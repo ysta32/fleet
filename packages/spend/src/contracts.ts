@@ -124,7 +124,7 @@ export interface AnalyzeOptions {
  *  src/ingest/copilot.ts     export const ingestCopilot: Ingester
  *  src/ingest/api.ts         export const ingestAnthropicApi: Ingester; export const ingestOpenAiApi: Ingester
  *  src/analyze/summarize.ts  export function summarize(records: UsageRecord[], opts: AnalyzeOptions): SpendSummary
- *                            export function toBrief(records: UsageRecord[], summary: SpendSummary, now: number): SpendBrief
+ *                            export function toBrief(records: UsageRecord[], summary: SpendSummary, opts: { now: number; table: PriceTable }): SpendBrief
  *  src/analyze/tips.ts       export function savingsTips(records: UsageRecord[], table: PriceTable, now: number): SavingsTip[]
  *  src/config.ts             export function loadConfig(path?: string): SpendConfig ; export const DEFAULT_CONFIG: SpendConfig
  *  src/index.ts              export function loadSpendSummary(opts?: {now?: number; configPath?: string}): Promise<SpendSummary>
