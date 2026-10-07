@@ -6,7 +6,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { FleetConfig, FleetEvent, FleetSnapshot, HistoryResponse } from '@fleet/shared';
-import { createServer, opaqueProjectId, redactEvent, redactSnapshot, type StoreLike } from './server.js';
+import {
+  createServer,
+  opaqueProjectId,
+  redactEvent,
+  redactSnapshot,
+  type CreateServerOptions,
+  type ExternalAlert,
+  type StoreLike,
+} from './server.js';
 
 const TOKEN = 'a'.repeat(64);
 const PID = '-synthetic-dev-alpha';
@@ -124,8 +132,10 @@ async function start(opts: {
   remote?: boolean;
   webDir?: string;
   digestDir?: string;
+  extra?: Partial<CreateServerOptions>;
 }): Promise<void> {
   server = createServer({
+    ...opts.extra,
     store: opts.store ?? new FakeStore(),
     config: opts.config ?? makeConfig(),
     webDir: opts.webDir,
@@ -136,7 +146,12 @@ async function start(opts: {
   port = (server.address() as AddressInfo).port;
 }
 
-function get(p: string, headers: Record<string, string> = {}, method = 'GET'): Promise<Resp> {
+function get(
+  p: string,
+  headers: Record<string, string> = {},
+  method = 'GET',
+  payload?: string,
+): Promise<Resp> {
   return new Promise((resolve, reject) => {
     const req = http.request(
       { host: '127.0.0.1', port, path: p, method, headers: { host: `127.0.0.1:${port}`, ...headers } },
@@ -148,7 +163,7 @@ function get(p: string, headers: Record<string, string> = {}, method = 'GET'): P
       },
     );
     req.on('error', reject);
-    req.end();
+    req.end(payload);
   });
 }
 
@@ -268,7 +283,7 @@ describe('auth matrix', () => {
     expect(cookie).toContain(`fleet_token=${TOKEN}`);
     expect(cookie).toContain('HttpOnly');
     expect(cookie).toContain('SameSite=Strict');
-    expect(cookie).toContain('Max-Age=31536000');
+    expect(cookie).toContain('Max-Age=2592000');
     expect((await get('/api/snapshot', { cookie: `fleet_token=${TOKEN}` })).status).toBe(200);
     expect((await get('/api/snapshot', { cookie: 'fleet_token=nope' })).status).toBe(401);
   });
@@ -305,29 +320,115 @@ describe('auth matrix', () => {
 describe('redaction', () => {
   it('pure redactSnapshot/redactEvent hide paths, content and project ids', () => {
     const snap = makeSnapshot();
-    const r = redactSnapshot(snap, TOKEN);
-    const op = opaqueProjectId(PID, TOKEN);
+    snap.sessions[0].title = 'SYNTHETIC session title';
+    snap.agents[0].currentTask = 't01';
+    const agent2 = { ...snap.agents[0], id: 's1:x', currentTask: 'SYNTHETIC free text task' };
+    snap.agents.push(agent2);
+    snap.alerts[0] = { ...snap.alerts[0], title: 'SYNTHETIC alert', body: 'SYNTHETIC body' };
+    const orch = snap.projects[0].orch!;
+    orch.inflight = [
+      {
+        task: 't01',
+        role: 'coder',
+        agent: 'a',
+        worktree: '/synthetic/wt/t01',
+        baseSha: 'abc',
+        started: '09:00',
+      },
+    ];
+    orch.worktrees = ['SYNTHETIC-wt'];
+    orch.blocked = ['t02: SYNTHETIC reason', 'SYNTHETIC free text that is long'];
+    orch.tasks = [{ id: 't02', slug: 'x', depends: [], state: 'blocked' }];
+    snap.prs = [
+      {
+        projectId: PID,
+        number: 1,
+        title: 'pr',
+        state: 'open',
+        ci: 'none',
+        url: 'https://github.com/o/r/pull/1',
+        headRef: 'h',
+        updatedAt: 1,
+      },
+      {
+        projectId: PID,
+        number: 2,
+        title: 'pr',
+        state: 'open',
+        ci: 'none',
+        url: 'http://SYNTHETIC.internal/x',
+        headRef: 'h',
+        updatedAt: 1,
+      },
+    ];
+    snap.deploys = [
+      {
+        projectId: PID,
+        id: 'd1',
+        environment: 'prod',
+        state: 'ready',
+        url: 'https://ok.example',
+        createdAt: 1,
+      },
+      {
+        projectId: PID,
+        id: 'd2',
+        environment: 'prod',
+        state: 'ready',
+        url: 'http://SYNTHETIC.lan',
+        createdAt: 1,
+      },
+    ];
+    const SALT = 'test-salt';
+    const before = JSON.stringify(snap);
+    const r = redactSnapshot(snap, SALT);
+    const op = opaqueProjectId(PID, SALT);
     expect(op).toMatch(/^p_[0-9a-f]{12}$/);
     expect(r.projects[0]).toMatchObject({ id: op, path: '' });
-    expect(r.projects[0].orch).toMatchObject({ projectId: op, statusText: '', handoffText: '' });
+    expect(r.projects[0].orch).toMatchObject({
+      projectId: op,
+      statusText: '',
+      handoffText: '',
+      worktrees: [],
+    });
+    expect(r.projects[0].orch!.inflight[0].worktree).toBe('');
+    expect(r.projects[0].orch!.blocked).toEqual(['t02']);
     expect(r.sessions[0].projectId).toBe(op);
-    expect(r.agents[0]).toMatchObject({ projectId: op, id: `${op}:astra:t01` });
+    expect(r.sessions[0].title).toBeUndefined();
+    expect(r.agents[0]).toMatchObject({ projectId: op, id: `${op}:astra:t01`, currentTask: 't01' });
     expect(r.agents[0].location.projectId).toBe(op);
-    expect(r.alerts[0].projectId).toBe(op);
+    expect(r.agents[1].currentTask).toBeUndefined();
+    expect(r.alerts[0]).toMatchObject({ projectId: op, title: 'Army finished', body: '' });
+    expect(r.prs.map((x) => x.url)).toEqual(['https://github.com/o/r/pull/1', '']);
+    expect(r.deploys.map((x) => x.url)).toEqual(['https://ok.example', undefined]);
     expect(JSON.stringify(r)).not.toContain(PID);
     expect(JSON.stringify(r)).not.toContain('SYNTHETIC');
-    // input untouched
-    expect(snap.projects[0].path).toBe('/synthetic/dev/alpha');
-    const e = redactEvent(EVENT, TOKEN);
+    expect(JSON.stringify(snap)).toBe(before); // input untouched
+    const e = redactEvent({ ...EVENT, label: 'SYNTHETIC label', data: { file: 'SYNTHETIC' } }, SALT);
     expect(JSON.stringify(e)).not.toContain(PID);
+    expect(JSON.stringify(e)).not.toContain('SYNTHETIC');
+    expect(e.label).toBe('agent.move');
+    expect(e.data).toBeUndefined();
     expect(e.to?.projectId).toBe(op);
+    expect(e.agentId).toBe(`${op}:astra:t01`);
     // stable, salt-dependent
-    expect(opaqueProjectId(PID, TOKEN)).toBe(op);
+    expect(opaqueProjectId(PID, SALT)).toBe(op);
     expect(opaqueProjectId(PID, 'other')).not.toBe(op);
-    // shareContent: only path blanked
-    const shared = redactSnapshot(snap, TOKEN, { shareContent: true });
-    expect(shared.projects[0]).toMatchObject({ id: PID, path: '' });
+    // shareContent keeps text but ids stay opaque and path blank
+    const shared = redactSnapshot(snap, SALT, { shareContent: true });
+    expect(shared.projects[0]).toMatchObject({ id: op, path: '' });
     expect(shared.projects[0].orch?.statusText).toBe('SYNTHETIC STATUS');
+    expect(JSON.stringify(shared)).not.toContain(PID);
+    expect(redactEvent(EVENT, SALT, { shareContent: true })).toMatchObject({ projectId: op, label: 'move' });
+  });
+
+  it('opaque ids use the server salt, not the auth token', async () => {
+    await start({ remote: true, extra: { redactSalt: 'server-secret' } });
+    const s = JSON.parse(
+      (await get('/api/snapshot', { authorization: `Bearer ${TOKEN}` })).body,
+    ) as FleetSnapshot;
+    expect(s.projects[0].id).toBe(opaqueProjectId(PID, 'server-secret'));
+    expect(s.projects[0].id).not.toBe(opaqueProjectId(PID, TOKEN));
   });
 
   it('remote snapshot/history are redacted; shareContent keeps text', async () => {
@@ -350,6 +451,77 @@ describe('redaction', () => {
     ) as FleetSnapshot;
     expect(s.projects[0].path).toBe('');
     expect(s.projects[0].orch?.statusText).toBe('SYNTHETIC STATUS');
+    expect(s.projects[0].id).toMatch(/^p_[0-9a-f]{12}$/);
+  });
+
+  it('Secure cookie behind https proxy', async () => {
+    await start({ remote: true });
+    const r = await get(`/api/snapshot?token=${TOKEN}`, { 'x-forwarded-proto': 'https' });
+    expect(String(r.headers['set-cookie'])).toContain('Secure');
+  });
+});
+
+describe('POST /api/alerts', () => {
+  const good = JSON.stringify({ kind: 'spend.budget', id: 'b1', title: 'Budget', body: 'over' });
+  const json = { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` };
+
+  it('local + bearer + valid body -> 204 and callback', async () => {
+    const got: ExternalAlert[] = [];
+    await start({ extra: { onExternalAlert: (a) => got.push(a) } });
+    expect((await get('/api/alerts', json, 'POST', good)).status).toBe(204);
+    expect(got).toHaveLength(1);
+    expect(got[0]).toMatchObject({ kind: 'spend.budget', id: 'b1', title: 'Budget', body: 'over' });
+  });
+
+  it('error matrix', async () => {
+    const got: ExternalAlert[] = [];
+    await start({ extra: { onExternalAlert: (a) => got.push(a) } });
+    expect((await get('/api/alerts', { 'content-type': 'application/json' }, 'POST', good)).status).toBe(401);
+    expect(
+      (await get('/api/alerts', { ...json, cookie: `fleet_token=${TOKEN}`, authorization: '' }, 'POST', good))
+        .status,
+    ).toBe(401);
+    expect((await get('/api/alerts', { ...json, 'content-type': 'text/plain' }, 'POST', good)).status).toBe(
+      415,
+    );
+    expect((await get('/api/alerts', json, 'POST', 'x'.repeat(5000))).status).toBe(413);
+    expect((await get('/api/alerts', json, 'POST', '{bad')).status).toBe(400);
+    for (const bad of [
+      { kind: 'army.done', id: 'b1', title: 't', body: '' },
+      { kind: 'spend.budget', id: 'x'.repeat(65), title: 't', body: '' },
+      { kind: 'spend.budget', id: 'b1', title: 'x'.repeat(81), body: '' },
+      { kind: 'spend.budget', id: 'b1', title: 't', body: 'x'.repeat(201) },
+      { kind: 'spend.budget', id: 'b1', title: 't' },
+      [1],
+    ]) {
+      expect((await get('/api/alerts', json, 'POST', JSON.stringify(bad))).status).toBe(400);
+    }
+    expect((await get('/api/alerts', json, 'GET')).status).toBe(405);
+    expect(got).toHaveLength(0);
+  });
+
+  it('remote or non-loopback Host -> 403 even with token', async () => {
+    await start({ remote: true });
+    expect((await get('/api/alerts', json, 'POST', good)).status).toBe(403);
+  });
+});
+
+describe('extraGet', () => {
+  it('serves local, requires shareContent for remote', async () => {
+    const extra = { extraGet: { '/api/spend': () => ({ usd: 1 }) } };
+    await start({ remote: true, extra });
+    const auth = { authorization: `Bearer ${TOKEN}` };
+    expect((await get('/api/spend', auth)).status).toBe(403);
+    expect((await get('/api/spend')).status).toBe(401);
+    expect((await get('/api/constructor', auth)).status).toBe(404);
+    server!.closeAllConnections();
+    await new Promise((r) => server!.close(r));
+    await start({ remote: true, extra, config: makeConfig({ shareContent: true }) });
+    expect(JSON.parse((await get('/api/spend', auth)).body)).toEqual({ usd: 1 });
+    server!.closeAllConnections();
+    await new Promise((r) => server!.close(r));
+    await start({ extra });
+    expect(JSON.parse((await get('/api/spend')).body)).toEqual({ usd: 1 });
   });
 });
 
