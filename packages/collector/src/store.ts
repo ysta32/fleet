@@ -352,10 +352,19 @@ export class FleetStore extends EventEmitter {
       version: HISTORY_FILE_VERSION,
       savedAt: this.now(),
       state: this.snapshot(),
-      frames: thinFrames(this.frames, this.persistFrameMs),
+      frames: this.persistedFrames(),
       events: this.events.slice(Math.max(0, this.events.length - PERSIST_MAX_EVENTS)),
     };
     return JSON.stringify(file);
+  }
+
+  /** retained frames thinned to one per persistFrameMs bucket; the cutoff predecessor is kept outside thinning */
+  private persistedFrames(): FleetSnapshot[] {
+    const cutoff = this.now() - this.retentionMs;
+    const kept = retainFrames(this.frames, cutoff);
+    const firstInWindow = kept.findIndex((f) => f.generatedAt >= cutoff);
+    if (firstInWindow === -1) return kept;
+    return [...kept.slice(0, firstInWindow), ...thinFrames(kept.slice(firstInWindow), this.persistFrameMs)];
   }
 
   /** atomic write of dir/history.json (tmp + rename). Concurrent calls are serialized. */

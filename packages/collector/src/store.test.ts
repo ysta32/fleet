@@ -294,6 +294,24 @@ describe('FleetStore', () => {
     expect((s as unknown as { dirtySinceSave: boolean }).dirtySinceSave).toBe(false);
   });
 
+  it('save/load keeps the cutoff predecessor even when a newer frame shares its 5min bucket', () => {
+    const dir = tmp();
+    const bucket = 300_000;
+    // cutoff falls mid-bucket: predecessor 1min before cutoff, next frame 1min after, same bucket
+    const cutoff = Math.floor((T0 - 24 * HOUR) / bucket) * bucket + 2 * 60_000;
+    clock = cutoff + 24 * HOUR;
+    const s = new FleetStore({ now });
+    s.upsertProject(project('p1', T0));
+    s.keyframe(cutoff - 60_000);
+    s.upsertProject(project('p2', T0));
+    s.keyframe(cutoff + 60_000);
+    s.saveSync(dir);
+    const r = new FleetStore({ now });
+    r.load(dir);
+    const h = r.history(cutoff, clock);
+    expect(h.frames.map((f) => f.generatedAt)).toEqual([cutoff - 60_000, cutoff + 60_000]);
+  });
+
   it('persists at most one frame per 5 minutes and at most 20k events', () => {
     const dir = tmp();
     const s = new FleetStore({ now, maxEvents: 25_000 });
