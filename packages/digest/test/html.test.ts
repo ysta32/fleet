@@ -605,6 +605,66 @@ describe('keyboard script', () => {
     expect(DIGEST_SCRIPT).toContain('prefers-reduced-motion: reduce');
   });
 
+  it('j/k skip rows hidden inside a closed <details> (e.g. "+N more") and reach the projects', () => {
+    type Row = { id: string; visible: boolean; tabIndex: number; focus: () => void };
+    let active: Row | null = null;
+    const mk = (id: string, visible: boolean): Row => {
+      const r: Row = {
+        id,
+        visible,
+        tabIndex: -1,
+        focus: () => {
+          active = r;
+        },
+      };
+      return r;
+    };
+    const rows = [mk('need1', true), mk('need6-hidden', false), mk('need7-hidden', false), mk('proj1', true)];
+    const dom = (r: Row) =>
+      Object.assign(r, {
+        getClientRects: () => (r.visible ? [{}] : []),
+        closest: () => r,
+        hasAttribute: () => true,
+        scrollIntoView: () => undefined,
+      });
+    rows.forEach(dom);
+    let onKey: ((e: unknown) => void) | undefined;
+    const root = { setAttribute: () => undefined, querySelectorAll: () => rows, querySelector: () => null };
+    const doc = {
+      querySelector: () => root,
+      getElementById: () => null,
+      addEventListener: (_t: string, f: (e: unknown) => void) => {
+        onKey = f;
+      },
+      get activeElement() {
+        return active;
+      },
+    };
+    const run = new Function(
+      'document',
+      'matchMedia',
+      'location',
+      'addEventListener',
+      'setTimeout',
+      DIGEST_SCRIPT,
+    );
+    run(
+      doc,
+      () => ({ matches: true }),
+      {},
+      () => undefined,
+      setTimeout,
+    );
+    const press = (key: string) =>
+      onKey?.({ key, target: { tagName: 'BODY' }, preventDefault: () => undefined, defaultPrevented: false });
+    press('j');
+    expect((active as Row | null)?.id).toBe('need1');
+    press('j');
+    expect((active as Row | null)?.id).toBe('proj1');
+    press('k');
+    expect((active as Row | null)?.id).toBe('need1');
+  });
+
   it('is only on full pages; the fragment stays script-free with ovn- classes only', () => {
     expect(
       renderIndexHtml(
@@ -647,6 +707,41 @@ describe('renderIndexHtml', () => {
     expect(html).toContain('Sept &lt;b&gt;end&lt;/b&gt;');
     expect(html).toMatch(/class="ovn-latest" href="digests\/2026-10-02\.html"/);
     expect(html).toContain('4 PRs · 17 commits · 1 release · 5 deploys');
+  });
+
+  it('counts issue-only nights as activity in row marks and the trend', () => {
+    const zero = totals({
+      projectsActive: 1,
+      mergedPRs: 0,
+      commits: 0,
+      releases: 0,
+      ciFailures: 0,
+      openPRsNeedingAttention: 0,
+      deployments: 0,
+      deploymentsFailed: 0,
+      starsDelta: 0,
+      agentContributions: 0,
+      issuesOpened: 2,
+      issuesClosed: 1,
+    });
+    const index: DigestIndex = {
+      schema: 'overnight.index/v1',
+      owner: 'ysta32',
+      updatedAt: '2026-10-07T06:00:00.000Z',
+      digests: [
+        {
+          id: '2026-10-07',
+          headline: 'Two issues opened, one closed.',
+          window: { since: '2026-10-06T06:00:00.000Z', until: '2026-10-07T06:00:00.000Z' },
+          totals: zero,
+          path: 'digests/2026-10-07.html',
+        },
+      ],
+    };
+    const html = renderIndexHtml(index, { siteTitle: 'Overnight' });
+    expect(html).not.toContain('aria-label="No activity"');
+    expect(html).toContain('aria-label="Activity, no failures"');
+    expect(html).toContain('aria-label="1 of 14 nights: 1 active, none red"');
   });
 
   it('first run shows the single edition and what to expect', () => {
@@ -730,6 +825,46 @@ describe('writeArchive', () => {
       expect(older).toMatch(/aria-label="1 of 14 nights: [^"]*"/);
       const indexHtml = await readFile(join(out, 'index.html'), 'utf8');
       expect(indexHtml).toMatch(/class="ovn-latest" href="digests\/2026-10-07\.html"/);
+    } finally {
+      await rm(out, { recursive: true, force: true });
+    }
+  });
+
+  it('skips corrupt historical digests with a warning and still publishes today, latest and index', async () => {
+    const out = await mkdtemp(join(tmpdir(), 'ovn-html-'));
+    try {
+      const quietWarn = () => undefined;
+      for (const id of ['2026-10-04', '2026-10-05', '2026-10-06'])
+        await writeArchive(makeDigest(id), out, { siteTitle: 'Overnight', warn: quietWarn });
+      await writeFile(join(out, 'digests/2026-10-04.json'), JSON.stringify({ schema: 'other' }));
+      await writeFile(join(out, 'digests/2026-10-06.json'), '{not json');
+      // outside the 14-night window: must never be read
+      await writeFile(join(out, 'digests/2026-09-01.json'), '{not json');
+      const warnings: string[] = [];
+      const written = await writeArchive(makeDigest('2026-10-07'), out, {
+        siteTitle: 'Overnight',
+        warn: (m) => warnings.push(m),
+      });
+      expect(written).toContain(join(out, 'latest.json'));
+      expect(written).toContain(join(out, 'index.html'));
+      expect(written).not.toContain(join(out, 'digests/2026-10-06.html'));
+      const latest = JSON.parse(await readFile(join(out, 'latest.json'), 'utf8')) as Digest;
+      expect(latest.id).toBe('2026-10-07');
+      expect(warnings.some((w) => w.includes('2026-10-04.json') && w.includes('not a valid digest'))).toBe(
+        true,
+      );
+      expect(warnings.some((w) => w.includes('2026-10-06.json') && w.includes('could not be read'))).toBe(
+        true,
+      );
+      expect(warnings.join('\n')).not.toContain('2026-09-01');
+      // trend uses the valid 2026-10-05 plus today only
+      const page = await readFile(join(out, 'digests/2026-10-07.html'), 'utf8');
+      expect(page).toMatch(/class="ovn-spark ovn-spark-overall"[^>]*aria-label="2 of 14 nights/);
+      // the index itself stays strictly validated
+      await writeFile(join(out, 'index.json'), '{not json');
+      await expect(
+        writeArchive(makeDigest('2026-10-08'), out, { siteTitle: 'O', warn: quietWarn }),
+      ).rejects.toThrow(/not valid JSON/);
     } finally {
       await rm(out, { recursive: true, force: true });
     }

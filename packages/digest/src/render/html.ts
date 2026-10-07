@@ -50,6 +50,8 @@ export interface IndexHtmlOptions extends FragmentOptions {
 
 export interface WriteArchiveOptions extends FragmentOptions {
   siteTitle: string;
+  /** Receives non-fatal problems (e.g. an unreadable historical digest skipped from trends). Default: console.warn. */
+  warn?: (msg: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -1028,7 +1030,7 @@ function renderDigestInner(d: Digest, o: InnerOpts): string {
 export const DIGEST_SCRIPT = `(()=>{const d=document,R=d.querySelector('.ovn-root');if(!R)return;R.setAttribute('data-ovn-js','');const S=d.getElementById('ovn-keys');let g=0;
 const go=s=>{const a=R.querySelector(s);if(a&&a.href)location.href=a.href};
 const rm=matchMedia('(prefers-reduced-motion: reduce)');
-const mv=n=>{const r=[...R.querySelectorAll('[data-ovn-row]')];if(!r.length)return;const c=d.activeElement&&d.activeElement.closest('[data-ovn-row]');let i=r.indexOf(c);i=i==-1?(n>0?0:r.length-1):Math.max(0,Math.min(r.length-1,i+n));const e=r[i];if(e.tabIndex==-1&&!e.hasAttribute('tabindex'))e.tabIndex=-1;e.focus({preventScroll:true});e.scrollIntoView({block:'nearest',behavior:rm.matches?'auto':'smooth'})};
+const mv=n=>{const r=[...R.querySelectorAll('[data-ovn-row]')].filter(e=>e.getClientRects().length);if(!r.length)return;const c=d.activeElement&&d.activeElement.closest('[data-ovn-row]');let i=r.indexOf(c);i=i==-1?(n>0?0:r.length-1):Math.max(0,Math.min(r.length-1,i+n));const e=r[i];if(e.tabIndex==-1&&!e.hasAttribute('tabindex'))e.tabIndex=-1;e.focus({preventScroll:true});e.scrollIntoView({block:'nearest',behavior:rm.matches?'auto':'smooth'})};
 d.addEventListener('keydown',e=>{if(e.metaKey||e.ctrlKey||e.altKey||e.defaultPrevented)return;const t=e.target;if(t&&(t.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)))return;const k=e.key;
 if(k=='?'&&S){S.open?S.close():S.showModal();e.preventDefault();return}
 if(S&&S.open)return;
@@ -1489,11 +1491,24 @@ function miniTotals(t: DigestTotals): string {
 }
 
 /** Worst state derivable from an index entry's totals alone (no per-project data in the index). */
+/** Activity from index totals; issues count, so an issue-only night is not "No activity". */
+function entryActivity(t: DigestTotals): number {
+  return (
+    int(t.mergedPRs) +
+    int(t.commits) +
+    int(t.releases) +
+    int(t.deployments) +
+    int(t.issuesOpened) +
+    int(t.issuesClosed)
+  );
+}
+
 function entryHealth(t: DigestTotals): { h: Health; label: string } {
   if (int(t.ciFailures) > 0 || int(t.deploymentsFailed) > 0) return { h: 'red', label: 'Failures overnight' };
   if (int(t.openPRsNeedingAttention) > 0) return { h: 'yellow', label: 'Items needed you' };
-  const active = int(t.mergedPRs) + int(t.commits) + int(t.releases) + int(t.deployments);
-  return active > 0 ? { h: 'green', label: 'Shipped, no failures' } : { h: 'quiet', label: 'No activity' };
+  return entryActivity(t) > 0
+    ? { h: 'green', label: 'Activity, no failures' }
+    : { h: 'quiet', label: 'No activity' };
 }
 
 function entrySeries(entries: IndexEntryLike[], endId: string): SparkPoint[] | undefined {
@@ -1505,7 +1520,7 @@ function entrySeries(entries: IndexEntryLike[], endId: string): SparkPoint[] | u
     if (!e || typeof e.totals !== 'object' || e.totals === null) return { v: null, red: false };
     const t = e.totals;
     return {
-      v: int(t.mergedPRs) + int(t.commits) + int(t.releases) + int(t.deployments),
+      v: entryActivity(t),
       red: entryHealth(t).h === 'red',
     };
   });
@@ -1644,35 +1659,56 @@ function looksLikeDigest(x: unknown): x is Digest {
 }
 
 /**
- * Loads earlier digests from `<out>/digests/*.json` for trend lines (the 14 stored digests before a
- * given day), reading each file at most once. Files that parse but are not digests are refused, the
- * same as neighbour pages, rather than silently dropped from the trend.
+ * Loads earlier digests from `<out>/digests/<id>.json` for trend lines: only the days inside a
+ * page's 14-night window, each file read at most once. History is decoration, so an unreadable or
+ * invalid file is skipped with a warning instead of blocking the archive (the current digest and
+ * the index stay strictly validated).
  */
 async function historyLoader(
   digestsDir: string,
   current: Digest,
+  warn: (msg: string) => void,
 ): Promise<(id: string) => Promise<Digest[]>> {
-  const ids = (await readdir(digestsDir))
-    .map((n) => /^(\d{4}-\d{2}-\d{2})\.json$/.exec(n)?.[1])
-    .filter((x): x is string => typeof x === 'string')
-    .sort();
+  const stored = new Set(
+    (await readdir(digestsDir))
+      .map((n) => /^(\d{4}-\d{2}-\d{2})\.json$/.exec(n)?.[1])
+      .filter((x): x is string => typeof x === 'string'),
+  );
   const cache = new Map<string, Digest | undefined>([[current.id, current]]);
   return async (id: string) => {
     const out: Digest[] = [];
-    for (const pid of ids.filter((x) => x < id).slice(-SPARK_DAYS)) {
+    const window = (lastDays(id, SPARK_DAYS) ?? []).filter((k) => k < id && stored.has(k));
+    for (const pid of window) {
       if (!cache.has(pid)) {
-        const path = join(digestsDir, `${pid}.json`);
-        const raw = await readJsonIfExists(path);
-        if (raw !== undefined && (!looksLikeDigest(raw) || raw.id !== pid)) {
-          throw new Error(`overnight: ${path} is not a valid digest`);
-        }
-        cache.set(pid, raw);
+        cache.set(pid, await readStoredDigest(digestsDir, pid, warn, 'skipped in trend lines'));
       }
       const hd = cache.get(pid);
       if (hd) out.push(hd);
     }
     return out;
   };
+}
+
+/**
+ * A stored historical digest, or undefined when it is missing or unreadable. Unreadable files are
+ * reported through `warn` so one corrupt old day never blocks publishing today's edition.
+ */
+async function readStoredDigest(
+  digestsDir: string,
+  id: string,
+  warn: (msg: string) => void,
+  consequence: string,
+): Promise<Digest | undefined> {
+  const path = join(digestsDir, `${id}.json`);
+  try {
+    const raw = await readJsonIfExists(path);
+    if (raw === undefined) return undefined;
+    if (looksLikeDigest(raw) && raw.id === id) return raw;
+    warn(`overnight: ${path} is not a valid digest; ${consequence}`);
+  } catch (e) {
+    warn(`overnight: ${path} could not be read (${(e as Error).message}); ${consequence}`);
+  }
+  return undefined;
 }
 
 function editionOf(sorted: IndexEntry[], id: string): number {
@@ -1713,7 +1749,8 @@ export async function writeArchive(d: Digest, outDir: string, opts: WriteArchive
   // The digest itself.
   await write(join(digestsDir, `${d.id}.json`), JSON.stringify(d, null, 2) + '\n');
   const renderOpts = { siteTitle: opts.siteTitle, ...(opts.timezone ? { timezone: opts.timezone } : {}) };
-  const historyFor = await historyLoader(digestsDir, d);
+  const warn = opts.warn ?? ((msg: string) => console.warn(msg));
+  const historyFor = await historyLoader(digestsDir, d, warn);
   await write(
     join(digestsDir, `${d.id}.html`),
     renderDigestHtml(d, {
@@ -1728,11 +1765,8 @@ export async function writeArchive(d: Digest, outDir: string, opts: WriteArchive
   const pos = sorted.findIndex((e) => e.id === d.id);
   for (const neighbour of [sorted[pos - 1], sorted[pos + 1]]) {
     if (!neighbour) continue;
-    const nd = await readJsonIfExists(join(digestsDir, `${neighbour.id}.json`));
-    if (nd === undefined) continue; // index entry without stored JSON: nothing to re-render from
-    if (!looksLikeDigest(nd) || nd.id !== neighbour.id) {
-      throw new Error(`overnight: ${join(digestsDir, `${neighbour.id}.json`)} is not a valid digest`);
-    }
+    const nd = await readStoredDigest(digestsDir, neighbour.id, warn, 'kept its old page');
+    if (nd === undefined) continue; // missing or unreadable stored JSON: nothing to re-render from
     await write(
       join(digestsDir, `${neighbour.id}.html`),
       renderDigestHtml(nd, {
@@ -1751,8 +1785,9 @@ export async function writeArchive(d: Digest, outDir: string, opts: WriteArchive
     await write(join(outDir, 'latest.json'), JSON.stringify(d, null, 2) + '\n');
   } else {
     const newest = sorted[0];
-    const nd = newest ? await readJsonIfExists(join(digestsDir, `${newest.id}.json`)) : undefined;
-    latest = looksLikeDigest(nd) ? nd : undefined;
+    latest = newest
+      ? await readStoredDigest(digestsDir, newest.id, warn, 'index shows no latest card')
+      : undefined;
   }
 
   await write(indexPath, JSON.stringify(index, null, 2) + '\n');
