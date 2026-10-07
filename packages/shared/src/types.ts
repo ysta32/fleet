@@ -166,7 +166,8 @@ export interface Deploy {
   createdAt: number;
 }
 
-export type AlertKind = 'army.done' | 'army.blocked' | 'ci.failed' | 'session.waiting' | 'deploy.failed';
+export type AlertKind =
+  'army.done' | 'army.blocked' | 'ci.failed' | 'session.waiting' | 'deploy.failed' | 'spend.budget';
 export interface Alert {
   id: string;
   kind: AlertKind;
@@ -190,6 +191,8 @@ export interface FleetSnapshot {
   releases: Release[];
   deploys: Deploy[];
   alerts: Alert[];
+  /** Fleet Spend brief (absent when fleet-spend is not installed) */
+  spend?: import('./spend.js').SpendBrief;
 }
 
 export type FleetEventKind =
