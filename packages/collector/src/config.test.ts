@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, statSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -80,5 +80,22 @@ describe('config', () => {
     const saved = JSON.parse(readFileSync(configPath(), 'utf8'));
     expect(saved.port).toBe(4747);
     expect(saved.lan).toBe(false);
+  });
+
+  it('first-run creation is exclusive: adopts a token written by a racing process', () => {
+    const p = join(home, 'race', 'c.json');
+    const first = loadConfig(p);
+    // simulate losing the race: file already exists with a different token
+    writeFileSync(p, JSON.stringify({ token: 'other' }));
+    expect(loadConfig(p).token).toBe('other');
+    expect(first.token).not.toBe('other');
+    expect(readdirSync(join(home, 'race'))).toEqual(['c.json']);
+  });
+
+  it('many concurrent first loads converge on one token', async () => {
+    const p = join(home, 'conc', 'c.json');
+    const toks = await Promise.all(Array.from({ length: 8 }, async () => loadConfig(p).token));
+    expect(new Set(toks).size).toBe(1);
+    expect(JSON.parse(readFileSync(p, 'utf8')).token).toBe(toks[0]);
   });
 });

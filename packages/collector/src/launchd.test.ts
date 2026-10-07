@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { install, plistXml, uninstall } from './launchd.js';
+import { install, installEnv, plistXml, uninstall } from './launchd.js';
 
 const opts = { nodePath: '/usr/local/bin/node', cliPath: '/opt/fleet/dist/cli.js', logDir: '/tmp/l' };
 
@@ -23,6 +23,34 @@ describe('plistXml', () => {
     const x = plistXml({ ...opts, nodePath: '/a&b/<n>"\'' });
     expect(x).toContain('/a&amp;b/&lt;n&gt;&quot;&apos;');
     expect(x).not.toContain('/a&b/');
+  });
+});
+
+describe('environment', () => {
+  it('persists FLEET_* overrides and a PATH with the node dir', () => {
+    const env = installEnv(
+      { FLEET_PORT: '4520', FLEET_LAN: '1', FLEET_CONFIG: '/t/c.json', FLEET_DATA: '/t/d', HOME: '/h' },
+      '/nvm/bin/node',
+    );
+    expect(env).toMatchObject({
+      FLEET_PORT: '4520',
+      FLEET_LAN: '1',
+      FLEET_CONFIG: '/t/c.json',
+      FLEET_DATA: '/t/d',
+    });
+    expect(env.HOME).toBeUndefined();
+    expect(env.PATH).toBe('/nvm/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin');
+    expect(installEnv({}, '/usr/local/bin/node')).toEqual({
+      PATH: '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin',
+    });
+  });
+
+  it('emits an escaped EnvironmentVariables dict', () => {
+    const x = plistXml({ ...opts, env: { FLEET_CONFIG: '/a&b.json', PATH: '/bin' } });
+    expect(x).toMatch(
+      /<key>EnvironmentVariables<\/key>\s*<dict>[\s\S]*<key>FLEET_CONFIG<\/key>\s*<string>\/a&amp;b.json<\/string>/,
+    );
+    expect(plistXml(opts)).not.toContain('EnvironmentVariables');
   });
 });
 

@@ -1,5 +1,14 @@
 import { randomBytes } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  linkSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir as osHomedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { DEFAULT_PORT, type AlertKind, type FleetConfig } from '@fleet/shared';
@@ -42,17 +51,39 @@ function readJson(path: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
-function writeConfig(path: string, cfg: FleetConfig): void {
-  const dir = dirname(path);
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  writeFileSync(path, JSON.stringify(cfg, null, 2) + '\n', { mode: 0o600 });
-  chmodSync(path, 0o600);
+/**
+ * Write the config via a private tmp file. With exclusive=true the final path is created with
+ * link() (fails with EEXIST if another process won the race) and false is returned.
+ */
+function writeConfig(path: string, cfg: FleetConfig, exclusive: boolean): boolean {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  const tmp = `${path}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+  writeFileSync(tmp, JSON.stringify(cfg, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
+  try {
+    if (exclusive) {
+      linkSync(tmp, path);
+    } else {
+      renameSync(tmp, path);
+    }
+    chmodSync(path, 0o600);
+    return true;
+  } catch (e) {
+    if (exclusive && (e as NodeJS.ErrnoException).code === 'EEXIST') return false;
+    throw e;
+  } finally {
+    try {
+      unlinkSync(tmp);
+    } catch {
+      /* already renamed away */
+    }
+  }
 }
 
 /** Load config (merging defaults), generating a token and persisting on first run. */
 export function loadConfig(path: string = configPath()): FleetConfig {
   const defaults = defaultConfig();
-  const user = existsSync(path) ? readJson(path) : {};
+  const existed = existsSync(path);
+  const user = existed ? readJson(path) : {};
   const userNotify =
     typeof user.notify === 'object' && user.notify !== null && !Array.isArray(user.notify)
       ? (user.notify as Partial<FleetConfig['notify']>)
@@ -64,7 +95,12 @@ export function loadConfig(path: string = configPath()): FleetConfig {
     notify: { ...defaults.notify, ...userNotify },
     token: hadToken ? (user.token as string) : randomBytes(32).toString('hex'),
   };
-  if (!hadToken) writeConfig(path, cfg);
+  if (!hadToken) {
+    if (!writeConfig(path, cfg, !existed)) {
+      // another process created the file first: adopt its token
+      return loadConfig(path);
+    }
+  }
 
   // env overrides are applied in memory only, never persisted
   const envPort = process.env.FLEET_PORT;

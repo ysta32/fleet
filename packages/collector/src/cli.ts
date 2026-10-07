@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import type { FleetSnapshot } from '@fleet/shared';
 import { configPath, dataDir, loadConfig } from './config.js';
-import { install, uninstall } from './launchd.js';
+import { install, installEnv, uninstall } from './launchd.js';
 
 const pexec = promisify(execFile);
 
@@ -138,12 +138,13 @@ async function main(argv: string[]): Promise<number> {
       await runDaemonCmd();
       return -1;
     case 'install': {
+      const cfg = loadConfig(); // create config/token before the daemon can race to do so
       const path = await install({
+        env: installEnv(process.env, process.execPath),
         nodePath: process.execPath,
         cliPath: fileURLToPath(import.meta.url),
         logDir: join(dataDir(), 'logs'),
       });
-      const cfg = loadConfig();
       console.log(`installed ${path}`);
       console.log(`dashboard: http://127.0.0.1:${cfg.port}/`);
       return 0;

@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir as osHomedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
 export const LABEL = 'dev.fleet.collector';
@@ -12,6 +12,24 @@ export interface PlistOpts {
   nodePath: string;
   cliPath: string;
   logDir: string;
+  /** extra environment for the daemon (see installEnv) */
+  env?: Record<string, string>;
+}
+
+const PASS_THROUGH = ['FLEET_CONFIG', 'FLEET_DATA', 'FLEET_PORT', 'FLEET_LAN'];
+
+/** Env persisted into the plist: FLEET_* overrides present at install time plus a PATH that resolves gh/git. */
+export function installEnv(src: NodeJS.ProcessEnv, nodePath: string): Record<string, string> {
+  const env: Record<string, string> = {
+    PATH: [dirname(nodePath), '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin']
+      .filter((p, i, a) => a.indexOf(p) === i)
+      .join(':'),
+  };
+  for (const k of PASS_THROUGH) {
+    const v = src[k];
+    if (v !== undefined && v !== '') env[k] = v;
+  }
+  return env;
 }
 
 export function xmlEscape(s: string): string {
@@ -25,6 +43,10 @@ export function xmlEscape(s: string): string {
 
 export function plistXml(o: PlistOpts): string {
   const args = [o.nodePath, o.cliPath, 'start'].map((a) => `    <string>${xmlEscape(a)}</string>`).join('\n');
+  const envXml = Object.entries(o.env ?? {})
+    .map(([k, v]) => `    <key>${xmlEscape(k)}</key>\n    <string>${xmlEscape(v)}</string>`)
+    .join('\n');
+  const envBlock = envXml ? `  <key>EnvironmentVariables</key>\n  <dict>\n${envXml}\n  </dict>\n` : '';
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -35,7 +57,7 @@ export function plistXml(o: PlistOpts): string {
   <array>
 ${args}
   </array>
-  <key>RunAtLoad</key>
+${envBlock}  <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
   <true/>
