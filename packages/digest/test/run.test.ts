@@ -308,6 +308,40 @@ describe('runDigest', () => {
     }
   });
 
+  it('scrubs secrets from collector warnings before they reach the digest and logs', async () => {
+    const base = makeFetch();
+    const fetch: FetchLike = async (url, init) => {
+      if (init?.body?.includes('OvernightDetail')) {
+        return {
+          ok: false,
+          status: 502,
+          headers: { get: () => null },
+          json: async () => ({}),
+          text: async () => `bad gateway, echoed ${FAKE_ENV.OVERNIGHT_GITHUB_TOKEN} and ghp_Leaked123`,
+        };
+      }
+      return base.fetch(url, init);
+    };
+    const logs: string[] = [];
+    const { digest } = await runDigest({
+      configPath,
+      outDir,
+      llm: false,
+      deliver: false,
+      fetch,
+      env: FAKE_ENV,
+      now: new Date('2026-10-07T06:00:00Z'),
+      log: (m) => logs.push(m),
+    });
+    expect(digest.warnings.some((w) => w.includes('HTTP 502'))).toBe(true);
+    const published = await readFile(join(outDir, 'latest.json'), 'utf8');
+    for (const text of [JSON.stringify(digest.warnings), published, logs.join('\n')]) {
+      expect(text).not.toContain(FAKE_ENV.OVERNIGHT_GITHUB_TOKEN);
+      expect(text).not.toContain('ghp_Leaked123');
+    }
+    expect(digest.warnings.join('\n')).toContain('[redacted]');
+  });
+
   it('dry run writes nothing and saves no state', async () => {
     const { fetch, calls } = makeFetch();
     const { digest, paths, deliveries } = await runDigest({

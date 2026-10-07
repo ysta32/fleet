@@ -6,7 +6,25 @@ import { writeArchive } from './render/html.js';
 import { loadState, saveState } from './state.js';
 import { fallbackSummarizer } from './summarize/fallback.js';
 import { createLlmSummarizer } from './summarize/llm.js';
-import type { DeliveryResult, Digest, FetchLike, StateSnapshot, Summarizer } from './types.js';
+import type { DeliveryResult, Digest, FetchLike, Secrets, StateSnapshot, Summarizer } from './types.js';
+
+const TOKEN_PATTERNS: readonly RegExp[] = [
+  /\bgh[pousr]_[A-Za-z0-9]+/g,
+  /\bgithub_pat_[A-Za-z0-9_]+/g,
+  /\bsk-ant-[A-Za-z0-9_-]+/g,
+  /\bBearer\s+\S+/gi,
+];
+
+/** Replaces every configured secret value and anything that looks like a token with "[redacted]". */
+export function redactSecrets(text: string, secrets: Secrets): string {
+  let out = text;
+  const values = Object.values(secrets)
+    .filter((v): v is string => typeof v === 'string' && v.length > 0)
+    .sort((a, b) => b.length - a.length);
+  for (const value of values) out = out.split(value).join('[redacted]');
+  for (const pattern of TOKEN_PATTERNS) out = out.replace(pattern, '[redacted]');
+  return out;
+}
 
 export interface RunOptions {
   since?: string;
@@ -36,11 +54,12 @@ function defaultFetch(): FetchLike {
 }
 
 export async function runDigest(opts: RunOptions = {}): Promise<RunResult> {
-  const log = opts.log ?? (() => {});
+  const sink = opts.log;
   const now = opts.now ?? new Date();
   const config = await loadConfig(opts.configPath, opts.outDir !== undefined ? { outDir: opts.outDir } : {});
   if (!config.owner) throw new Error('set OVERNIGHT_OWNER or owner in overnight.config.json');
   const secrets = readSecrets(opts.env ?? process.env);
+  const log = (m: string): void => sink?.(redactSecrets(m, secrets));
   const state = await loadState(config.stateDir);
   const window = resolveWindow({ since: opts.since, until: opts.until }, state, config, now);
   const fetch = opts.fetch ?? defaultFetch();
@@ -62,7 +81,8 @@ export async function runDigest(opts: RunOptions = {}): Promise<RunResult> {
     projects: summarized.projects,
     headline: summarized.headline,
     summarizer: summarized.summarizer,
-    warnings: collected.warnings,
+    // Warnings can embed HTTP error bodies; they are published in the archive, so scrub them.
+    warnings: collected.warnings.map((w) => redactSecrets(w, secrets)),
     now,
   });
 

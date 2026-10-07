@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { defaultConfig } from './config.js';
+import { defaultConfig, readSecrets } from './config.js';
 import { syntheticArchive } from './demo/synthetic.js';
 import { writeArchive } from './render/html.js';
-import { runDigest } from './run.js';
+import { redactSecrets, runDigest, type RunResult } from './run.js';
 import type { FetchLike } from './types.js';
 
 export interface CliIO {
@@ -116,20 +117,52 @@ function initTemplate(owner: string): Record<string, unknown> {
   };
 }
 
+const DEFAULT_CONFIG_FILE = 'overnight.config.json';
+
+/**
+ * Runs `fn` with the config path to load. Explicit --config is resolved against cwd. Otherwise
+ * `<cwd>/overnight.config.json` is used when present; when absent, config falls back to defaults,
+ * which must not pick up a file from process.cwd() when cwd differs, so an empty object is loaded instead.
+ */
+async function withConfigPath<T>(
+  explicit: string | undefined,
+  cwd: string,
+  fn: (configPath: string | undefined) => Promise<T>,
+): Promise<T> {
+  if (explicit !== undefined) return fn(resolve(cwd, explicit));
+  const candidate = resolve(cwd, DEFAULT_CONFIG_FILE);
+  if (existsSync(candidate)) return fn(candidate);
+  const processDefault = resolve(process.cwd(), DEFAULT_CONFIG_FILE);
+  if (processDefault === candidate || !existsSync(processDefault)) return fn(undefined);
+  const dir = await mkdtemp(join(tmpdir(), 'overnight-config-'));
+  try {
+    const empty = join(dir, DEFAULT_CONFIG_FILE);
+    await writeFile(empty, '{}\n');
+    return await fn(empty);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
 async function cmdRun(p: ParsedArgs, io: CliIO, cwd: string): Promise<number> {
-  const { digest, paths, deliveries } = await runDigest({
-    since: p.values.since,
-    until: p.values.until,
-    configPath: p.values.config !== undefined ? resolve(cwd, p.values.config) : undefined,
-    outDir: p.values.out !== undefined ? resolve(cwd, p.values.out) : undefined,
-    llm: !p.flags.has('no-llm'),
-    deliver: !p.flags.has('no-deliver'),
-    dryRun: p.flags.has('dry-run'),
-    fetch: io.fetch,
-    env: io.env ?? process.env,
-    now: io.now,
-    log: (m) => io.stderr(m),
-  });
+  const { digest, paths, deliveries } = await withConfigPath(
+    p.values.config,
+    cwd,
+    (configPath): Promise<RunResult> =>
+      runDigest({
+        since: p.values.since,
+        until: p.values.until,
+        configPath,
+        outDir: p.values.out !== undefined ? resolve(cwd, p.values.out) : undefined,
+        llm: !p.flags.has('no-llm'),
+        deliver: !p.flags.has('no-deliver'),
+        dryRun: p.flags.has('dry-run'),
+        fetch: io.fetch,
+        env: io.env ?? process.env,
+        now: io.now,
+        log: (m) => io.stderr(m),
+      }),
+  );
   if (p.flags.has('json')) {
     io.stdout(JSON.stringify(digest, null, 2));
     return 0;
@@ -149,7 +182,10 @@ async function cmdRun(p: ParsedArgs, io: CliIO, cwd: string): Promise<number> {
   } else {
     lines.push('Dry run: nothing written, delivered, or saved.');
   }
-  for (const d of deliveries) lines.push(`Delivery ${d.channel}: ${d.ok ? 'ok' : 'FAILED'} — ${d.detail}`);
+  const secrets = readSecrets(io.env ?? process.env);
+  for (const d of deliveries) {
+    lines.push(`Delivery ${d.channel}: ${d.ok ? 'ok' : 'FAILED'} — ${redactSecrets(d.detail, secrets)}`);
+  }
   io.stdout(lines.join('\n'));
   return 0;
 }
@@ -161,9 +197,11 @@ async function cmdDemo(p: ParsedArgs, io: CliIO, cwd: string): Promise<number> {
     throw new UsageError('--days must be an integer between 1 and 366');
   }
   const date = p.values.date ?? (io.now ?? new Date()).toISOString().slice(0, 10);
+  const parsed = Date.parse(`${date}T00:00:00Z`);
   if (
     !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
-    new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date
+    !Number.isFinite(parsed) ||
+    new Date(parsed).toISOString().slice(0, 10) !== date
   ) {
     throw new UsageError('--date must be a valid YYYY-MM-DD date');
   }
@@ -198,6 +236,10 @@ async function cmdInit(p: ParsedArgs, io: CliIO, cwd: string): Promise<number> {
 /** CLI entry point. Returns the process exit code; never throws. */
 export async function main(argv: readonly string[], io: CliIO): Promise<number> {
   const cwd = io.cwd ?? process.cwd();
+  const env = io.env ?? process.env;
+  // Everything written to stderr (progress logs, errors, debug stacks) is scrubbed of secrets.
+  const secrets = readSecrets(env);
+  const safeIO: CliIO = { ...io, env, stderr: (s) => io.stderr(redactSecrets(s, secrets)) };
   try {
     const parsed = parseArgs(argv);
     switch (parsed.command) {
@@ -208,20 +250,20 @@ export async function main(argv: readonly string[], io: CliIO): Promise<number> 
         io.stdout(readVersion());
         return 0;
       case 'run':
-        return await cmdRun(parsed, io, cwd);
+        return await cmdRun(parsed, safeIO, cwd);
       case 'demo':
-        return await cmdDemo(parsed, io, cwd);
+        return await cmdDemo(parsed, safeIO, cwd);
       case 'init':
-        return await cmdInit(parsed, io, cwd);
+        return await cmdInit(parsed, safeIO, cwd);
     }
   } catch (error) {
     if (error instanceof UsageError) {
-      io.stderr(`overnight: ${error.message}\n\n${USAGE}`);
+      safeIO.stderr(`overnight: ${error.message}\n\n${USAGE}`);
       return 2;
     }
-    const debug = (io.env ?? process.env).OVERNIGHT_DEBUG === '1';
+    const debug = env.OVERNIGHT_DEBUG === '1';
     const message = error instanceof Error ? error.message : String(error);
-    io.stderr(`overnight: ${debug && error instanceof Error && error.stack ? error.stack : message}`);
+    safeIO.stderr(`overnight: ${debug && error instanceof Error && error.stack ? error.stack : message}`);
     return 1;
   }
 }

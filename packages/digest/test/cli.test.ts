@@ -206,3 +206,125 @@ describe('main', () => {
     expect(missing.err.join('\n')).toContain('ENOENT');
   });
 });
+
+describe('main fix round regressions', () => {
+  const LIST_EMPTY = {
+    data: { repositoryOwner: { repositories: { pageInfo: { hasNextPage: false }, nodes: [] } } },
+  };
+  function okFetch(): FetchLike {
+    return async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      json: async () => LIST_EMPTY,
+      text: async () => JSON.stringify(LIST_EMPTY),
+    });
+  }
+
+  it('demo rejects impossible dates with a usage error (exit 2)', async () => {
+    for (const date of ['2026-13-01', '2026-00-10', '2026-02-30', '2026-1-01']) {
+      const io = makeIO();
+      expect(await main(['demo', '--out', 'p', '--days', '1', '--date', date], io)).toBe(2);
+      expect(io.err.join('\n')).toContain('--date must be a valid YYYY-MM-DD date');
+    }
+    await expect(readdir(join(dir, 'p'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('loads overnight.config.json from io.cwd when --config is omitted', async () => {
+    await writeFile(
+      join(dir, 'overnight.config.json'),
+      JSON.stringify({ owner: 'from-cwd', timezone: 'UTC', stateDir: join(dir, 'state') }),
+    );
+    const io = makeIO({
+      env: { OVERNIGHT_GITHUB_TOKEN: 't0ken-value' },
+      fetch: okFetch(),
+      now: new Date('2026-10-07T06:00:00Z'),
+    });
+    expect(await main(['--dry-run', '--json'], io)).toBe(0);
+    expect((JSON.parse(io.out[0] ?? '') as Digest).owner).toBe('from-cwd');
+  });
+
+  it('a missing default config in io.cwd falls back to defaults, ignoring process.cwd()', async () => {
+    const other = await mkdtemp(join(tmpdir(), 'overnight-cli-other-'));
+    try {
+      await writeFile(join(other, 'overnight.config.json'), JSON.stringify({ owner: 'wrong-owner' }));
+      const spy = vi.spyOn(process, 'cwd').mockReturnValue(other);
+      try {
+        const io = makeIO({ env: { OVERNIGHT_GITHUB_TOKEN: 't0ken-value' }, fetch: okFetch() });
+        expect(await main(['--dry-run', '--json'], io)).toBe(1);
+        expect(io.err).toEqual(['overnight: set OVERNIGHT_OWNER or owner in overnight.config.json']);
+      } finally {
+        spy.mockRestore();
+      }
+    } finally {
+      await rm(other, { recursive: true, force: true });
+    }
+  });
+
+  describe('secret redaction', () => {
+    const SECRET = 'plain-secret-value-42';
+    const ENV = {
+      OVERNIGHT_GITHUB_TOKEN: SECRET,
+      VERCEL_TOKEN: 'vercel-secret-77',
+      ANTHROPIC_API_KEY: 'anthropic-secret-99',
+    };
+
+    async function writeCfg(): Promise<void> {
+      await writeFile(
+        join(dir, 'cfg.json'),
+        JSON.stringify({ owner: 'acme', timezone: 'UTC', stateDir: join(dir, 'state') }),
+      );
+    }
+
+    const leaky = new Error(
+      `connect failed: Authorization: Bearer ${SECRET}; vercel=vercel-secret-77 ` +
+        'ghp_AbC123xyz github_pat_11AA_bb sk-ant-api03-zzz-yyy anthropic-secret-99',
+    );
+    const throwingFetch: FetchLike = async () => {
+      throw leaky;
+    };
+
+    for (const debug of [false, true]) {
+      it(`redacts secrets and token patterns from thrown errors (debug=${debug})`, async () => {
+        await writeCfg();
+        const io = makeIO({
+          env: { ...ENV, ...(debug ? { OVERNIGHT_DEBUG: '1' } : {}) },
+          fetch: throwingFetch,
+          now: new Date('2026-10-07T06:00:00Z'),
+        });
+        expect(await main(['--config', 'cfg.json', '--dry-run'], io)).toBe(1);
+        const err = io.err.join('\n');
+        for (const leak of [
+          SECRET,
+          'vercel-secret-77',
+          'anthropic-secret-99',
+          'ghp_AbC123xyz',
+          'github_pat_11AA_bb',
+          'sk-ant-api03',
+        ]) {
+          expect(err).not.toContain(leak);
+        }
+        expect(err).toContain('[redacted]');
+        expect(err).toContain('connect failed');
+        if (debug) expect(err).toMatch(/\n\s+at /);
+      });
+    }
+
+    it('redacts tokens echoed in HTTP error bodies', async () => {
+      await writeCfg();
+      const fetch: FetchLike = async () => ({
+        ok: false,
+        status: 500,
+        headers: { get: () => null },
+        json: async () => ({}),
+        text: async () => `upstream echoed header: token ${SECRET}`,
+      });
+      const io = makeIO({ env: ENV, fetch, now: new Date('2026-10-07T06:00:00Z') });
+      expect(await main(['--config', 'cfg.json', '--dry-run'], io)).toBe(1);
+      const err = io.err.join('\n');
+      expect(err).toContain('HTTP 500');
+      expect(err).not.toContain(SECRET);
+      expect(err).toContain('[redacted]');
+    });
+  });
+});
