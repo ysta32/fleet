@@ -174,12 +174,61 @@ describe('findModel', () => {
     ['o3', 'o3'],
     ['o3-mini', 'o3-mini'],
     ['o4-mini-2025-04-16', 'o4-mini'],
+    // OpenAI substring-collision regressions
+    ['codex-mini-latest', 'codex-mini-latest'],
+    ['codex-mini', 'codex-mini-latest'],
+    ['gpt-5-codex-mini', 'gpt-5-codex-mini'],
+    ['gpt-5.1-codex-max', 'gpt-5-1'],
+    ['gpt-5.2-codex', 'gpt-5-2'],
+    ['gpt-5-nano-2025-08-07', 'gpt-5-nano'],
+    ['gpt-5-pro-2025-10-06', 'gpt-5-pro'],
+    ['gpt-5-chat-latest', 'gpt-5'],
+    ['o4-mini', 'o4-mini'],
+    ['gpt-4o-mini-2024-07-18', 'gpt-4o-mini'],
+    ['gpt-4o', 'gpt-4o'],
+    ['gpt-4.1', 'gpt-4-1'],
+    ['gpt-4.1-2025-04-14', 'gpt-4-1'],
+    ['gpt-4.1-mini-2025-04-14', 'gpt-4-1-mini'],
+    ['gpt-4.1-nano', 'gpt-4-1-nano'],
+    ['o1', 'o1'],
+    ['o1-mini', 'o3-mini'],
+    ['o1-pro', 'o1-pro'],
+    ['o3-pro-2025-06-10', 'o3-pro'],
+    ['o3-mini-high', 'o3-mini'],
+    ['o3-2025-04-16', 'o3'],
+    ['claude-opus-4-0', 'claude-opus-4-0'],
+    ['claude-sonnet-4-0', 'claude-sonnet-4-0'],
+    ['gpt-5-codex-mini-2025-11-07', 'gpt-5-codex-mini'],
     ['gemini-2.5-pro', 'gemini-2-5-pro'],
     ['gemini-2.5-flash-lite', 'gemini-2-5-flash-lite'],
     ['models/gemini-2.5-flash', 'gemini-2-5-flash'],
   ];
   it.each(cases)('%s -> %s', (raw, id) => {
     expect(findModel(raw)?.id).toBe(id);
+  });
+
+  it('every match string resolves to its own entry (no substring collisions)', () => {
+    for (const m of PRICE_TABLE.models) {
+      for (const s of m.match) expect([s, findModel(s)?.id]).toEqual([s, m.id]);
+    }
+  });
+
+  it('prices codex-mini-latest at its own rates, not GPT-5 Mini', () => {
+    const c = priceRecord(
+      rec('codex-mini-latest', { input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000 }),
+    );
+    expect(c.modelId).toBe('codex-mini-latest');
+    expect(c.costUsd).toBeCloseTo(1.5 + 6 + 0.375, 10);
+  });
+
+  it('never resolves a -pro id to a non-pro entry', () => {
+    for (const raw of ['gpt-5.2-pro', 'gpt-5-1-pro', 'gpt-4o-pro', 'o4-mini-pro', 'claude-sonnet-4-5-pro']) {
+      expect(findModel(raw)).toBeUndefined();
+      expect(priceRecord(rec(raw, { input: 1 })).priced).toBe(false);
+    }
+    expect(findModel('gpt-5-pro')?.id).toBe('gpt-5-pro');
+    expect(findModel('o3-pro')?.id).toBe('o3-pro');
+    expect(findModel('gemini-2.5-pro-preview-06-05')?.id).toBe('gemini-2-5-pro');
   });
 
   it('does not match inside other words', () => {

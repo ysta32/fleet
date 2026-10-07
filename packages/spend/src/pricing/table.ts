@@ -45,7 +45,13 @@ const ANTHROPIC: ModelPrice[] = [
   m('claude-opus-4-6', 'anthropic', 3, ['claude-opus-4-6', 'claude-4-6-opus'], anth(5, 25, 0.5)),
   m('claude-opus-4-5', 'anthropic', 3, ['claude-opus-4-5', 'claude-4-5-opus'], anth(5, 25, 0.5)),
   m('claude-opus-4-1', 'anthropic', 3, ['claude-opus-4-1', 'claude-4-1-opus'], anth(15, 75, 1.5)),
-  m('claude-opus-4-0', 'anthropic', 3, ['claude-opus-4', 'claude-4-opus'], anth(15, 75, 1.5)),
+  m(
+    'claude-opus-4-0',
+    'anthropic',
+    3,
+    ['claude-opus-4', 'claude-opus-4-0', 'claude-4-opus'],
+    anth(15, 75, 1.5),
+  ),
   m('claude-3-opus', 'anthropic', 3, ['claude-3-opus'], anth(15, 75, 1.5)),
   m('claude-sonnet-5-5', 'anthropic', 2, ['claude-sonnet-5-5', 'claude-5-5-sonnet'], anth(2, 10, 0.2)),
   m('claude-sonnet-5', 'anthropic', 2, ['claude-sonnet-5', 'claude-5-sonnet'], anth(2, 10, 0.2)),
@@ -54,10 +60,17 @@ const ANTHROPIC: ModelPrice[] = [
     thresholdTokens: 200_000,
     ...anth(6, 22.5, 0.6),
   }),
-  m('claude-sonnet-4-0', 'anthropic', 2, ['claude-sonnet-4', 'claude-4-sonnet'], anth(3, 15, 0.3), {
-    thresholdTokens: 200_000,
-    ...anth(6, 22.5, 0.6),
-  }),
+  m(
+    'claude-sonnet-4-0',
+    'anthropic',
+    2,
+    ['claude-sonnet-4', 'claude-sonnet-4-0', 'claude-4-sonnet'],
+    anth(3, 15, 0.3),
+    {
+      thresholdTokens: 200_000,
+      ...anth(6, 22.5, 0.6),
+    },
+  ),
   m('claude-3-7-sonnet', 'anthropic', 2, ['claude-3-7-sonnet'], anth(3, 15, 0.3)),
   m('claude-3-5-sonnet', 'anthropic', 2, ['claude-3-5-sonnet'], anth(3, 15, 0.3)),
   m('claude-haiku-5-5', 'anthropic', 1, ['claude-haiku-5-5', 'claude-5-5-haiku'], anth(0.1, 0.5, 0.01), {
@@ -81,7 +94,10 @@ const OPENAI: ModelPrice[] = [
   m('gpt-5-1-codex-mini', 'openai', 1, ['gpt-5-1-codex-mini'], flat(0.25, 2, 0.025)),
   m('gpt-5-codex', 'openai', 2, ['gpt-5-codex'], flat(1.25, 10, 0.125)),
   m('gpt-5', 'openai', 2, ['gpt-5'], flat(1.25, 10, 0.125)),
-  m('gpt-5-mini', 'openai', 1, ['gpt-5-mini', 'codex-mini'], flat(0.25, 2, 0.025)),
+  m('gpt-5-mini', 'openai', 1, ['gpt-5-mini'], flat(0.25, 2, 0.025)),
+  m('gpt-5-codex-mini', 'openai', 1, ['gpt-5-codex-mini'], flat(0.25, 2, 0.025)),
+  // codex-mini-latest (o4-mini based Codex CLI model) has its own, higher rates
+  m('codex-mini-latest', 'openai', 1, ['codex-mini'], flat(1.5, 6, 0.375)),
   m('gpt-5-nano', 'openai', 1, ['gpt-5-nano'], flat(0.05, 0.4, 0.005)),
   m('o3-pro', 'openai', 3, ['o3-pro'], flat(20, 80, 20)),
   m('o1-pro', 'openai', 3, ['o1-pro'], flat(150, 600, 150)),

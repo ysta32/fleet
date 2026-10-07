@@ -42,6 +42,9 @@ const ALNUM = /[a-z0-9]/;
 /** a short numeric version segment right after the needle means a different (unknown) model version */
 const VERSION_TAIL = /^-\d{1,2}(?!\d)/;
 
+/** a standalone "pro" segment in an id */
+const PRO_TOKEN = /(^|[^a-z0-9])pro($|[^a-z0-9])/;
+
 function hitAt(id: string, needle: string): boolean {
   let from = 0;
   for (;;) {
@@ -60,7 +63,10 @@ export function findModel(model: string, table: PriceTable = PRICE_TABLE): Model
   if (typeof model !== 'string') return undefined;
   const id = normalizeModelId(model);
   if (!id) return undefined;
+  const wantsPro = PRO_TOKEN.test(id);
   for (const { needle, model: price } of matchersFor(table)) {
+    // a "-pro" model must never be priced as its cheaper non-pro sibling; unpriced beats wrong
+    if (wantsPro && !PRO_TOKEN.test(normalizeModelId(price.id))) continue;
     if (hitAt(id, needle)) return price;
   }
   return undefined;
