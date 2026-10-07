@@ -278,6 +278,10 @@ export interface FleetConfig {
   /** poll GitHub via `gh` (read-only) */
   github: boolean;
   githubPollMs: number;
+  /** extra Host header names accepted when lan=true (e.g. 'mymac.tailnet.ts.net') */
+  allowedHosts?: string[];
+  /** Overnight digest output dir (default ~/.overnight/archive) */
+  digestDir?: string;
 }
 
 /* ---------------- Synthetic demo generator (packages/shared/src/demo.ts) ----------------
