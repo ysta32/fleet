@@ -355,19 +355,78 @@ export function createServer(opts: CreateServerOptions): http.Server {
     return isLoopback(req) && LOOPBACK_HOSTS.has(hostName(req));
   }
 
+  function setSessionCookie(req: http.IncomingMessage, res: http.ServerResponse): void {
+    const proto = String(req.headers['x-forwarded-proto'] ?? '')
+      .split(',')[0]!
+      .trim()
+      .toLowerCase();
+    res.setHeader(
+      'Set-Cookie',
+      `${TOKEN_COOKIE}=${encodeURIComponent(config.token)}; Path=/; HttpOnly; SameSite=Strict; ` +
+        `Max-Age=${COOKIE_MAX_AGE_S}${proto === 'https' ? '; Secure' : ''}`,
+    );
+  }
+
+  /** Same-origin check for state-changing browser requests: Origin (if sent) must match Host. */
+  function crossSite(req: http.IncomingMessage): boolean {
+    const site = req.headers['sec-fetch-site'];
+    if (typeof site === 'string' && site !== 'same-origin' && site !== 'none') return true;
+    const origin = req.headers.origin;
+    if (origin === undefined) return false;
+    if (typeof origin !== 'string' || origin === 'null') return true;
+    let host: string;
+    try {
+      host = new URL(origin).host.toLowerCase();
+    } catch {
+      return true;
+    }
+    return host !== String(req.headers.host ?? '').toLowerCase();
+  }
+
+  /** Failed POST /api/session attempts per client address, to slow token guessing. */
+  const sessionFailures = new Map<string, { count: number; resetAt: number }>();
+  const SESSION_MAX_FAILURES = 10;
+  const SESSION_WINDOW_MS = 60_000;
+
+  /**
+   * POST /api/session: exchanges `Authorization: Bearer <token>` for the HttpOnly session cookie,
+   * so the web UI never has to put the token in a URL. 204 on success, 401 on a bad token.
+   */
+  function handleSession(req: http.IncomingMessage, res: http.ServerResponse): void {
+    req.resume(); // no body expected; drain anything sent
+    if (crossSite(req)) return sendError(res, 403, 'cross-site request');
+    const key = req.socket.remoteAddress ?? 'unknown';
+    const now = Date.now();
+    let entry = sessionFailures.get(key);
+    if (entry && entry.resetAt <= now) {
+      sessionFailures.delete(key);
+      entry = undefined;
+    }
+    if (entry && entry.count >= SESSION_MAX_FAILURES) {
+      res.setHeader('Retry-After', String(Math.ceil((entry.resetAt - now) / 1000)));
+      return sendError(res, 429, 'too many attempts');
+    }
+    if (!tokenMatches(bearerToken(req), config.token)) {
+      if (sessionFailures.size > 10_000) sessionFailures.clear();
+      sessionFailures.set(key, {
+        count: (entry?.count ?? 0) + 1,
+        resetAt: entry?.resetAt ?? now + SESSION_WINDOW_MS,
+      });
+      res.setHeader('WWW-Authenticate', 'Bearer');
+      return sendError(res, 401, 'unauthorized');
+    }
+    sessionFailures.delete(key);
+    setSessionCookie(req, res);
+    res.setHeader('Cache-Control', 'no-store');
+    res.writeHead(204);
+    res.end();
+  }
+
   function authorize(req: http.IncomingMessage, query: URLSearchParams, res: http.ServerResponse): boolean {
     const queryToken = query.get('token') ?? undefined;
     if (tokenMatches(queryToken, config.token)) {
       // lets the web UI load its own assets after being opened with ?token=
-      const proto = String(req.headers['x-forwarded-proto'] ?? '')
-        .split(',')[0]!
-        .trim()
-        .toLowerCase();
-      res.setHeader(
-        'Set-Cookie',
-        `${TOKEN_COOKIE}=${encodeURIComponent(config.token)}; Path=/; HttpOnly; SameSite=Strict; ` +
-          `Max-Age=${COOKIE_MAX_AGE_S}${proto === 'https' ? '; Secure' : ''}`,
-      );
+      setSessionCookie(req, res);
       return true;
     }
     return tokenMatches(bearerToken(req), config.token) || tokenMatches(cookieToken(req), config.token);
@@ -654,6 +713,13 @@ export function createServer(opts: CreateServerOptions): http.Server {
         return sendError(res, 405, 'method not allowed');
       }
       return handlePostAlert(req, res);
+    }
+    if (rawPath === '/api/session') {
+      if (method !== 'POST') {
+        res.setHeader('Allow', 'POST');
+        return sendError(res, 405, 'method not allowed');
+      }
+      return handleSession(req, res);
     }
     if (method !== 'GET' && method !== 'HEAD') {
       res.setHeader('Allow', 'GET, HEAD');
