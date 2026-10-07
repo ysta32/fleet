@@ -72,14 +72,14 @@ describe('readOrchRun', () => {
       'wt/not-a-directory': '',
     });
     const result = (await readOrchRun(project, 'p'))!;
-    expect(result.phase).toBe('running');
+    expect(result.phase).toBe('blocked');
     expect(result.tasks.map(({ id, state }) => [id, state])).toEqual([
-      ['01', 'running'],
+      ['01', 'landed'],
       ['03', 'landed'],
       ['04', 'blocked'],
       ['05', 'queued'],
       ['06', 'landed'],
-      ['t02', 'running'],
+      ['t02', 'landed'],
     ]);
     expect(result.tasks.find((task) => task.id === 't02')).toMatchObject({
       slug: 'second',
@@ -92,10 +92,7 @@ describe('readOrchRun', () => {
       risk: 'low',
     });
     expect(result.tasks.find((task) => task.id === '04')).toMatchObject({ depends: [], risk: undefined });
-    expect(result.inflight).toEqual([
-      { task: '01', role: 'coder', agent: 'astra', worktree: 'wt/01', baseSha: 'abc123', started: '12:34' },
-      { task: '02', role: 'reviewer', agent: 'fable', worktree: 'wt/t02', baseSha: '', started: '12:35' },
-    ]);
+    expect(result.inflight).toEqual([]);
     expect(result.worktrees).toEqual(['t02']);
     expect(result.blocked).toEqual(['04']);
     expect(result.updatedAt).toBeGreaterThan(0);
@@ -110,6 +107,110 @@ describe('readOrchRun', () => {
     expect((await readOrchRun(project, 'p'))!.inflight).toEqual([
       { task: 't04', role: 'coder', agent: 'astra', worktree: '', baseSha: '', started: '09:01' },
     ]);
+  });
+
+  it.each([
+    ['Landed 8 tasks by 17:50', []],
+    ['v1.6.0 merged (#10, 6e30574)', []],
+    ['cycle2: landed 10,12,14,18,19; in flight 09,11,13,16,17,20 17:29', ['10', '12', '14', '18', '19']],
+    ['landed: t21 error boundary, 15 deletion log UI', ['15', '21']],
+    ['merged 01 t02 03', ['01', '02', '03']],
+    ['landed 01; 02', ['01']],
+    ['landed 01\n02', ['01']],
+    ['landed 17:50, 1.6.0, #10, 12-14, 6e30574, 8 tasks', []],
+    ['landed 01 updated at 17:50 with PR #10', ['01']],
+    ['03 LANDED', ['03']],
+    ['- **t03** error boundary LANDED', ['03']],
+  ])('scopes landed IDs in %s', async (status, landed) => {
+    const ids = [
+      '1',
+      '6',
+      '8',
+      '0',
+      '50',
+      ...Array.from({ length: 21 }, (_, i) => String(i + 1).padStart(2, '0')),
+    ];
+    await fixture({
+      'STATUS.md': status,
+      ...Object.fromEntries(ids.map((id) => [`TASKS/${id}-synthetic.md`, ''])),
+    });
+    const result = (await readOrchRun(project, 'p'))!;
+    expect(result.tasks.filter((task) => task.state === 'landed').map((task) => task.id)).toEqual(landed);
+  });
+
+  it.each(['in flight', 'inflight', 'queued', 'blocked', 'running', 'next', 'pending'])(
+    'stops landed IDs at the %s state',
+    async (state) => {
+      await fixture({
+        'HANDOFF.md': `landed 01 ${state} 02, t03`,
+        'TASKS/01-first.md': '',
+        'TASKS/02-second.md': '',
+        'TASKS/03-third.md': '',
+      });
+      expect((await readOrchRun(project, 'p'))!.tasks.map((task) => task.state)).toEqual([
+        'landed',
+        state === 'blocked'
+          ? 'blocked'
+          : ['in flight', 'inflight', 'running'].includes(state)
+            ? 'running'
+            : 'queued',
+        state === 'blocked'
+          ? 'blocked'
+          : ['in flight', 'inflight', 'running'].includes(state)
+            ? 'running'
+            : 'queued',
+      ]);
+    },
+  );
+
+  it.each(['STATUS.md', 'HANDOFF.md'])('reads mixed state segments from %s', async (file) => {
+    await fixture({
+      [file]: 'cycle2: landed 10,12; in flight 09,11 17:29',
+      ...Object.fromEntries(
+        ['09', '10', '11', '12', '17', '29'].map((id) => [`TASKS/${id}-synthetic.md`, '']),
+      ),
+    });
+    expect((await readOrchRun(project, 'p'))!.tasks.map(({ id, state }) => [id, state])).toEqual([
+      ['09', 'running'],
+      ['10', 'landed'],
+      ['11', 'running'],
+      ['12', 'landed'],
+      ['17', 'queued'],
+      ['29', 'queued'],
+    ]);
+  });
+
+  it('prioritizes blocked over inflight rows and running segments', async () => {
+    await fixture({
+      'STATUS.md': 'blocked 01,02; running 01,02,03',
+      'INFLIGHT.md': '01 | coder | astra | wt/01 | abc123 | 12:34',
+      'TASKS/01-first.md': '',
+      'TASKS/02-second.md': '',
+      'TASKS/03-third.md': '',
+    });
+    expect((await readOrchRun(project, 'p'))!.tasks.map((task) => task.state)).toEqual([
+      'blocked',
+      'blocked',
+      'running',
+    ]);
+  });
+
+  it.each([
+    ['blocked: 03', ['03']],
+    ['03 BLOCKED', ['03']],
+    ['blocked: t03 error boundary, 15 deletion log UI; queued 10', ['03', '15']],
+    ['blocked 03 running 10, 15', ['03']],
+    ['blocked 8 tasks by 17:50', []],
+    ['v1.6.0 blocked (#10, 6e30574)', []],
+    ['blocked 17:50, 1.6.0, #10, 03-15, 6e30574', []],
+  ])('scopes blocked IDs in %s', async (status, blocked) => {
+    await fixture({
+      'STATUS.md': status,
+      ...Object.fromEntries(
+        ['03', '6', '8', '10', '15', '17', '50'].map((id) => [`TASKS/${id}-synthetic.md`, '']),
+      ),
+    });
+    expect((await readOrchRun(project, 'p'))!.blocked).toEqual(blocked);
   });
 
   it('uses full state text while limiting excerpts and matching complete ids', async () => {

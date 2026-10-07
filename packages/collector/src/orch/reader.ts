@@ -89,10 +89,47 @@ function metadata(text: string, key: string): string | undefined {
   return value && value !== '-' ? value : undefined;
 }
 
-function mentions(text: string, id: string, state: 'landed' | 'blocked'): boolean {
-  const token = `\\bt?${canonical(id)}\\b`;
-  const marker = state === 'landed' ? '(?:landed|merged)' : 'blocked';
-  return new RegExp(`(?:\\b${marker}\\b[^\\n]*${token}|${token}[^\\n]*\\b${marker}\\b)`, 'i').test(text);
+function listedIds(text: string): string[] {
+  const ids: string[] = [];
+  for (const item of text.split(',')) {
+    let remaining = item.trim();
+    while (remaining) {
+      const match = remaining.match(/^(?:orch-task\/)?(t?\d+)(?![\w:.#-])/i);
+      if (!match) break;
+      const rest = remaining.slice(match[0].length);
+      if (/^\s+tasks?\b/i.test(rest)) break;
+      ids.push(canonical(match[1]));
+      if (!/^\s/.test(rest)) break;
+      remaining = rest.trimStart();
+    }
+  }
+  return ids;
+}
+
+function mentions(text: string, id: string, state: 'landed' | 'blocked' | 'running'): boolean {
+  for (const clause of clean(text).split(/[;\r\n]/)) {
+    const markers = [
+      ...clause.matchAll(/\b(landed|merged|blocked|in flight|inflight|queued|running|next|pending)\b/gi),
+    ];
+    for (const [index, marker] of markers.entries()) {
+      const name = marker[1].toLowerCase();
+      if (
+        name !== state &&
+        !(state === 'landed' && name === 'merged') &&
+        !(state === 'running' && (name === 'in flight' || name === 'inflight'))
+      )
+        continue;
+      const after = clause
+        .slice(marker.index + marker[0].length, markers[index + 1]?.index)
+        .replace(/^\s*:?\s*/, '');
+      if (listedIds(after).includes(canonical(id))) return true;
+      if (index === 0) {
+        const before = clause.slice(0, marker.index).replace(/^\s*[-+]\s+/, '');
+        if (listedIds(before).includes(canonical(id))) return true;
+      }
+    }
+  }
+  return false;
 }
 
 export async function readOrchRun(projectPath: string, projectId: string): Promise<OrchRun | undefined> {
@@ -107,8 +144,8 @@ export async function readOrchRun(projectPath: string, projectId: string): Promi
     exists(path.join(root, 'ACTIVE')),
     exists(path.join(root, 'REPORT.md')),
   ]);
-  const inflight = parseInflight(inflightText);
   const stateText = `${status}\n${handoff}`;
+  const inflight = parseInflight(inflightText).filter((entry) => !mentions(stateText, entry.task, 'landed'));
   const tasks: OrchTask[] = [];
   for (const file of taskFiles.sort((a, b) => a.name.localeCompare(b.name))) {
     const match = file.name.match(/^(t?\d+)-(.+)\.md$/i);
@@ -125,12 +162,13 @@ export async function readOrchRun(projectPath: string, projectId: string): Promi
         .filter((value): value is string => value !== undefined),
       route: metadata(text, 'ROUTE'),
       risk: risk === 'low' || risk === 'normal' || risk === 'high' ? risk : undefined,
-      state: inflight.some((entry) => canonical(entry.task) === canonical(id))
-        ? 'running'
-        : mentions(stateText, id, 'landed')
-          ? 'landed'
-          : mentions(stateText, id, 'blocked')
-            ? 'blocked'
+      state: mentions(stateText, id, 'landed')
+        ? 'landed'
+        : mentions(stateText, id, 'blocked')
+          ? 'blocked'
+          : inflight.some((entry) => canonical(entry.task) === canonical(id)) ||
+              mentions(stateText, id, 'running')
+            ? 'running'
             : 'queued',
     });
   }
