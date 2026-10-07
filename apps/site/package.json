@@ -1,0 +1,27 @@
+{
+  "name": "@fleet/site",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "prebuild": "node scripts/prebuild.mjs",
+    "build": "next build",
+    "dev": "node scripts/prebuild.mjs && next dev -p 4530",
+    "preview": "node scripts/serve.mjs 4530",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@fleet/shared": "0.1.0",
+    "@fleet/ui": "0.1.0",
+    "@fleet/web": "0.1.0",
+    "next": "15.5.4",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "vite": "5.4.11",
+    "@vitejs/plugin-react": "4.3.4"
+  }
+}
