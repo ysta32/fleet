@@ -294,6 +294,37 @@ describe('readOrchRun', () => {
     expect((await readOrchRun(project, 'p'))!.blocked).toEqual(blocked);
   });
 
+  it.each([
+    ['01 LANDED, 02 BLOCKED', ['landed', 'blocked', 'queued']],
+    ['02 BLOCKED, 01 LANDED', ['landed', 'blocked', 'queued']],
+    ['01 LANDED, 02 auth fix BLOCKED, 03 LANDED', ['landed', 'blocked', 'landed']],
+    ['01 LANDED 02 BLOCKED', ['landed', 'blocked', 'queued']],
+    ['LANDED: 01, 02 BLOCKED', ['landed', 'blocked', 'queued']],
+    ['LANDED 01, 02 BLOCKED 03', ['landed', 'landed', 'blocked']],
+    ['landed 01, 03; blocked: 02', ['landed', 'blocked', 'landed']],
+  ])('binds postfix markers to the preceding item in %s', async (status, states) => {
+    await fixture({
+      'STATUS.md': status,
+      'TASKS/01-first.md': '',
+      'TASKS/02-second.md': '',
+      'TASKS/03-third.md': '',
+    });
+    expect((await readOrchRun(project, 'p'))!.tasks.map((task) => task.state)).toEqual(states);
+  });
+
+  it('keeps the blocked alert for a postfix-blocked task after a landed one', async () => {
+    await fixture({
+      'STATUS.md': '01 LANDED, 02 BLOCKED',
+      'TASKS/01-first.md': '',
+      'TASKS/02-second.md': '',
+    });
+    const result = (await readOrchRun(project, 'p'))!;
+    expect(result.blocked).toEqual(['02']);
+    expect(result.phase).toBe('blocked');
+    const alerts = diffOrch(undefined, result, 1).filter((event) => event.kind === 'blocked');
+    expect(alerts.map((event) => event.taskId)).toEqual(['02']);
+  });
+
   it('uses full state text while limiting excerpts and matching complete ids', async () => {
     const lines = Array.from({ length: 14 }, (_, index) => `Synthetic line ${index}`);
     await fixture({

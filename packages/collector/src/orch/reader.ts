@@ -175,7 +175,7 @@ function parseItem(word: string, following: string): string[] | 'reject' | undef
  * or numeric range optionally followed by descriptive words up to the next separator. The list ends
  * at a non-ID where an item is expected, a rejected number (time, count, version, sha), or a sentence end.
  */
-function parseList(tokens: Token[], header: boolean): string[] {
+function parseList(tokens: Token[], header: boolean, starts?: number[]): string[] {
   const ids: string[] = [];
   let index = nextSolid(tokens, 0);
   if (header) {
@@ -229,6 +229,7 @@ function parseList(tokens: Token[], header: boolean): string[] {
       const item = parseItem(word, normalWord(tokens[nextSolid(tokens, index + 1)]));
       if (Array.isArray(item)) {
         ids.push(...item);
+        starts?.push(index);
         mode = 'after';
       } else if (mode === 'expect') {
         break;
@@ -266,8 +267,31 @@ function textStates(text: string): Map<string, Set<Mark>> {
         markers.push({ mark: marker.mark, start: cursor, end: marker.end });
         cursor = marker.end - 1;
       }
+      // A marker with no list of its own after it is a postfix marker (`02 BLOCKED`): it owns only the
+      // item immediately before it, which is split off the preceding marker's trailing list.
+      // Resolved right to left so a later postfix marker's item is not counted as this marker's list.
+      const owned = markers.map(() => 0);
+      for (let position = markers.length - 1; position > 0; position--) {
+        const marker = markers[position];
+        const next = markers[position + 1];
+        const after = clause.slice(marker.end, next ? next.start - owned[position + 1] : clause.length);
+        if (parseList(after, true).length > 0) continue;
+        const segment = clause.slice(markers[position - 1].end, marker.start);
+        let lastSep = -1;
+        for (const [offset, token] of segment.entries())
+          if (token.kind === 'sep' && token.text !== ';') lastSep = offset;
+        const starts: number[] = [];
+        parseList(segment.slice(lastSep + 1), false, starts);
+        if (starts.length > 0) owned[position] = segment.length - (lastSep + 1 + starts[starts.length - 1]);
+      }
       for (const [position, marker] of markers.entries()) {
-        add(parseList(clause.slice(marker.end, markers[position + 1]?.start), true), marker.mark);
+        const next = markers[position + 1];
+        const stop = next ? next.start - owned[position + 1] : clause.length;
+        add(parseList(clause.slice(marker.end, stop), true), marker.mark);
+        if (owned[position] > 0) {
+          add(parseList(clause.slice(marker.start - owned[position], marker.start), false), marker.mark);
+          continue;
+        }
         if (position > 0) continue;
         const prefix = clause.slice(0, marker.start);
         const first = nextSolid(prefix, 0);
