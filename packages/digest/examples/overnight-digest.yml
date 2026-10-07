@@ -1,0 +1,120 @@
+# Overnight digest — example workflow.
+# Copy this file into a PRIVATE repository you own (e.g. <you>/overnight-archive) at
+# .github/workflows/overnight-digest.yml. The digest summarises private repo and deploy activity, so it
+# must never run in, or publish to, a public repository. The job refuses to run in a public repo.
+name: Overnight digest
+
+on:
+  schedule:
+    - cron: '0 13 * * *' # 06:00 PT
+  workflow_dispatch:
+    inputs:
+      since:
+        description: 'Window start, e.g. 24h, 7d or an ISO date (empty = since last run)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: overnight-digest
+  cancel-in-progress: false
+
+jobs:
+  digest:
+    name: Build and publish digest
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Refuse to run in a public repository
+        if: ${{ github.event.repository.private != true }}
+        run: |
+          echo "::error::Overnight digests contain private activity. Run this workflow only in a private repository."
+          exit 1
+
+      - name: Check for required secret
+        id: gate
+        env:
+          HAS_TOKEN: ${{ secrets.OVERNIGHT_GITHUB_TOKEN != '' }}
+        run: |
+          if [ "$HAS_TOKEN" = "true" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "OVERNIGHT_GITHUB_TOKEN is not set; skipping."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.enabled == 'true'
+
+      - name: Prepare archive branch
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          git config user.name "overnight-bot"
+          git config user.email "overnight-bot@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin overnight-archive >/dev/null 2>&1; then
+            git fetch origin overnight-archive
+            git worktree add archive origin/overnight-archive
+            git -C archive checkout -B overnight-archive origin/overnight-archive
+          else
+            git worktree add --detach archive
+            git -C archive checkout --orphan overnight-archive
+            git -C archive rm -rf --quiet . || true
+            git -C archive commit --allow-empty -m "chore: init overnight-archive"
+          fi
+
+      - name: Check out Fleet (Overnight source)
+        if: steps.gate.outputs.enabled == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ysta32/fleet
+          ref: ${{ vars.OVERNIGHT_FLEET_REF || 'main' }}
+          path: fleet
+
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: fleet/package-lock.json
+
+      - name: Install and build
+        if: steps.gate.outputs.enabled == 'true'
+        working-directory: fleet
+        run: |
+          npm ci
+          npm run build -w @fleet/digest
+
+      - name: Run digest
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          OVERNIGHT_STATE: archive/state
+          OVERNIGHT_OWNER: ${{ vars.OVERNIGHT_OWNER || github.repository_owner }}
+          OVERNIGHT_SITE_URL: ${{ vars.OVERNIGHT_SITE_URL }}
+          OVERNIGHT_NTFY_TOPIC: ${{ vars.OVERNIGHT_NTFY_TOPIC }}
+          OVERNIGHT_NOTION_DATABASE_ID: ${{ vars.OVERNIGHT_NOTION_DATABASE_ID }}
+          OVERNIGHT_EMAIL_TO: ${{ vars.OVERNIGHT_EMAIL_TO }}
+          OVERNIGHT_EMAIL_FROM: ${{ vars.OVERNIGHT_EMAIL_FROM }}
+          OVERNIGHT_GITHUB_TOKEN: ${{ secrets.OVERNIGHT_GITHUB_TOKEN }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}
+          SINCE: ${{ inputs.since }}
+        run: node fleet/packages/digest/dist/cli.js run --out archive/site --since "$SINCE"
+
+      - name: Commit and push archive
+        if: steps.gate.outputs.enabled == 'true'
+        working-directory: archive
+        run: |
+          git config user.name "overnight-bot"
+          git config user.email "overnight-bot@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No archive changes."
+          else
+            git commit -m "digest: $(date -u +%Y-%m-%d)"
+            git push origin HEAD:overnight-archive
+          fi

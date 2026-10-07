@@ -1,0 +1,244 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ysta32/fleet/packages/digest/schema/digest.v1.json",
+  "title": "Overnight Digest v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "id",
+    "generatedAt",
+    "window",
+    "owner",
+    "headline",
+    "summarizer",
+    "totals",
+    "projects",
+    "warnings"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "schema": { "const": "overnight.digest/v1" },
+    "id": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "generatedAt": { "$ref": "#/$defs/isoDate" },
+    "window": { "$ref": "#/$defs/timeWindow" },
+    "owner": { "type": "string" },
+    "headline": { "type": "string" },
+    "summarizer": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "model"],
+          "additionalProperties": true,
+          "properties": { "kind": { "const": "llm" }, "model": { "type": "string" } }
+        },
+        {
+          "type": "object",
+          "required": ["kind"],
+          "additionalProperties": true,
+          "properties": { "kind": { "const": "fallback" } }
+        }
+      ]
+    },
+    "totals": { "$ref": "#/$defs/totals" },
+    "projects": { "type": "array", "items": { "$ref": "#/$defs/project" } },
+    "warnings": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "isoDate": { "type": "string", "format": "date-time" },
+    "timeWindow": {
+      "type": "object",
+      "required": ["since", "until"],
+      "additionalProperties": true,
+      "properties": { "since": { "$ref": "#/$defs/isoDate" }, "until": { "$ref": "#/$defs/isoDate" } }
+    },
+    "actor": {
+      "type": "object",
+      "required": ["login", "isBot"],
+      "additionalProperties": true,
+      "properties": { "login": { "type": "string" }, "isBot": { "type": "boolean" } }
+    },
+    "totals": {
+      "type": "object",
+      "required": [
+        "projectsActive",
+        "mergedPRs",
+        "commits",
+        "releases",
+        "ciFailures",
+        "openPRsNeedingAttention",
+        "issuesOpened",
+        "issuesClosed",
+        "deployments",
+        "deploymentsFailed",
+        "starsDelta",
+        "agentContributions"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "projectsActive": { "type": "integer" },
+        "mergedPRs": { "type": "integer" },
+        "commits": { "type": "integer" },
+        "releases": { "type": "integer" },
+        "ciFailures": { "type": "integer" },
+        "openPRsNeedingAttention": { "type": "integer" },
+        "issuesOpened": { "type": "integer" },
+        "issuesClosed": { "type": "integer" },
+        "deployments": { "type": "integer" },
+        "deploymentsFailed": { "type": "integer" },
+        "starsDelta": { "type": "integer" },
+        "agentContributions": { "type": "integer" }
+      }
+    },
+    "pullRequest": {
+      "type": "object",
+      "required": ["number", "title", "url", "author", "at", "labels"],
+      "additionalProperties": true,
+      "properties": {
+        "number": { "type": "integer" },
+        "title": { "type": "string" },
+        "url": { "type": "string" },
+        "author": { "$ref": "#/$defs/actor" },
+        "at": { "$ref": "#/$defs/isoDate" },
+        "additions": { "type": "integer" },
+        "deletions": { "type": "integer" },
+        "labels": { "type": "array", "items": { "type": "string" } },
+        "draft": { "type": "boolean" },
+        "attention": {
+          "type": "array",
+          "items": { "enum": ["review_requested", "ci_failing", "stale", "conflicts", "approved_unmerged"] }
+        }
+      }
+    },
+    "commit": {
+      "type": "object",
+      "required": ["sha", "message", "url", "author", "at", "branch"],
+      "additionalProperties": true,
+      "properties": {
+        "sha": { "type": "string" },
+        "message": { "type": "string" },
+        "url": { "type": "string" },
+        "author": { "$ref": "#/$defs/actor" },
+        "at": { "$ref": "#/$defs/isoDate" },
+        "branch": { "type": "string" }
+      }
+    },
+    "release": {
+      "type": "object",
+      "required": ["tag", "name", "url", "at", "prerelease"],
+      "additionalProperties": true,
+      "properties": {
+        "tag": { "type": "string" },
+        "name": { "type": "string" },
+        "url": { "type": "string" },
+        "at": { "$ref": "#/$defs/isoDate" },
+        "prerelease": { "type": "boolean" },
+        "notes": { "type": "string", "maxLength": 2000 }
+      }
+    },
+    "ciFailure": {
+      "type": "object",
+      "required": ["workflow", "runId", "url", "branch", "at", "conclusion"],
+      "additionalProperties": true,
+      "properties": {
+        "workflow": { "type": "string" },
+        "runId": { "type": "integer" },
+        "url": { "type": "string" },
+        "branch": { "type": "string" },
+        "at": { "$ref": "#/$defs/isoDate" },
+        "conclusion": { "enum": ["failure", "timed_out", "cancelled", "startup_failure"] },
+        "commitMessage": { "type": "string" }
+      }
+    },
+    "issue": {
+      "type": "object",
+      "required": ["number", "title", "url", "author", "at", "state", "labels"],
+      "additionalProperties": true,
+      "properties": {
+        "number": { "type": "integer" },
+        "title": { "type": "string" },
+        "url": { "type": "string" },
+        "author": { "$ref": "#/$defs/actor" },
+        "at": { "$ref": "#/$defs/isoDate" },
+        "state": { "enum": ["opened", "closed"] },
+        "labels": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "deployment": {
+      "type": "object",
+      "required": ["id", "project", "url", "target", "state", "at"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string" },
+        "project": { "type": "string" },
+        "url": { "type": "string" },
+        "target": { "enum": ["production", "preview"] },
+        "state": { "enum": ["READY", "ERROR", "CANCELED", "BUILDING", "QUEUED"] },
+        "at": { "$ref": "#/$defs/isoDate" },
+        "commitMessage": { "type": "string" },
+        "branch": { "type": "string" }
+      }
+    },
+    "traffic": {
+      "type": "object",
+      "required": ["source"],
+      "additionalProperties": true,
+      "properties": {
+        "views": { "type": "integer" },
+        "uniqueVisitors": { "type": "integer" },
+        "source": { "enum": ["github", "vercel"] }
+      }
+    },
+    "repoStats": {
+      "type": "object",
+      "required": ["stars", "forks", "starsDelta", "forksDelta", "openIssues"],
+      "additionalProperties": true,
+      "properties": {
+        "stars": { "type": "integer" },
+        "forks": { "type": "integer" },
+        "starsDelta": { "type": "integer" },
+        "forksDelta": { "type": "integer" },
+        "openIssues": { "type": "integer" }
+      }
+    },
+    "project": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "url",
+        "mergedPRs",
+        "openPRs",
+        "commits",
+        "releases",
+        "ciFailures",
+        "issues",
+        "deployments",
+        "health",
+        "summary",
+        "highlights"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "url": { "type": "string" },
+        "description": { "type": "string" },
+        "defaultBranch": { "type": "string" },
+        "vercelProject": { "type": "string" },
+        "siteUrl": { "type": "string" },
+        "mergedPRs": { "type": "array", "items": { "$ref": "#/$defs/pullRequest" } },
+        "openPRs": { "type": "array", "items": { "$ref": "#/$defs/pullRequest" } },
+        "commits": { "type": "array", "items": { "$ref": "#/$defs/commit" } },
+        "releases": { "type": "array", "items": { "$ref": "#/$defs/release" } },
+        "ciFailures": { "type": "array", "items": { "$ref": "#/$defs/ciFailure" } },
+        "issues": { "type": "array", "items": { "$ref": "#/$defs/issue" } },
+        "deployments": { "type": "array", "items": { "$ref": "#/$defs/deployment" } },
+        "traffic": { "$ref": "#/$defs/traffic" },
+        "stats": { "$ref": "#/$defs/repoStats" },
+        "health": { "enum": ["green", "yellow", "red", "quiet"] },
+        "summary": { "type": "string" },
+        "highlights": { "type": "array", "maxItems": 5, "items": { "type": "string" } }
+      }
+    }
+  }
+}
