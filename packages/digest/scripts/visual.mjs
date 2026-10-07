@@ -56,7 +56,7 @@ async function compare(filename) {
   try {
     expected = PNG.sync.read(await readFile(join(baseline, filename)));
   } catch (error) {
-    if (error.code === 'ENOENT') return { status: 'no baseline', difference: '—' };
+    if (error.code === 'ENOENT') return { status: 'NO BASELINE', difference: '—' };
     throw error;
   }
   const actual = PNG.sync.read(await readFile(join(shots, filename)));
@@ -123,7 +123,7 @@ try {
               `<html${attributes.replace(/\sdata-theme\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')} data-theme="${theme}">`,
           ),
         );
-        for (const width of [375, 768, 1280, 1920]) {
+        for (const width of [360, 768, 1280, 1920]) {
           const filename = `${name}-${width}.png`;
           const screenshot = join(shots, filename);
           await rm(screenshot, { force: true });
@@ -177,6 +177,6 @@ await writeFile(
 );
 console.table(results);
 console.log(
-  `${results.length} shots: ${results.filter((row) => row.status.startsWith('FAIL')).length} failed, ${results.filter((row) => row.status === 'no baseline').length} with no baseline. Contact sheet: ${join(visual, 'contact-sheet.html')}`,
+  `${results.length} shots: ${results.filter((row) => row.status.startsWith('FAIL')).length} failed, ${results.filter((row) => row.status === 'NO BASELINE').length} with no baseline. Contact sheet: ${join(visual, 'contact-sheet.html')}`,
 );
 if (results.some((row) => row.status.startsWith('FAIL'))) process.exitCode = 1;
