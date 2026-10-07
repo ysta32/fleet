@@ -1,0 +1,26 @@
+{
+  "name": "@fleet/ui",
+  "version": "0.1.0",
+  "description": "Halyard: the Fleet design system (tokens, fonts, icons, motion)",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./tokens.css": "./tokens.css",
+    "./fonts.css": "./fonts.css"
+  },
+  "files": [
+    "dist",
+    "tokens.css",
+    "fonts.css",
+    "icons"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b"
+  }
+}
