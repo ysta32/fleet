@@ -38,14 +38,18 @@
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --root ../.. packages/digest",
-    "demo": "node dist/cli.js demo --out public"
+    "demo": "node dist/cli.js demo --out public",
+    "visual": "node scripts/visual.mjs",
+    "visual:update": "node scripts/visual.mjs --update"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.132.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "tsup": "^8.5.1"
+    "tsup": "^8.5.1",
+    "pixelmatch": "^7.0.0",
+    "pngjs": "^7.0.0"
   },
   "private": true
 }
