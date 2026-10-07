@@ -156,19 +156,22 @@ function budgetAlerts(
 /**
  * Build the spend summary for the local calendar month containing `opts.now`.
  *
- * Windows (half-open, epoch ms): month = [monthStart, nextMonthStart); today = [local midnight,
- * next local midnight); daily = the 31 local calendar days ending today; burn = [now - 1h, now).
+ * Records dated after `now` are ignored everywhere. Windows (epoch ms): month = [monthStart, now];
+ * today = [local midnight, now]; daily = the 31 local calendar days ending today (up to now);
+ * burn = [now - 1h, now).
  *
  * Forecast (D-12, nothing rounded):
  *   elapsedDays = max((now - monthStart) / 86400000, 1/24)
  *   dailyRate   = elapsedDays < 3 ? MTD / elapsedDays : cost of records in [now - 7d, now) / 7
- *   forecast    = MTD + dailyRate * max(daysInMonth - elapsedDays, 0)
- * (the clamp only matters for the extra DST hour at the very end of a fall-back month).
+ *   forecast    = MTD + dailyRate * (daysInMonth - elapsedDays)
+ * (exact frozen formula: in the extra hour at the end of a DST fall-back month elapsedDays slightly
+ * exceeds daysInMonth, so the forecast dips just below MTD; this is intentional per D-12).
  */
 export function summarize(records: UsageRecord[], opts: AnalyzeOptions): SpendSummary {
   const { now, table, budget } = opts;
   const period = monthPeriod(now);
-  const rows = priceAll(records, table);
+  // records dated after `now` (clock skew, bad data) are excluded from every figure
+  const rows = priceAll(records, table).filter((p) => p.r.ts <= now);
   const month = rows.filter((p) => p.r.ts >= period.start && p.r.ts < period.end);
 
   const mtd = month.reduce((s, p) => s + p.cost, 0);
@@ -181,7 +184,7 @@ export function summarize(records: UsageRecord[], opts: AnalyzeOptions): SpendSu
 
   const dailyRate =
     period.elapsedDays < 3 ? mtd / period.elapsedDays : sumCost(rows, now - 7 * DAY_MS, now) / 7;
-  const forecast = mtd + dailyRate * Math.max(period.daysInMonth - period.elapsedDays, 0);
+  const forecast = mtd + dailyRate * (period.daysInMonth - period.elapsedDays);
 
   const breakdown = {} as Record<SpendDimension, SpendBucket[]>;
   for (const dim of DIMENSIONS) {
@@ -211,7 +214,9 @@ export function summarize(records: UsageRecord[], opts: AnalyzeOptions): SpendSu
   }
 
   const unpriced = new Set<string>();
-  for (const p of rows) if (!p.priced) unpriced.add(keyOrNone(p.r.model));
+  for (const p of month) {
+    if (!p.priced && p.r.vendorCostUsd === undefined) unpriced.add(keyOrNone(p.r.model));
+  }
 
   return {
     generatedAt: now,
@@ -232,8 +237,8 @@ export function summarize(records: UsageRecord[], opts: AnalyzeOptions): SpendSu
 }
 
 /**
- * Compact brief. sessionBurn / projectBurn are USD over [now - 1h, now) keyed by session id / repo
- * display name (records lacking the key are omitted). Totals and alerts come from `summary`.
+ * Compact brief. sessionBurn / projectBurn are USD over [now - 1h, now) keyed by Claude Code session
+ * id (claude-code records only) / repo display name (any source; records lacking the key are omitted). Totals and alerts come from `summary`.
  */
 export function toBrief(
   records: UsageRecord[],
@@ -246,7 +251,8 @@ export function toBrief(
   for (const p of priceAll(records, opts.table)) {
     if (!(p.r.ts >= opts.now - HOUR_MS && p.r.ts < opts.now)) continue;
     const sid = p.r.sessionId;
-    if (typeof sid === 'string' && sid !== '') sessions.set(sid, (sessions.get(sid) ?? 0) + p.cost);
+    if (p.r.source === 'claude-code' && typeof sid === 'string' && sid !== '')
+      sessions.set(sid, (sessions.get(sid) ?? 0) + p.cost);
     const repo = p.r.repo;
     if (typeof repo === 'string' && repo !== '') projects.set(repo, (projects.get(repo) ?? 0) + p.cost);
   }

@@ -1,4 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { dirname, join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { AnalyzeOptions, SpendBudget, UsageRecord } from '../contracts.js';
 import { PRICE_TABLE } from '../pricing/table.js';
 import { summarize, toBrief } from './summarize.js';
@@ -306,4 +310,113 @@ describe('toBrief', () => {
       alerts: [],
     });
   });
+});
+
+describe('review regressions', () => {
+  it('excludes records dated after now from every figure', () => {
+    const now = jul(15, 12);
+    const base = [
+      rec({ id: 'p1', ts: jul(15, 11, 30), repo: 'a', tokens: { output: 200_000 } }), // $3
+      rec({ id: 'p2', ts: jul(10, 10), sessionId: 's', tokens: { output: 200_000 } }), // $3
+    ];
+    const future = [
+      rec({ id: 'f1', ts: jul(15, 13), repo: 'z', sessionId: 's', tokens: { input: 100_000_000 } }), // $300 today
+      rec({ id: 'f2', ts: jul(20), model: 'future-x', tokens: { input: 5 } }),
+    ];
+    const budget = { monthlyUsd: 10, warnAt: [0.5] };
+    const s = summarize([...base, ...future], opts(now, budget));
+    expect(s.monthToDateUsd).toBeCloseTo(6, 12);
+    expect(s.todayUsd).toBeCloseTo(3, 12);
+    expect(s.daily.reduce((a, b) => a + b.costUsd, 0)).toBeCloseTo(6, 12);
+    expect(s.breakdown.repo.map((b) => b.key)).toEqual(['(none)', 'a']);
+    expect(s.unpricedModels).toEqual([]);
+    // mtd 6 >= 5 ; 7-day rate 6/7 -> forecast 6 + 6/7 * 16.5 = 141/7 = 20.14 >= 5 and >= 10
+    expect(s.forecastMonthEndUsd).toBeCloseTo(141 / 7, 10);
+    expect(s.alerts.map((a) => a.id)).toEqual([
+      'budget-2026-07-mtd-0.5',
+      'budget-2026-07-forecast-0.5',
+      'budget-2026-07-forecast-over',
+    ]);
+    // session s = $3 of $6 (50%); the $300 future record is not counted
+    expect(s.tips.map((t) => [t.id, t.title.includes('50%')])).toEqual([['session-share-s', true]]);
+  });
+
+  it('lists unpriced models only from current-month records without a vendor cost', () => {
+    const now = jul(15, 12);
+    const s = summarize(
+      [
+        rec({ ts: jul(3), model: 'mystery-now', tokens: { input: 10 } }),
+        rec({ ts: local(5, 20), model: 'mystery-old', tokens: { input: 10 } }),
+        rec({ ts: jul(4), model: 'vendor-billed-x', vendorCostUsd: 0 }),
+      ],
+      opts(now),
+    );
+    expect(s.unpricedModels).toEqual(['mystery-now']);
+  });
+
+  it('sessionBurn keeps only claude-code sessions; projectBurn keeps every source', () => {
+    const now = jul(15, 12);
+    const r = [
+      rec({ ts: jul(15, 11, 30), sessionId: 'cc', repo: 'p1', tokens: { output: 100_000 } }), // 1.5
+      rec({
+        ts: jul(15, 11, 40),
+        source: 'codex',
+        model: 'gpt-5',
+        sessionId: 'cx',
+        repo: 'p2',
+        tokens: { output: 100_000 },
+      }), // 1.0
+    ];
+    const b = toBrief(r, summarize(r, opts(now)), { now, table: PRICE_TABLE });
+    expect(b.sessionBurn).toEqual({ cc: 1.5 });
+    expect(b.projectBurn).toEqual({ p1: 1.5, p2: 1 });
+  });
+
+  // November-end regression in America/New_York. Node only honours a runtime process.env.TZ change on
+  // the main thread; vitest runs this file in a worker thread, where the assignment is a no-op. So:
+  // set TZ, check it took effect via getTimezoneOffset, and if it did not, run this one test in a child
+  // vitest process started with TZ=America/New_York (where it takes the direct path). Either way it runs.
+  const NOV_END_TEST = 'uses the exact D-12 formula in the extra fall-back hour at November end';
+  const tzActive = () =>
+    new Date(2026, 10, 1, 0, 30).getTimezoneOffset() === 240 && // Nov 1 00:30 EDT
+    new Date(2026, 10, 30, 23, 30).getTimezoneOffset() === 300; // Nov 30 23:30 EST
+  let savedTz: string | undefined;
+  beforeAll(() => {
+    savedTz = process.env.TZ;
+    process.env.TZ = 'America/New_York';
+  });
+  afterAll(() => {
+    if (savedTz === undefined) delete process.env.TZ;
+    else process.env.TZ = savedTz;
+  });
+  it(
+    NOV_END_TEST,
+    () => {
+      if (tzActive()) {
+        // Nov 1 2026 00:00 EDT -> Nov 30 23:30 EST is 30 days + 30 min: elapsedDays = 30 + 1/48 > daysInMonth 30
+        const now = local(10, 30, 23, 30);
+        const r = [rec({ ts: local(10, 28, 12), source: 'copilot', model: 'gpt-4o', vendorCostUsd: 7 })];
+        const s = summarize(r, opts(now));
+        expect(s.monthToDateUsd).toBe(7);
+        // dailyRate = 7 / 7 = 1 ; forecast = 7 + 1 * (30 - (30 + 1/48)) = 335/48
+        expect(s.forecastMonthEndUsd).toBeCloseTo(335 / 48, 12);
+        expect(s.forecastMonthEndUsd).toBeLessThan(7);
+        return;
+      }
+      const require = createRequire(import.meta.url);
+      const vitestBin = join(dirname(require.resolve('vitest/package.json')), 'vitest.mjs');
+      const thisFile = fileURLToPath(import.meta.url);
+      const root = join(dirname(thisFile), '..', '..', '..', '..');
+      const res = spawnSync(
+        process.execPath,
+        [vitestBin, 'run', relative(root, thisFile), '-t', NOV_END_TEST, '--reporter', 'verbose'],
+        { cwd: root, env: { ...process.env, TZ: 'America/New_York' }, encoding: 'utf8', timeout: 60_000 },
+      );
+      const out = `${res.stdout ?? ''}${res.stderr ?? ''}`;
+      expect(res.status, out).toBe(0);
+      // must have actually executed (not skipped / filtered out)
+      expect(out).toMatch(/Tests\s+1 passed/);
+    },
+    90_000,
+  );
 });

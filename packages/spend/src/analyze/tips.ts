@@ -72,6 +72,8 @@ export function usd(v: number): string {
  * Savings tips
  * ------------------------------------------------------------------------------------------------ */
 
+/** Minimum elapsed days used when extrapolating month-to-date savings. */
+export const MIN_EXTRAPOLATION_DAYS = 3;
 /** Tips below this estimated monthly saving are noise and are dropped. */
 export const MIN_TIP_USD = 1;
 /** Max tips returned. */
@@ -153,19 +155,20 @@ function clip(s: string, max: number): string {
 }
 
 /**
- * Savings tips for the current local calendar month (records outside it are ignored).
- * Every estimate is month-to-date saving extrapolated to a full month:
- *   estMonthlySavingsUsd = mtdSaving * daysInMonth / max(elapsedDays, 1)
- * (at least one elapsed day so the first hours of a month cannot inflate an estimate).
+ * Savings tips for the current local calendar month up to `now` (other records are ignored,
+ * including any dated after `now`). Every estimate is month-to-date saving extrapolated:
+ *   estMonthlySavingsUsd = mtdSaving * daysInMonth / max(elapsedDays, 3)
+ * (at least three elapsed days, matching the forecast's early-month rule, so the first days of a
+ * month cannot inflate an estimate).
  * Tips that cannot be estimated from recorded data carry 0 rather than a guess.
  * Sorted by estimate desc (then id), at most 8.
  */
 export function savingsTips(records: UsageRecord[], table: PriceTable, now: number): SavingsTip[] {
   const period = monthPeriod(now);
-  const scale = period.daysInMonth / Math.max(period.elapsedDays, 1);
+  const scale = period.daysInMonth / Math.max(period.elapsedDays, MIN_EXTRAPOLATION_DAYS);
   const rows: Row[] = [];
   for (const r of dedupeRecords(records)) {
-    if (r.ts < period.start || r.ts >= period.end) continue;
+    if (r.ts < period.start || r.ts >= period.end || r.ts > now) continue;
     const priced = priceRecord(r, table);
     const price = typeof r.model === 'string' ? findModel(r.model, table) : undefined;
     const vendor = typeof r.vendorCostUsd === 'number' && Number.isFinite(r.vendorCostUsd);
@@ -260,18 +263,30 @@ export function savingsTips(records: UsageRecord[], table: PriceTable, now: numb
     );
   }
 
-  /* (c) heavy 1h cache writes */
+  /* (c) heavy 1h cache writes. The saving is priced per record with priceRecord (so long-context
+   * tiers and the aggregate-source rule apply): cost as recorded minus cost with the 1h writes
+   * re-billed as 5m writes. */
+  const ttlSaving = new Map<string, number>();
+  for (const row of rows) {
+    if (!row.tokenPriced || !row.price) continue;
+    const t = tokensOf(row.r);
+    if (!(t.cacheWrite1h > 0)) continue;
+    const as5m: UsageRecord = {
+      ...row.r,
+      tokens: { ...t, cacheWrite5m: t.cacheWrite5m + t.cacheWrite1h, cacheWrite1h: 0 },
+    };
+    const diff = row.cost - priceRecord(as5m, table).costUsd;
+    ttlSaving.set(row.price.id, (ttlSaving.get(row.price.id) ?? 0) + diff);
+  }
   for (const { price, t } of byModel.values()) {
     if (!(t.cacheWrite1h > 0) || t.cacheWrite1h <= t.cacheWrite5m) continue;
-    const premium = price.cacheWrite1h - price.cacheWrite5m;
-    if (!(premium > 0)) continue;
-    const saving = (t.cacheWrite1h * premium) / 1_000_000;
+    const saving = ttlSaving.get(price.id) ?? 0;
+    if (!(saving > 0)) continue;
     push(
       `cache-1h-${price.id}`,
       `Use 5-minute cache writes for model ${price.id}`,
       `model ${price.id}: ${Math.round(t.cacheWrite1h).toLocaleString('en-US')} tokens written with 1h TTL this month ` +
-        `(${usd((t.cacheWrite1h * price.cacheWrite1h) / 1_000_000)}). 5m TTL is cheaper when calls are frequent; ` +
-        `upper bound shown.`,
+        `(${usd(saving)} premium over 5m). 5m TTL is cheaper when calls are frequent; upper bound shown.`,
       saving,
     );
   }
@@ -292,10 +307,14 @@ export function savingsTips(records: UsageRecord[], table: PriceTable, now: numb
         const cost = g.rows.reduce((s, x) => s + x.cost, 0);
         const share = cost / total;
         if (!(share >= COPILOT_SHARE)) continue;
-        const calls = g.rows.map((x) => tokensOf(x.r));
-        // without token counts there is nothing to compare; never guess
-        if (!calls.some((c) => c.input + c.output + c.cacheRead + c.cacheWrite5m + c.cacheWrite1h > 0))
-          continue;
+        // only rows with token counts can be compared; rows without tokens contribute no saving
+        const withTokens = g.rows.filter((x) => {
+          const c = tokensOf(x.r);
+          return c.input + c.output + c.cacheRead + c.cacheWrite5m + c.cacheWrite1h > 0;
+        });
+        if (withTokens.length === 0) continue;
+        const calls = withTokens.map((x) => tokensOf(x.r));
+        const estimable = withTokens.reduce((s, x) => s + x.cost, 0);
         const alt = cheaperAlternative(
           g.price,
           (g.price.tier - 1) as ModelPrice['tier'],
@@ -309,7 +328,7 @@ export function savingsTips(records: UsageRecord[], table: PriceTable, now: numb
           `Pick a cheaper Copilot model than ${g.price.id}`,
           `model ${g.price.id}: ${usd(cost)} (${Math.round(share * 100)}% of Copilot spend) this month. ` +
             `The same tokens at ${alt.model.id} list rates cost ${Math.round(alt.ratio * 100)}% as much.`,
-          cost * (1 - alt.ratio),
+          estimable * (1 - alt.ratio),
         );
       }
     }
@@ -323,7 +342,7 @@ export function savingsTips(records: UsageRecord[], table: PriceTable, now: numb
       if (!r.sessionId) continue;
       sessions.set(r.sessionId, (sessions.get(r.sessionId) ?? 0) + cost);
     }
-    if (total > 0 && sessions.size >= 2) {
+    if (total > 0) {
       for (const [sid, cost] of sessions) {
         const share = cost / total;
         if (!(share > SESSION_SHARE)) continue;

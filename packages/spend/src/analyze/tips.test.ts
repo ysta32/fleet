@@ -86,7 +86,7 @@ describe('savingsTips', () => {
     }
   });
 
-  it('skips tier tips for high-output or too-few-call groups and for sessions with one session only', () => {
+  it('skips tier tips for high-output or too-few-call groups', () => {
     const records = [
       // median output 2000 >= 1500
       // (total prompt 800k stays under the 1M cache-ratio floor)
@@ -123,8 +123,8 @@ describe('savingsTips', () => {
     expect(tips[7]!.estMonthlySavingsUsd).toBeCloseTo(3.96, 9);
   });
 
-  it('extrapolates with at least one elapsed day', () => {
-    // now = Jul 1 06:00 -> elapsed 0.25 day, clamped to 1 -> factor 31
+  it('extrapolates with at least three elapsed days', () => {
+    // now = Jul 1 06:00 -> elapsed 0.25 day, clamped to 3 -> factor 31 / 3
     const now = new Date(2026, 6, 1, 6).getTime();
     const ts = new Date(2026, 6, 1, 1).getTime();
     const tips = savingsTips(
@@ -133,6 +133,70 @@ describe('savingsTips', () => {
       now,
     );
     expect(tips).toHaveLength(1);
-    expect(tips[0]!.estMonthlySavingsUsd).toBeCloseTo(0.75 * 31, 9);
+    expect(tips[0]!.estMonthlySavingsUsd).toBeCloseTo(7.75, 9);
+  });
+
+  it('ignores records dated after now', () => {
+    const w1 = { cacheWrite1h: 1_000_000 } as UsageRecord['tokens'];
+    const future = rec({ model: 'claude-haiku-4-5', ts: at(16, 13), tokens: w1 });
+    expect(savingsTips([future], PRICE_TABLE, NOW)).toEqual([]);
+    const past = rec({ model: 'claude-haiku-4-5', ts: at(16, 11), tokens: w1 });
+    const tips = savingsTips([future, past], PRICE_TABLE, NOW);
+    expect(tips.map((t) => t.id)).toEqual(['cache-1h-claude-haiku-4-5']);
+    // 0.75 MTD -> 1.5
+    expect(tips[0]!.estMonthlySavingsUsd).toBeCloseTo(1.5, 9);
+  });
+
+  it('estimates Copilot savings only from rows that carry tokens', () => {
+    const records = [
+      // $10 with 1M input: opus $5 vs sonnet-4-6 $3 -> ratio 0.6 -> saving 4 MTD -> 8
+      rec({
+        model: 'claude-opus-4-7',
+        source: 'copilot',
+        ts: at(8),
+        vendorCostUsd: 10,
+        tokens: { input: 1_000_000 } as UsageRecord['tokens'],
+      }),
+      // $10 without tokens: counts toward share, contributes no saving
+      rec({ model: 'claude-opus-4-7', source: 'copilot', ts: at(9), vendorCostUsd: 10 }),
+    ];
+    const tips = savingsTips(records, PRICE_TABLE, NOW);
+    expect(tips.map((t) => t.id)).toEqual(['copilot-model-claude-opus-4-7']);
+    expect(tips[0]!.estMonthlySavingsUsd).toBeCloseTo(8, 9);
+    // no token rows at all -> no tip
+    expect(savingsTips([records[1]!], PRICE_TABLE, NOW)).toEqual([]);
+  });
+
+  it('prices the 1h->5m cache saving per record, honouring long-context and aggregate rules', () => {
+    const w1 = { cacheWrite1h: 300_000 } as UsageRecord['tokens'];
+    const records = [
+      // per-call record above sonnet-4-5's 200K tier: (12 - 7.5) * 0.3 = 1.35
+      rec({ model: 'claude-sonnet-4-5', ts: at(3), tokens: w1 }),
+      // aggregate API record never uses the tier: (6 - 3.75) * 0.3 = 0.675
+      rec({ model: 'claude-sonnet-4-5', source: 'anthropic-api', ts: at(4), tokens: w1 }),
+    ];
+    const tips = savingsTips(records, PRICE_TABLE, NOW);
+    expect(tips.map((t) => t.id)).toEqual(['cache-1h-claude-sonnet-4-5']);
+    // 2.025 MTD -> 4.05
+    expect(tips[0]!.estMonthlySavingsUsd).toBeCloseTo(4.05, 9);
+  });
+
+  it('flags a dominant session even when it is the only session', () => {
+    const tips = savingsTips(
+      [
+        rec({
+          model: 'claude-haiku-4-5',
+          ts: at(3),
+          sessionId: 'only',
+          tokens: { input: 1000 } as UsageRecord['tokens'],
+        }),
+      ],
+      PRICE_TABLE,
+      NOW,
+    );
+    expect(tips).toHaveLength(1);
+    expect(tips[0]!.id).toBe('session-share-only');
+    expect(tips[0]!.title).toContain('100%');
+    expect(tips[0]!.estMonthlySavingsUsd).toBe(0);
   });
 });
