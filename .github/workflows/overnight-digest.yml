@@ -22,7 +22,6 @@ jobs:
     name: Build and publish digest
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    if: github.repository_owner == 'ysta32' || vars.OVERNIGHT_OWNER != ''
     steps:
       - name: Check for required secret
         id: gate
