@@ -20,6 +20,7 @@ import {
   type Project,
   type Session,
   type SpendBrief,
+  type SpendSummary,
 } from '@fleet/shared';
 import { dataDir as defaultDataDir } from './config.js';
 import { GithubPoller, type ExecFn } from './github/poller.js';
@@ -41,8 +42,10 @@ export interface DaemonOptions {
   tickMs?: number;
   /** orch re-read interval (default 5000) */
   orchMs?: number;
-  /** fleet-spend refresh interval (default 60000) */
+  /** fleet-spend brief refresh interval and summary cache TTL (default 30000) */
   spendMs?: number;
+  /** seam: resolves the fleet-spend module, or undefined when absent (default: optional import) */
+  loadSpend?: () => Promise<unknown>;
   /** demo generator tick (default 1000) */
   demoTickMs?: number;
   /** transcript poll interval passed to the tailer (default 1500) */
@@ -67,7 +70,8 @@ export interface Daemon {
 const NOTIFY_MAX_AGE_MS = 5 * 60_000;
 /** lines buffered per transcript while waiting for the first `cwd` */
 const MAX_BUFFERED_LINES = 2000;
-const SPEND_SPECIFIERS = ['@fleet/spend', 'fleet-spend'];
+/** fleet-spend cache / refresh cadence */
+const SPEND_TTL_MS = 30_000;
 
 function homeDir(): string {
   return process.env.HOME || osHomedir();
@@ -98,41 +102,56 @@ class View extends EventEmitter implements StoreLike {
   }
 }
 
-interface SpendModule {
-  loadSpendBrief: () => Promise<SpendBrief> | SpendBrief;
-  loadSpendSummary?: () => Promise<unknown> | unknown;
+interface SpendLoadOpts {
+  now?: number;
+  configPath?: string;
 }
 
-async function loadSpendModule(log: DaemonOptions['log'] & {}): Promise<SpendModule | undefined> {
-  for (const spec of SPEND_SPECIFIERS) {
-    let mod: Record<string, unknown>;
-    try {
-      mod = (await import(spec)) as Record<string, unknown>;
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException | undefined)?.code;
-      const msg = err instanceof Error ? err.message : '';
-      // "not installed" (node: ERR_MODULE_NOT_FOUND; vite: "Failed to load url") is silent; a broken install is logged
-      const absent =
-        msg.includes(spec) &&
-        (code === 'ERR_MODULE_NOT_FOUND' || code === 'MODULE_NOT_FOUND' || /failed to load url/i.test(msg));
-      if (!absent) {
-        log(`fleet-spend (${spec}) failed to load`, err);
-      }
-      continue;
-    }
-    if (typeof mod.loadSpendBrief !== 'function') {
-      log(`fleet-spend (${spec}) has no loadSpendBrief(); spend disabled`);
-      continue;
-    }
-    return {
-      loadSpendBrief: mod.loadSpendBrief as SpendModule['loadSpendBrief'],
-      loadSpendSummary:
-        typeof mod.loadSpendSummary === 'function'
-          ? (mod.loadSpendSummary as SpendModule['loadSpendSummary'])
-          : undefined,
-    };
+/** the surface of the optional `fleet-spend` package the daemon uses */
+export interface SpendModule {
+  loadSpendSummary: (opts?: SpendLoadOpts) => Promise<SpendSummary>;
+  loadSpendBrief: (opts?: SpendLoadOpts) => Promise<SpendBrief>;
+}
+
+const SPEND_SPECIFIER = 'fleet-spend';
+
+/** default loader: optional dynamic import; resolves undefined when the package is not installed */
+async function importFleetSpend(): Promise<unknown> {
+  try {
+    return await import(SPEND_SPECIFIER);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException | undefined)?.code;
+    const msg = err instanceof Error ? err.message : '';
+    // "not installed" (node: ERR_MODULE_NOT_FOUND; vite: "Failed to load url") is silent; a broken install throws
+    const absent =
+      msg.includes(SPEND_SPECIFIER) &&
+      (code === 'ERR_MODULE_NOT_FOUND' || code === 'MODULE_NOT_FOUND' || /failed to load url/i.test(msg));
+    if (absent) return undefined;
+    throw err;
   }
-  return undefined;
+}
+
+async function loadSpendModule(
+  loader: () => Promise<unknown>,
+  log: (msg: string, err?: unknown) => void,
+): Promise<SpendModule | undefined> {
+  let mod: unknown;
+  try {
+    mod = await loader();
+  } catch (err) {
+    log('fleet-spend failed to load; spend disabled', err);
+    return undefined;
+  }
+  if (mod === undefined || mod === null) return undefined;
+  const m = mod as Record<string, unknown>;
+  if (typeof m.loadSpendSummary !== 'function' || typeof m.loadSpendBrief !== 'function') {
+    log('fleet-spend lacks loadSpendSummary/loadSpendBrief; spend disabled');
+    return undefined;
+  }
+  return {
+    loadSpendSummary: m.loadSpendSummary as SpendModule['loadSpendSummary'],
+    loadSpendBrief: m.loadSpendBrief as SpendModule['loadSpendBrief'],
+  };
 }
 
 function listen(server: http.Server, port: number, host: string): Promise<number> {
@@ -189,12 +208,11 @@ async function runDemo(cfg: FleetConfig, opts: DaemonOptions): Promise<Daemon> {
   }, opts.demoTickMs ?? 1000);
   timer.unref();
 
-  // no digest default (~/.overnight), no spend, no history file, no notifications: synthetic only
+  // no digest (even a configured one is real content), no spend, no history file, no notifications
   const server = createServer({
     store: view,
     config: cfg,
     webDir: opts.webDir ?? defaultWebDir(),
-    digestDir: cfg.digestDir,
   });
   const host = cfg.lan ? '0.0.0.0' : '127.0.0.1';
   let port: number;
@@ -227,6 +245,8 @@ interface FileEntry {
   parser?: SessionParser;
   projectId?: string;
   buffer: string[];
+  /** set after the first ingest (the backlog replay) */
+  ingested?: boolean;
 }
 
 /** first absolute `cwd` in a batch of transcript lines (only that field is read) */
@@ -271,8 +291,10 @@ async function runReal(cfg: FleetConfig, opts: DaemonOptions): Promise<Daemon> {
 
   /* notifications: every source's events go through the store */
   const notifier = new Notifier(cfg.notify, { log, ...opts.notifierDeps });
+  /** true while emitting events derived from a transcript's first (backlog) ingest */
+  let replaying = false;
   store.on('event', (e: FleetEvent) => {
-    if (closed || !alertKindOf(e) || Date.now() - e.ts > NOTIFY_MAX_AGE_MS) return;
+    if (closed || replaying || !alertKindOf(e) || Date.now() - e.ts > NOTIFY_MAX_AGE_MS) return;
     const alert = notifier.handle(e, store.snapshot());
     if (alert) store.addAlert(alert);
   });
@@ -367,8 +389,15 @@ async function runReal(cfg: FleetConfig, opts: DaemonOptions): Promise<Daemon> {
     return s;
   };
 
-  const emitAll = (events: FleetEvent[], projectId: string | undefined): void => {
-    for (const e of events) store.emitEvent(projectId && e.projectId !== projectId ? { ...e, projectId } : e);
+  const emitAll = (events: FleetEvent[], projectId: string | undefined, replay = false): void => {
+    // emit is synchronous, so the flag covers exactly these events
+    replaying = replay;
+    try {
+      for (const e of events)
+        store.emitEvent(projectId && e.projectId !== projectId ? { ...e, projectId } : e);
+    } finally {
+      replaying = false;
+    }
   };
 
   const sessionIdOf = (f: TranscriptFile): string =>
@@ -394,9 +423,13 @@ async function runReal(cfg: FleetConfig, opts: DaemonOptions): Promise<Daemon> {
       entry.buffer = [];
     }
     const now = Date.now();
+    // the first ingest replays the transcript backlog (e.g. a turn that ended before a restart): it
+    // records state and events but must not re-notify
+    const replay = !entry.ingested;
+    entry.ingested = true;
     const events = entry.parser!.ingest(batch, now);
     syncSession(sessionIdOf(file), now);
-    emitAll(events, entry.projectId);
+    emitAll(events, entry.projectId, replay);
   };
 
   const tailer = new Tailer({
@@ -426,6 +459,14 @@ async function runReal(cfg: FleetConfig, opts: DaemonOptions): Promise<Daemon> {
   const reconcileRestored = (): void => {
     if (closed || !restored) return;
     const snap = store.snapshot();
+    // restored projects not seen in transcripts still get one orch read, so stale restored orch state clears
+    for (const p of snap.projects) {
+      if (projects.has(p.id) || !p.path || !path.isAbsolute(p.path)) continue;
+      const rest: Project = { ...p };
+      delete rest.orch;
+      projects.set(p.id, rest);
+      projectJson.set(p.id, JSON.stringify(rest));
+    }
     const live = new Set([...files.values()].filter((f) => f.parser).map((f) => sessionIdOf(f.file)));
     for (const s of snap.sessions) {
       if (live.has(s.id) || s.status === 'ended') continue;
@@ -459,7 +500,8 @@ async function runReal(cfg: FleetConfig, opts: DaemonOptions): Promise<Daemon> {
         const prev = orchPrev.get(p.id);
         orchPrev.set(p.id, run);
         if (!run) {
-          if (prev) {
+          // a first read also clears orch state restored from history.json (.orch removed while stopped)
+          if (prev || (!seen && restored)) {
             orchKeys.delete(p.id);
             store.setOrch(p.id, undefined);
           }
@@ -516,14 +558,35 @@ async function runReal(cfg: FleetConfig, opts: DaemonOptions): Promise<Daemon> {
     }
   };
 
-  /* optional fleet-spend */
-  const spendMod = await loadSpendModule(log);
-  let spendBusy = false;
+  /* optional fleet-spend: each scan reads usage logs (~1s), so scans are serialized, one at a time */
+  const spendMod = await loadSpendModule(opts.loadSpend ?? importFleetSpend, log);
+  const spendTtl = opts.spendMs ?? SPEND_TTL_MS;
+  let spendQueue: Promise<unknown> = Promise.resolve();
+  const exclusive = <T>(fn: () => Promise<T>): Promise<T> => {
+    const run = spendQueue.then(fn, fn);
+    spendQueue = run.catch(() => undefined);
+    return run;
+  };
+  let summaryCache: { at: number; value: SpendSummary } | undefined;
+  let summaryInflight: Promise<SpendSummary> | undefined;
+  const spendSummary = (): Promise<SpendSummary> => {
+    if (summaryCache && Date.now() - summaryCache.at < spendTtl) return Promise.resolve(summaryCache.value);
+    summaryInflight ??= exclusive(() => spendMod!.loadSpendSummary({ now: Date.now() }))
+      .then((value) => {
+        summaryCache = { at: Date.now(), value };
+        return value;
+      })
+      .finally(() => {
+        summaryInflight = undefined;
+      });
+    return summaryInflight;
+  };
+  let briefInflight = false;
   const pollSpend = async (): Promise<void> => {
-    if (!spendMod || spendBusy || closed) return;
-    spendBusy = true;
+    if (!spendMod || briefInflight || closed) return;
+    briefInflight = true;
     try {
-      const brief = await spendMod.loadSpendBrief();
+      const brief = await exclusive(() => spendMod.loadSpendBrief({ now: Date.now() }));
       if (closed) return;
       if (brief && typeof brief === 'object') {
         spend = brief;
@@ -532,7 +595,7 @@ async function runReal(cfg: FleetConfig, opts: DaemonOptions): Promise<Daemon> {
     } catch (err) {
       log('fleet-spend refresh failed', err);
     } finally {
-      spendBusy = false;
+      briefInflight = false;
     }
   };
 
@@ -547,8 +610,7 @@ async function runReal(cfg: FleetConfig, opts: DaemonOptions): Promise<Daemon> {
     ...(spendMod
       ? {
           extraGet: {
-            '/api/spend': async () =>
-              spendMod.loadSpendSummary ? spendMod.loadSpendSummary() : (spend ?? spendMod.loadSpendBrief()),
+            '/api/spend': () => spendSummary(),
           },
         }
       : {}),
@@ -568,7 +630,7 @@ async function runReal(cfg: FleetConfig, opts: DaemonOptions): Promise<Daemon> {
   every(opts.orchMs ?? 5000, () => void pollOrch());
   if (poller) every(Math.max(5000, cfg.githubPollMs), () => void pollGithub());
   if (spendMod) {
-    every(opts.spendMs ?? 60_000, () => void pollSpend());
+    every(spendTtl, () => void pollSpend());
     void pollSpend();
   }
 

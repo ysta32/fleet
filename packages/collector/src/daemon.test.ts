@@ -6,6 +6,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { projectIdFromPath, type FleetConfig, type FleetEvent, type FleetSnapshot } from '@fleet/shared';
 import { runDaemon, type Daemon } from './daemon.js';
+import { FleetStore } from './store.js';
 
 /* Synthetic transcripts only; HOME is a temp dir for the whole file. */
 
@@ -86,6 +87,17 @@ async function waitFor<T>(fn: () => Promise<T | undefined> | T | undefined, ms =
     if (Date.now() > end) throw new Error('waitFor timed out');
     await new Promise((r) => setTimeout(r, 50));
   }
+}
+
+function getStatus(port: number, p: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    http
+      .get({ host: '127.0.0.1', port, path: p }, (res) => {
+        res.resume();
+        resolve(res.statusCode ?? 0);
+      })
+      .on('error', reject);
+  });
 }
 
 /** SSE client collecting `fleet` events */
@@ -300,6 +312,159 @@ describe('runDaemon (real sources, synthetic data)', () => {
   });
 });
 
+describe('runDaemon restart from history', () => {
+  it('does not re-notify a backlog waiting turn and clears stale restored orch state', async () => {
+    const root = path.join(tmp, 'restart');
+    const projA = path.join(root, 'proj-a');
+    const projB = path.join(root, 'proj-b');
+    const claude = path.join(root, 'claude');
+    const dataDir = path.join(root, 'data');
+    await mkdir(projA, { recursive: true });
+    await mkdir(projB, { recursive: true });
+    const idA = projectIdFromPath(projA);
+    const idB = projectIdFromPath(projB);
+    const now = Date.now();
+    const orch = (projectId: string) => ({
+      projectId,
+      phase: 'running' as const,
+      statusText: '',
+      handoffText: '',
+      tasks: [{ id: '01', slug: 'stale', depends: [], state: 'running' as const }],
+      inflight: [],
+      worktrees: [],
+      blocked: [],
+      updatedAt: now - 3600_000,
+    });
+    // previous run: both projects had .orch; it has since been deleted
+    const prev = new FleetStore({ dataDir });
+    for (const [id, p] of [
+      [idA, projA],
+      [idB, projB],
+    ] as const) {
+      prev.upsertProject({
+        id,
+        name: path.basename(p),
+        path: p,
+        lastActivity: now - 3600_000,
+        orch: orch(id),
+      });
+    }
+    prev.saveSync(dataDir);
+    await prev.close();
+
+    // session A ended its turn 10 minutes ago (already notified by the previous run)
+    const dir = path.join(claude, 'synthetic-a');
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      path.join(dir, 'sess-old.jsonl'),
+      [
+        userLine(now - 601_000, projA),
+        assistantLine(now - 600_000, projA, 'msg-old', [{ type: 'text', text: 'done' }], 'end_turn'),
+      ].join('\n') + '\n',
+    );
+
+    const execCalls: string[][] = [];
+    const d = await runDaemon(
+      config({
+        claudeProjectsDir: claude,
+        notify: { macos: true, ntfyUrl: '', kinds: ['session.waiting', 'army.done', 'army.blocked'] },
+      }),
+      {
+        dataDir,
+        tickMs: 100,
+        orchMs: 100,
+        tailPollMs: 100,
+        notifierDeps: { platform: 'darwin', exec: (_c, args) => void execCalls.push(args) },
+      },
+    );
+    try {
+      const snap = await waitFor(async () => {
+        const s = await getJson<FleetSnapshot>(d.port, '/api/snapshot');
+        const a = s.projects.find((p) => p.id === idA);
+        const b = s.projects.find((p) => p.id === idB);
+        const sess = s.sessions.find((x) => x.id === 'sess-old');
+        return a && b && !a.orch && !b.orch && sess?.status === 'waiting' ? s : undefined;
+      });
+      expect(snap.projects.find((p) => p.id === idA)!.orch).toBeUndefined();
+      expect(snap.projects.find((p) => p.id === idB)!.orch).toBeUndefined();
+      // let several clock ticks pass: the backlog turn must stay silent
+      await new Promise((r) => setTimeout(r, 400));
+      const later = await getJson<FleetSnapshot>(d.port, '/api/snapshot');
+      expect(later.alerts.filter((a) => a.kind === 'session.waiting')).toEqual([]);
+      expect(execCalls).toEqual([]);
+    } finally {
+      await d.close();
+    }
+  });
+});
+
+describe('runDaemon with fleet-spend (fake module via the loader seam)', () => {
+  it('caches /api/spend for the TTL, runs one scan at a time and puts the brief in the snapshot', async () => {
+    const calls = { summary: 0, brief: 0, active: 0, maxActive: 0 };
+    const scan = async <T>(kind: 'summary' | 'brief', value: T): Promise<T> => {
+      calls[kind]++;
+      calls.active++;
+      calls.maxActive = Math.max(calls.maxActive, calls.active);
+      await new Promise((r) => setTimeout(r, 80));
+      calls.active--;
+      return value;
+    };
+    const brief = {
+      generatedAt: 1,
+      monthToDateUsd: 12.5,
+      forecastMonthEndUsd: 40,
+      budgetUsd: null,
+      burnUsdPerHour: 1.25,
+      sessionBurn: {},
+      projectBurn: {},
+      alerts: [],
+    };
+    const summary = { synthetic: 'summary' };
+    const fake = {
+      loadSpendSummary: () => scan('summary', summary),
+      loadSpendBrief: () => scan('brief', brief),
+      dispatchAlerts: () => {
+        throw new Error('daemon must not dispatch spend alerts');
+      },
+    };
+    const root = path.join(tmp, 'spend');
+    const d = await runDaemon(config({ claudeProjectsDir: path.join(root, 'claude') }), {
+      dataDir: path.join(root, 'data'),
+      loadSpend: async () => fake,
+      spendMs: 30_000,
+    });
+    try {
+      const results = await Promise.all([1, 2, 3].map(() => getJson<unknown>(d.port, '/api/spend')));
+      expect(results).toEqual([summary, summary, summary]);
+      expect(await getJson<unknown>(d.port, '/api/spend')).toEqual(summary);
+      expect(calls.summary).toBe(1);
+      const snap = await waitFor(async () => {
+        const s = await getJson<FleetSnapshot>(d.port, '/api/snapshot');
+        return s.spend ? s : undefined;
+      });
+      expect(snap.spend).toEqual(brief);
+      expect(calls.brief).toBe(1);
+      expect(calls.maxActive).toBe(1);
+    } finally {
+      await d.close();
+    }
+  });
+
+  it('serves no spend route when the loader reports the package absent', async () => {
+    const root = path.join(tmp, 'spend-absent');
+    const d = await runDaemon(config({ claudeProjectsDir: path.join(root, 'claude') }), {
+      dataDir: path.join(root, 'data'),
+      loadSpend: async () => undefined,
+    });
+    try {
+      expect(await getStatus(d.port, '/api/spend')).toBe(404);
+      expect((await getJson<FleetSnapshot>(d.port, '/api/snapshot')).spend).toBeUndefined();
+    } finally {
+      await d.close();
+    }
+  });
+});
+
 describe('runDaemon demo mode', () => {
   it('serves synthetic data and touches no HOME or transcript paths', async () => {
     const demoHome = path.join(tmp, 'demo-home');
@@ -310,7 +475,21 @@ describe('runDaemon demo mode', () => {
     await mkdir(dir, { recursive: true });
     await writeFile(path.join(dir, 'sess-real.jsonl'), userLine(Date.now(), path.join(tmp, 'proj')) + '\n');
     try {
-      const d = await runDaemon(config({ claudeProjectsDir: claude }), { demo: true, demoTickMs: 50 });
+      let spendLoads = 0;
+      const digestDir = path.join(tmp, 'demo-digest');
+      await mkdir(digestDir);
+      await writeFile(
+        path.join(digestDir, 'latest.json'),
+        JSON.stringify({ synthetic: 'real-digest-marker' }),
+      );
+      const d = await runDaemon(config({ claudeProjectsDir: claude, digestDir }), {
+        demo: true,
+        demoTickMs: 50,
+        loadSpend: () => {
+          spendLoads++;
+          return Promise.resolve(undefined);
+        },
+      });
       try {
         const snap = await getJson<FleetSnapshot>(d.port, '/api/snapshot');
         expect(snap.demo).toBe(true);
@@ -318,6 +497,8 @@ describe('runDaemon demo mode', () => {
         expect(snap.projects.every((p) => p.path.startsWith('/synthetic/'))).toBe(true);
         expect(snap.sessions.some((s) => s.id === 'sess-real')).toBe(false);
         expect(snap.spend).toBeUndefined();
+        // a configured digest dir holds real content: demo never serves it
+        expect(await getStatus(d.port, '/api/digest/latest')).toBe(404);
         const h = await getJson<{ ok: boolean }>(d.port, '/api/health');
         expect(h.ok).toBe(true);
         await new Promise((r) => setTimeout(r, 200));
@@ -325,6 +506,7 @@ describe('runDaemon demo mode', () => {
         await d.close();
       }
       expect(d.server.listening).toBe(false);
+      expect(spendLoads).toBe(0);
       expect(await readdir(demoHome, { recursive: true })).toEqual([]);
       expect(await readdir(dir)).toEqual(['sess-real.jsonl']);
     } finally {
