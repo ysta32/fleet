@@ -1,1 +1,2 @@
-export { FleetScene, Dashboard } from './Placeholders';
+export { default as FleetScene } from '../viz/FleetScene';
+export { default as Dashboard } from '../dashboard/Dashboard';
