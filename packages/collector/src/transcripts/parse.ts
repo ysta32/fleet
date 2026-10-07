@@ -47,6 +47,7 @@ const TEST_RUNNERS = new Set([
 const MODEL_ALIASES = new Set<ModelFamily>(['opus', 'sonnet', 'haiku', 'fable']);
 const WORKTREE_RE = /\/\.orch\/wt\/([^/\\]+)/;
 const SAFE_ID_RE = /^[A-Za-z0-9._-]{1,60}$/;
+const SAFE_TAG_RE = /^v?[0-9A-Za-z._-]{1,32}$/;
 
 type Json = Record<string, unknown>;
 
@@ -437,34 +438,185 @@ export class SessionParser {
       events.push(this.event('agent.spawn', ts, 'info', `Spawn ${role}`, { data }));
       review = role === 'critic' || (subType !== undefined && /critic|review/i.test(subType));
     } else if (name === 'Bash' && typeof fields.command === 'string') {
-      const cmd = fields.command;
-      if (target && TEST_RUNNERS.has(target) && /test/i.test(cmd)) {
-        events.push(this.event('test.run', ts, 'info', `Tests (${target})`, { data: { runner: target } }));
-      }
-      const prMerge = /(?:^|[\s;&|(])gh\s+pr\s+merge(?:\s+#?(\d+))?(?=[\s;&|)]|$)/.exec(cmd);
-      if (prMerge) {
-        const pr = prMerge[1] ? Number(prMerge[1]) : undefined;
-        events.push(
-          this.event('merge', ts, 'success', pr !== undefined ? `PR #${pr} merged` : 'PR merged', {
-            data: pr !== undefined ? { pr } : undefined,
-          }),
-        );
-      } else if (/(?:^|[\s;&|(])git\s+(?:-C\s+\S+\s+)?merge(?=[\s;&|)]|$)/.test(cmd)) {
-        events.push(this.event('merge', ts, 'success', 'Branch merged'));
-      }
-      const release = /(?:^|[\s;&|(])gh\s+release\s+create(?:\s+([^\s;&|)]+))?/.exec(cmd);
-      if (release) {
-        const tag = safeId(release[1]);
-        events.push(
-          this.event('release', ts, 'success', tag ? `Release ${tag}` : 'Release created', {
-            data: tag ? { tag } : undefined,
-          }),
-        );
-      }
-      const gpt = /(?:^|[\s;&|(])gpt\s+code\b([^;&|\n]*)/.exec(cmd);
-      review = gpt !== null && /(?:^|\s)ro(?=\s|$)/.test(gpt[1] ?? '');
+      review = this.onBash(fields.command, ts, events);
     }
 
     this.moveTo(review ? { kind: 'review', projectId: this.file.projectId } : this.baseLocation, ts, events);
   }
+
+  /**
+   * Detect test/merge/release/review from the *executed* simple commands only (quoted text,
+   * comments and heredoc bodies never match). Returns true when this is a review run.
+   */
+  private onBash(cmd: string, ts: number, events: FleetEvent[]): boolean {
+    let test: string | undefined;
+    let merge: { pr?: number } | undefined;
+    let release: { tag?: string } | undefined;
+    let review = false;
+    for (const segment of commandSegments(cmd)) {
+      const words = leadingCommand(segment);
+      const head = words[0];
+      if (head === undefined) continue;
+      const runner = projectNameFromPath(head);
+      if (!test && TEST_RUNNERS.has(runner) && words.slice(1).some((w) => /test/i.test(w))) test = runner;
+      if (head === 'gh' && words[1] === 'pr' && words[2] === 'merge') {
+        const m = /^#?(\d{1,7})$/.exec(firstArg(words, 3) ?? '');
+        merge ??= m ? { pr: Number(m[1]) } : {};
+      } else if (head === 'git') {
+        const sub = words[1] === '-C' ? words[3] : words[1];
+        if (sub === 'merge') merge ??= {};
+      }
+      if (head === 'gh' && words[1] === 'release' && words[2] === 'create') {
+        const tag = firstArg(words, 3);
+        release ??= tag !== undefined && SAFE_TAG_RE.test(tag) ? { tag } : {};
+      }
+      if (head === 'gpt' && words[1] === 'code' && words.slice(2).includes('ro')) review = true;
+    }
+    if (test) events.push(this.event('test.run', ts, 'info', `Tests (${test})`, { data: { runner: test } }));
+    if (merge) {
+      const pr = merge.pr;
+      events.push(
+        this.event('merge', ts, 'success', pr !== undefined ? `PR #${pr} merged` : 'Branch merged', {
+          data: pr !== undefined ? { pr } : undefined,
+        }),
+      );
+    }
+    if (release) {
+      const tag = release.tag;
+      events.push(
+        this.event('release', ts, 'success', tag ? `Release ${tag}` : 'Release created', {
+          data: tag ? { tag } : undefined,
+        }),
+      );
+    }
+    return review;
+  }
+}
+
+/** Strip leading `VAR=value` assignments from a simple command. */
+function leadingCommand(words: string[]): string[] {
+  let i = 0;
+  while (i < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i] ?? '')) i++;
+  return words.slice(i);
+}
+
+/** First non-flag word at or after index `from`. */
+function firstArg(words: string[], from: number): string | undefined {
+  for (let i = from; i < words.length; i++) {
+    const w = words[i];
+    if (w !== undefined && !w.startsWith('-')) return w;
+  }
+  return undefined;
+}
+
+/**
+ * Best-effort split of a shell command into executed simple commands (word lists).
+ * Quoted text stays inside a single word; `;`, `&`, `|`, `(`, `)`, backticks and newlines
+ * separate commands; `#` comments and heredoc bodies are dropped.
+ */
+export function commandSegments(cmd: string): string[][] {
+  const segments: string[][] = [];
+  const heredocs: { delim: string; strip: boolean }[] = [];
+  let words: string[] = [];
+  let word = '';
+  let inWord = false;
+  const endWord = (): void => {
+    if (inWord) words.push(word);
+    word = '';
+    inWord = false;
+  };
+  const endSegment = (): void => {
+    endWord();
+    if (words.length) segments.push(words);
+    words = [];
+  };
+  const n = cmd.length;
+  let i = 0;
+  while (i < n) {
+    const c = cmd[i] as string;
+    if (c === '\n') {
+      endSegment();
+      i++;
+      for (const h of heredocs) {
+        while (i < n) {
+          const nl = cmd.indexOf('\n', i);
+          const end = nl < 0 ? n : nl;
+          const body = cmd.slice(i, end);
+          i = end + 1;
+          if ((h.strip ? body.replace(/^\t+/, '') : body) === h.delim) break;
+        }
+      }
+      heredocs.length = 0;
+      continue;
+    }
+    if (c === "'") {
+      const close = cmd.indexOf("'", i + 1);
+      const end = close < 0 ? n : close;
+      word += cmd.slice(i + 1, end);
+      inWord = true;
+      i = end + 1;
+      continue;
+    }
+    if (c === '"') {
+      inWord = true;
+      i++;
+      while (i < n && cmd[i] !== '"') {
+        if (cmd[i] === '\\' && i + 1 < n) {
+          word += cmd[i + 1];
+          i += 2;
+        } else {
+          word += cmd[i];
+          i++;
+        }
+      }
+      i++;
+      continue;
+    }
+    if (c === '\\') {
+      if (i + 1 < n && cmd[i + 1] !== '\n') {
+        word += cmd[i + 1];
+        inWord = true;
+      }
+      i += 2;
+      continue;
+    }
+    if (c === '#' && !inWord) {
+      const nl = cmd.indexOf('\n', i);
+      i = nl < 0 ? n : nl;
+      continue;
+    }
+    if (c === '<' && cmd[i + 1] === '<' && cmd[i + 2] !== '<') {
+      endWord();
+      i += 2;
+      let strip = false;
+      if (cmd[i] === '-') {
+        strip = true;
+        i++;
+      }
+      while (cmd[i] === ' ' || cmd[i] === '\t') i++;
+      let delim = '';
+      while (i < n && !/[\s;&|<>()]/.test(cmd[i] as string)) {
+        const ch = cmd[i] as string;
+        if (ch !== '"' && ch !== "'" && ch !== '\\') delim += ch;
+        i++;
+      }
+      if (delim) heredocs.push({ delim, strip });
+      continue;
+    }
+    if (c === ';' || c === '&' || c === '|' || c === '(' || c === ')' || c === '`') {
+      endSegment();
+      i++;
+      continue;
+    }
+    if (c === ' ' || c === '\t' || c === '\r') {
+      endWord();
+      i++;
+      continue;
+    }
+    word += c;
+    inWord = true;
+    i++;
+  }
+  endSegment();
+  return segments;
 }

@@ -320,6 +320,51 @@ describe('SessionParser (lead transcript)', () => {
   });
 });
 
+describe('Bash detection privacy (only executed commands match)', () => {
+  function bashEvents(command: string): FleetEvent[] {
+    const p = new SessionParser(leadFile);
+    return p
+      .ingest([assistant(T0, 'm', [tool('t', 'Bash', { command })])], T0)
+      .filter((e) => e.kind !== 'session.start' && e.kind !== 'agent.tool');
+  }
+
+  it.each([
+    ['double-quoted', `printf %s "example gh release create ${SECRET} text"`],
+    [
+      'single-quoted',
+      `echo 'gh release create ${SECRET}; gh pr merge 3; git merge x; npm test; gpt code a ro'`,
+    ],
+    ['echo args', `echo gh release create ${SECRET} && echo git merge ${SECRET}`],
+    ['comment', `ls # gh release create ${SECRET}\n# git merge ${SECRET}\n# npm test`],
+    [
+      'heredoc',
+      `cat <<'EOF' > notes.md\ngh release create ${SECRET}\ngh pr merge 9\ngit merge main\nnpm test\nEOF\nls`,
+    ],
+    ['herestring', `cat <<< "gh release create ${SECRET}"`],
+  ])('%s text triggers nothing', (_name, command) => {
+    const events = bashEvents(command);
+    expect(events).toEqual([]);
+    expect(JSON.stringify(events)).not.toContain(SECRET);
+  });
+
+  it('matches real commands in later segments and keeps safe tags only', () => {
+    expect(bashEvents(`cd x && GH=1 gh release create v2.0.0 --notes "${SECRET}"`)).toMatchObject([
+      { kind: 'release', label: 'Release v2.0.0', data: { tag: 'v2.0.0' } },
+    ]);
+    const unsafe = bashEvents(`gh release create "${SECRET} with spaces/and:stuff"`);
+    expect(unsafe).toMatchObject([{ kind: 'release', label: 'Release created' }]);
+    expect(unsafe[0]?.data).toBeUndefined();
+    expect(JSON.stringify(unsafe)).not.toContain(SECRET);
+    expect(bashEvents('git -C ../repo merge --no-ff feat')).toMatchObject([
+      { kind: 'merge', label: 'Branch merged' },
+    ]);
+    expect(bashEvents('gh pr merge --squash 42')).toMatchObject([{ kind: 'merge', data: { pr: 42 } }]);
+    expect(bashEvents('cat <<EOF\nhello\nEOF\nnpm test')).toMatchObject([
+      { kind: 'test.run', data: { runner: 'npm' } },
+    ]);
+  });
+});
+
 describe('SessionParser (subagent transcript)', () => {
   const lines = [
     user(T0, `${SECRET} subagent prompt`, { isSidechain: true }),
