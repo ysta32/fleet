@@ -1,22 +1,31 @@
-/* Fleet app-shell service worker. Caches the shell (HTML, hashed assets, icons) only.
+/* Fleet app-shell service worker. Caches the shell (HTML, built JS/CSS, icons) only.
  * Never caches /api: live fleet data, history and tokens always go to the network. */
-const VERSION = 'fleet-shell-v1';
+importScripts('/sw-policy.js');
+const policy = self.fleetSwPolicy;
+const VERSION = 'fleet-shell-v2';
 const SHELL = [
   '/',
   '/manifest.webmanifest',
   '/favicon.svg',
   '/theme-init.js',
+  '/sw-policy.js',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
 ];
 
+async function precache() {
+  const cache = await caches.open(VERSION);
+  await cache.addAll(SHELL.filter((path) => path !== '/'));
+  // Read the built index.html to find the hashed JS/CSS it boots from, so offline startup works.
+  const response = await fetch('/', { cache: 'no-store', credentials: 'same-origin' });
+  if (!policy.isShellNavigation('navigate', response.status, response.headers.get('content-type'))) return;
+  const html = await response.clone().text();
+  await cache.put('/', response);
+  await cache.addAll(policy.shellAssets(html));
+}
+
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches
-      .open(VERSION)
-      .then((cache) => cache.addAll(SHELL))
-      .then(() => self.skipWaiting()),
-  );
+  event.waitUntil(precache().then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (event) => {
@@ -30,18 +39,15 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const request = event.request;
-  if (request.method !== 'GET') return;
   const url = new URL(request.url);
-  if (url.origin !== self.location.origin) return;
-  if (url.pathname === '/api' || url.pathname.startsWith('/api/')) return; // network only, never cached
-  if (url.searchParams.has('token')) return; // never persist a URL carrying a token
+  if (!policy.shouldHandle(request.method, url, self.location.origin)) return; // /api and token URLs: network only
 
   if (request.mode === 'navigate') {
-    // Network first so a fresh deploy wins; fall back to the cached shell offline.
+    // Network first so a fresh deploy wins; only real HTML documents replace the cached shell.
     event.respondWith(
       fetch(request)
         .then((response) => {
-          if (response.ok) {
+          if (policy.isShellNavigation(request.mode, response.status, response.headers.get('content-type'))) {
             const copy = response.clone();
             void caches.open(VERSION).then((cache) => cache.put('/', copy));
           }
@@ -52,11 +58,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  if (
-    url.pathname.startsWith('/assets/') ||
-    url.pathname.startsWith('/icons/') ||
-    SHELL.includes(url.pathname)
-  ) {
+  if (policy.isCacheableAsset(url.pathname, SHELL)) {
     // Hashed assets are immutable: cache first.
     event.respondWith(
       caches.match(request).then(

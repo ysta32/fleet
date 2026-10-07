@@ -799,3 +799,7 @@
     gap: var(--fl-space-6);
   }
 }
+.alert-text > small {
+  display: block;
+  margin-top: var(--fl-space-1);
+}

@@ -241,6 +241,9 @@ export default function Dashboard({
     .filter((alert) => !alert.cleared && !dismissed.has(alert.id))
     .sort((a, b) => b.at - a.at);
   const urgent = needsYou(snapshot, dismissed);
+  const waiting = snapshot.sessions
+    .filter((session) => session.status === 'waiting')
+    .sort((a, b) => a.lastActivity - b.lastActivity);
   const blocked = armies.filter(
     (project) =>
       project.orch!.phase === 'blocked' ||
@@ -707,6 +710,36 @@ export default function Dashboard({
               ))}
             </section>
           )}
+          {waiting.length > 0 && (
+            <section className="block">
+              <h3 className="block-title">
+                Waiting on you <span className="num count">{waiting.length}</span>
+              </h3>
+              <ul className="dashboard-list rows">
+                {waiting.map((session) => (
+                  <li key={session.id} className="alert-row waiting-row" data-selected={selected('session', session.id)}>
+                    <Icon name="waiting" />
+                    <div className="alert-text">
+                      <button
+                        type="button"
+                        className="dashboard-link"
+                        aria-pressed={selected('session', session.id)}
+                        onClick={() => onSelect({ kind: 'session', id: session.id })}
+                      >
+                        {session.title ?? session.id}
+                      </button>
+                      <small className="row-meta">
+                        {projectButton(session.projectId)} · <span className="num">{session.model}</span> · waiting{' '}
+                        <time dateTime={new Date(session.lastActivity).toISOString()}>
+                          {relativeTime(session.lastActivity, now)}
+                        </time>
+                      </small>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
           <section className="block">
             <h3 className="block-title">
               Active <span className="num count">{alerts.length}</span>
@@ -735,7 +768,7 @@ export default function Dashboard({
                 </li>
               ))}
             </ul>
-            {!alerts.length && !blocked.length && (
+            {!urgent.length && (
               <div className="needs needs-calm">
                 <h2 className="needs-title">Nothing needs you.</h2>
                 <p className="needs-body">
@@ -744,7 +777,7 @@ export default function Dashboard({
                 </p>
               </div>
             )}
-            {!alerts.length && blocked.length > 0 && (
+            {!alerts.length && urgent.length > 0 && (
               <p className="dashboard-empty quiet">No active alerts.</p>
             )}
           </section>

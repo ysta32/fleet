@@ -171,4 +171,26 @@ describe('Dashboard', () => {
       expect(render(tab)).not.toContain('PRIVATE_');
     }
   });
+  it('lists waiting sessions in alerts so "Review oldest" never lands on an empty inbox', () => {
+    const base = fixture();
+    const snapshot = {
+      ...base.snapshot!,
+      projects: base.snapshot!.projects.map((project) => ({ ...project, orch: undefined })),
+      alerts: [],
+      sessions: base.snapshot!.sessions.map((session) => ({ ...session, status: 'waiting' as const })),
+    };
+    const html = render('alerts', { ...base, snapshot });
+    expect(html).toContain('Waiting on you');
+    expect(html).toContain('Synthetic session');
+    expect(html).not.toContain('Nothing needs you.');
+  });
+  it('shows the calm empty state only when nothing needs the operator', () => {
+    const base = fixture();
+    const snapshot = {
+      ...base.snapshot!,
+      projects: base.snapshot!.projects.map((project) => ({ ...project, orch: undefined })),
+      alerts: [],
+    };
+    expect(render('alerts', { ...base, snapshot })).toContain('Nothing needs you.');
+  });
 });

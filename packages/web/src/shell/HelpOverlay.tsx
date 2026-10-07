@@ -1,18 +1,20 @@
 import { useEffect, useRef } from 'react';
 import { Icon, Kbd } from './Icon';
 import { KEYMAP } from './hotkeys';
+import { useModal } from './modal';
 
 export function HelpOverlay({ onClose }: { onClose(): void }) {
   const close = useRef<HTMLButtonElement>(null);
+  const overlay = useRef<HTMLDivElement>(null);
+  const dialog = useRef<HTMLDivElement>(null);
+  useModal(dialog, overlay);
   useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null;
     close.current?.focus();
-    return () => previous?.focus?.();
   }, []);
   const groups = [...new Set(KEYMAP.map((entry) => entry.group))];
   return (
-    <div className="overlay" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div className="dialog help" role="dialog" aria-modal="true" aria-labelledby="help-title">
+    <div ref={overlay} className="overlay" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <div ref={dialog} className="dialog help" role="dialog" aria-modal="true" aria-labelledby="help-title">
         <header className="dialog-head">
           <h2 id="help-title" className="dialog-title">
             Keyboard

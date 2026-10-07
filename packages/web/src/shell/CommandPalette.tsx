@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Icon, Kbd } from './Icon';
 import { rankPalette, type PaletteItem } from './palette';
+import { useModal } from './modal';
 
 export function CommandPalette({ items, onClose }: { items: readonly PaletteItem[]; onClose(): void }) {
   const [query, setQuery] = useState('');
@@ -8,11 +9,12 @@ export function CommandPalette({ items, onClose }: { items: readonly PaletteItem
   const input = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLUListElement>(null);
   const id = useId();
+  const overlay = useRef<HTMLDivElement>(null);
+  const dialog = useRef<HTMLDivElement>(null);
+  useModal(dialog, overlay);
   const results = useMemo(() => rankPalette(items, query), [items, query]);
   useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null;
     input.current?.focus();
-    return () => previous?.focus?.();
   }, []);
   useEffect(() => setActive(0), [query]);
   useEffect(() => {
@@ -26,10 +28,11 @@ export function CommandPalette({ items, onClose }: { items: readonly PaletteItem
   let lastGroup = '';
   return (
     <div
+      ref={overlay}
       className="overlay overlay-top"
       onMouseDown={(event) => event.target === event.currentTarget && onClose()}
     >
-      <div className="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+      <div ref={dialog} className="palette" role="dialog" aria-modal="true" aria-label="Command palette">
         <div className="palette-input">
           <Icon name="search" />
           <input
