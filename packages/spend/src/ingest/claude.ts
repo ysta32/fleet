@@ -1,4 +1,4 @@
-import { createReadStream, existsSync, readFileSync } from 'node:fs';
+import { createReadStream, existsSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -34,16 +34,6 @@ function gitRootName(cwd: string): string {
     const up = dirname(dir);
     if (up === dir) return basename(cwd);
     dir = up;
-  }
-}
-
-/** Branch name from `<root>/.git/HEAD` when it is a ref; nothing else is read. */
-function runBranch(root: string): string | undefined {
-  try {
-    const head = readFileSync(join(root, '.git', 'HEAD'), 'utf8').trim();
-    return head.startsWith('ref: refs/heads/') ? head.slice('ref: refs/heads/'.length) : undefined;
-  } catch {
-    return undefined;
   }
 }
 
@@ -95,7 +85,7 @@ function toRecord(line: unknown): { key: string | undefined; rec: UsageRecord } 
     } else {
       repo = gitRootName(cwd);
     }
-    if (m) army = runBranch(m[1] as string) ? `${repo}:${runBranch(m[1] as string)}` : repo;
+    if (m) army = repo;
     else if (branch?.startsWith('orch/')) army = `${repo}:${branch}`;
   }
 
