@@ -36,3 +36,82 @@ export type ColorToken = (typeof COLOR_TOKENS)[number];
 export const v = (name: string): string => `var(${TOKEN_PREFIX}${name})`;
 export const FONT_URL =
   'https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=Schibsted+Grotesk:wght@400;500;600;700&display=swap';
+
+// Added by 20-design-system (add-only).
+export { icons, ICON_NAMES, type IconName } from './icons.js';
+export {
+  motion,
+  easing,
+  duration,
+  named as motions,
+  ease,
+  cssEasing,
+  dur,
+  prefersReducedMotion,
+  type Bezier,
+  type EasingName,
+  type DurationName,
+  type MotionName,
+} from './motion.js';
+export { palette, hexToInt, hexToRgb01, type PaletteKey, type ThemeName } from './palette.js';
+/** Tokens added after the freeze (add-only). Colour-ish, per theme. */
+export const ADDED_THEME_TOKENS = [
+  'accent-soft',
+  'danger-soft',
+  'warn-soft',
+  'success-soft',
+  'selection',
+  'scrim',
+  'skeleton',
+  'skeleton-shine',
+  'scrollbar',
+  'scrollbar-hover',
+  'focus-ring',
+  'grain-opacity',
+  'glow-accent',
+  'glow-danger',
+  'gradient-surface',
+  'gradient-horizon',
+  'gradient-vignette',
+  'glass',
+] as const;
+/** Tokens added after the freeze (add-only). Theme-independent. */
+export const ADDED_GLOBAL_TOKENS = [
+  'ease-dispatch',
+  'dur-dispatch',
+  'ease-land',
+  'dur-land',
+  'ease-alert',
+  'dur-alert',
+  'stagger',
+  'motion-dispatch',
+  'motion-land',
+  'motion-alert',
+  'leading-snug',
+  'tracking-tight',
+  'tracking-display',
+  'radius-xl',
+  'icon-sm',
+  'icon-md',
+  'icon-stroke',
+  'hairline',
+  'row-h',
+  'row-h-compact',
+  'sidebar-w',
+  'content-max',
+  'z-base',
+  'z-sticky',
+  'z-overlay',
+  'z-palette',
+  'z-toast',
+  'focus-width',
+  'focus-offset',
+  'tracking-display-xl',
+  'leading-display',
+  'measure',
+  'grain',
+  'grain-size',
+  'blur-sm',
+  'blur-md',
+  'blur-lg',
+] as const;
