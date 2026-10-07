@@ -49,7 +49,7 @@ const TEXT = [
   ['warn', 4.5, 'status text'],
   ['danger', 4.5, 'status text'],
   ['info', 4.5, 'status text'],
-  ['fg-subtle', 3, 'large text, placeholders, disabled (non-essential)'],
+  ['fg-subtle', 4.5, 'meta text, placeholders, disabled'],
   ['focus', 3, 'focus ring (non-text, 1.4.11)'],
 ];
 

@@ -12,13 +12,16 @@
     "test": "vitest run",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "lint": "npm run format:check"
+    "lint": "npm run format:check",
+    "shots": "node scripts/shots.mjs",
+    "test:visual": "playwright test --config scripts/visual.config.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "prettier": "^3.3.3",
     "typescript": "^5.6.3",
-    "vitest": "^2.1.8"
+    "vitest": "^2.1.8",
+    "@playwright/test": "1.63.0"
   },
   "engines": {
     "node": ">=20"
