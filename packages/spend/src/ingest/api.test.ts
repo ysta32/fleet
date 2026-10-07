@@ -287,3 +287,25 @@ describe('independent provider gating', () => {
     expect(o2.calls).toHaveLength(0);
   });
 });
+
+describe('error notes never pass through exception text', () => {
+  it('keeps a fetch error that mimics a pagination message generic', async () => {
+    const fn = (async () => {
+      throw new Error('pagination sk-ant-admin-SECRET /Users/x');
+    }) as typeof fetch;
+    for (const ingest of [ingestAnthropicApi, ingestOpenAiApi]) {
+      const res = await ingest(ctx({ fetch: fn }));
+      expect(res.status).toBe('error');
+      expect(res.note).toBe('request failed');
+      const json = JSON.stringify(res);
+      expect(json).not.toContain('sk-ant-admin-SECRET');
+      expect(json).not.toContain('/Users/x');
+    }
+  });
+
+  it('uses the fixed note for a real repeated cursor', async () => {
+    const { fn } = fakeFetch([{ status: 200, body: { data: [], has_more: true, next_page: 'same' } }]);
+    const res = await ingestAnthropicApi(ctx({ fetch: fn }));
+    expect(res).toMatchObject({ status: 'error', note: 'pagination cursor repeated' });
+  });
+});

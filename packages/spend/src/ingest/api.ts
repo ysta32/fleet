@@ -26,6 +26,24 @@ class HttpError extends Error {
   }
 }
 
+/** Internal-only errors whose notes are fixed strings chosen here, never derived from exception text. */
+const PAGINATION_NOTES = {
+  repeated: 'pagination cursor repeated',
+  exceeded: `pagination exceeded ${MAX_PAGES} pages`,
+} as const;
+
+class PaginationError extends Error {
+  constructor(readonly kind: keyof typeof PAGINATION_NOTES) {
+    super(PAGINATION_NOTES[kind]);
+  }
+}
+
+class ResponseShapeError extends Error {
+  constructor() {
+    super('unexpected response shape');
+  }
+}
+
 type Json = Record<string, unknown>;
 
 function isObj(v: unknown): v is Json {
@@ -64,26 +82,26 @@ async function fetchPages(
     });
     if (!res.ok) throw new HttpError(res.status);
     const body: unknown = await res.json();
-    if (!isObj(body)) throw new Error('unexpected response shape');
+    if (!isObj(body)) throw new ResponseShapeError();
     if (Array.isArray(body.data)) for (const b of body.data) if (isObj(b)) buckets.push(b);
     const next = str(body.next_page);
     if (body.has_more !== true || !next) return buckets;
-    if (seen.has(next)) throw new Error('pagination cursor repeated');
+    if (seen.has(next)) throw new PaginationError('repeated');
     seen.add(next);
     page = next;
   }
-  throw new Error(`pagination exceeded ${MAX_PAGES} pages`);
+  throw new PaginationError('exceeded');
 }
 
 function errorNote(err: unknown): string {
-  if (err instanceof HttpError) return err.message;
-  if (err instanceof Error) {
-    if (err.name === 'TimeoutError' || err.name === 'AbortError') return 'request timed out';
-    if (err.message === 'unexpected response shape' || err.message.startsWith('pagination'))
-      return err.message;
-    if (err instanceof SyntaxError) return 'invalid JSON response';
-  }
-  // Network errors may carry arbitrary text; keep the note generic so nothing sensitive leaks.
+  // Notes come only from fixed strings or numeric status codes; exception messages are never passed through.
+  if (err instanceof HttpError) return `HTTP ${err.status}`;
+  if (err instanceof PaginationError) return PAGINATION_NOTES[err.kind];
+  if (err instanceof ResponseShapeError) return 'unexpected response shape';
+  if (err instanceof SyntaxError) return 'invalid JSON response';
+  if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError'))
+    return 'request timed out';
+  // Anything else (network errors, injected fetch failures) may carry arbitrary text: keep it generic.
   return 'request failed';
 }
 
