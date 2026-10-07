@@ -49,7 +49,7 @@ Color is used only when stdout is a terminal and `NO_COLOR` is unset. When `wher
 fleet-spend check || echo "spend check exited $?"
 ```
 
-`serve` is read-only, answers GET only, binds 127.0.0.1, and rejects requests whose Host header is not loopback. Routes: `/` (the Spend tab as a page, refreshes every 60 seconds), `/api/spend`, `/api/brief`. Responses are cached for 30 seconds.
+`serve` is read-only, answers GET only, binds 127.0.0.1, and rejects requests whose Host header is not loopback. Routes: `/` (the Spend tab as a page, refreshes every 60 seconds), `/api/spend`, `/api/brief`, `/tokens.css` (Halyard tokens, when `@fleet/ui` is resolvable). Responses are cached for 30 seconds.
 
 ![Spend tab, dark](docs/screenshots/spend-tab-dark.png)
 ![Spend tab, light](docs/screenshots/spend-tab-light.png)
@@ -112,7 +112,7 @@ Nothing is rounded internally. The forecast is a straight-line projection of rec
 
 ## Fleet integration
 
-When [Fleet](https://github.com/) is running, the same data appears in Fleet:
+When [Fleet](https://github.com/ysta32/fleet) is running, the same data appears in Fleet:
 
 - A Spend tab with month to date, forecast, budget, and breakdowns.
 - Bot tint: each agent bot is tinted by its session's burn rate over the last hour (USD/hour): idle at 0, cool under 2, warm under 10, hot at 10 or more. The `fleet-spend` CLI uses the same thresholds.
@@ -127,8 +127,8 @@ fleet-spend works without Fleet; set `notify.fleet` to `false` to skip the Fleet
 - A top-tier model used on a task or session whose calls produce little output: same calls priced at a cheaper tier.
 - A low share of prompt tokens served from cache for a model.
 - 1-hour cache writes where 5-minute writes would cost less (reported as an upper bound).
-- Copilot spend concentrated in a high-cost model: the same tokens at a cheaper model's list rates.
-- A single session holding a large share of the month's spend (no estimate, a pointer only).
+- Copilot spend concentrated in a high-cost model: the same tokens at a cheaper model's list rates. This needs token counts, and Copilot CSV exports carry none, so with CSV ingestion this tip cannot fire. Copilot spend still appears in totals and breakdowns.
+- A single session holding a large share of the month's spend (informational: its estimate is $0 and the $1 minimum does not drop it).
 
 ## Privacy
 

@@ -28,7 +28,7 @@ Nothing is written to your agent log directories.
 
 ## Network calls
 
-None by default. There is no telemetry and no update check. The only calls that can happen:
+There is no telemetry and no update check. External calls (to the internet) are off by default: API ingestion needs `apiIngest: true` plus your key, and ntfy needs `notify.ntfyUrl`. One call is on by default but never leaves your machine: when an alert fires, `notify.fleet` (default true) POSTs it to the local Fleet collector at 127.0.0.1:4747, using the Fleet token from `FLEET_TOKEN` or `~/.config/fleet/config.json` if present. With no token, or no Fleet running, nothing is sent. Set `"notify": { "fleet": false }` to disable it. The only calls that can happen:
 
 | Call                                                      | When                                                                                                                    | Sends                                                                                                        |
 | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
