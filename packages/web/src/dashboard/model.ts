@@ -168,11 +168,21 @@ export interface NeedsYouItem {
 }
 
 /** Everything that is waiting on the operator, oldest first (cost of delay grows with age). */
-export function needsYou(snapshot: FleetSnapshot, dismissed: ReadonlySet<string> = new Set()): NeedsYouItem[] {
+export function needsYou(
+  snapshot: FleetSnapshot,
+  dismissed: ReadonlySet<string> = new Set(),
+): NeedsYouItem[] {
   const items: NeedsYouItem[] = [];
   for (const alert of snapshot.alerts) {
     if (alert.cleared || dismissed.has(alert.id)) continue;
-    items.push({ id: `alert:${alert.id}`, kind: 'alert', projectId: alert.projectId, title: alert.title, at: alert.at, alertIds: [alert.id] });
+    items.push({
+      id: `alert:${alert.id}`,
+      kind: 'alert',
+      projectId: alert.projectId,
+      title: alert.title,
+      at: alert.at,
+      alertIds: [alert.id],
+    });
   }
   for (const session of snapshot.sessions) {
     if (session.status !== 'waiting') continue;
@@ -191,7 +201,15 @@ export function needsYou(snapshot: FleetSnapshot, dismissed: ReadonlySet<string>
     const blockedTasks = run.tasks.filter((task) => task.state === 'blocked');
     if (run.phase !== 'blocked' && !run.blocked.length && !blockedTasks.length) continue;
     // an active army.blocked alert already represents this project
-    if (items.some((item) => item.kind === 'alert' && item.projectId === project.id && snapshot.alerts.some((alert) => item.alertIds.includes(alert.id) && alert.kind === 'army.blocked'))) continue;
+    if (
+      items.some(
+        (item) =>
+          item.kind === 'alert' &&
+          item.projectId === project.id &&
+          snapshot.alerts.some((alert) => item.alertIds.includes(alert.id) && alert.kind === 'army.blocked'),
+      )
+    )
+      continue;
     const count = run.blocked.length + blockedTasks.length;
     items.push({
       id: `blocked:${project.id}`,

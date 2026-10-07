@@ -73,6 +73,7 @@ export function useConnection(view: FleetView) {
   let state: LinkState = 'ok';
   if (!online) state = 'offline';
   else if (live && unauthorized && !view.connected) state = 'unauthorized';
-  else if (live && !view.connected) state = graceOver || everConnected.current ? 'disconnected' : 'connecting';
+  else if (live && !view.connected)
+    state = graceOver || everConnected.current ? 'disconnected' : 'connecting';
   return { state, lastUpdate, retry };
 }

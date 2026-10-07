@@ -449,7 +449,12 @@
 }
 .skeleton {
   border-radius: var(--fl-radius-sm);
-  background: linear-gradient(90deg, var(--fl-skeleton) 0 40%, var(--fl-skeleton-shine) 50%, var(--fl-skeleton) 60% 100%);
+  background: linear-gradient(
+    90deg,
+    var(--fl-skeleton) 0 40%,
+    var(--fl-skeleton-shine) 50%,
+    var(--fl-skeleton) 60% 100%
+  );
   background-size: 300% 100%;
   animation: shine 1.6s var(--fl-ease-land) infinite;
 }

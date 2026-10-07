@@ -22,7 +22,8 @@ export function applyTheme(pref: ThemePref) {
   if (pref === 'system') root.removeAttribute('data-theme');
   else root.setAttribute('data-theme', pref);
   const bg = getComputedStyle(root).getPropertyValue('--fl-bg').trim();
-  if (bg) document.querySelectorAll('meta[name="theme-color"]').forEach((meta) => meta.setAttribute('content', bg));
+  if (bg)
+    document.querySelectorAll('meta[name="theme-color"]').forEach((meta) => meta.setAttribute('content', bg));
 }
 
 export function useTheme() {

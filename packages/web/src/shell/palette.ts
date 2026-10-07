@@ -35,7 +35,8 @@ export function fuzzyScore(query: string, text: string): number {
 const ORDER: PaletteItem['group'][] = ['Commands', 'Sessions', 'Projects', 'Agents'];
 
 export function rankPalette(items: readonly PaletteItem[], query: string, limit = 40): PaletteItem[] {
-  if (!query.trim()) return items.filter((item) => item.group === 'Commands' || item.group === 'Projects').slice(0, limit);
+  if (!query.trim())
+    return items.filter((item) => item.group === 'Commands' || item.group === 'Projects').slice(0, limit);
   return items
     .map((item) => ({ item, score: fuzzyScore(query, `${item.label} ${item.meta ?? ''}`) }))
     .filter((entry) => entry.score >= 0)

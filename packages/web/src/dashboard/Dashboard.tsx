@@ -257,7 +257,14 @@ export default function Dashboard({
   const lastAlert = snapshot.alerts.reduce((latest, alert) => Math.max(latest, alert.at), 0);
   const sessions = sortSessions(
     snapshot.sessions.filter((session) =>
-      matches(query, session.title, session.id, projectName(session.projectId), session.model, session.status),
+      matches(
+        query,
+        session.title,
+        session.id,
+        projectName(session.projectId),
+        session.model,
+        session.status,
+      ),
     ),
     names,
     sort.key,
@@ -280,7 +287,11 @@ export default function Dashboard({
                 <ul className="needs-list">
                   {urgent.slice(0, 4).map((item) => (
                     <li key={item.id}>
-                      <Icon name={item.kind === 'waiting' ? 'waiting' : item.kind === 'blocked' ? 'blocked' : 'alert'} />
+                      <Icon
+                        name={
+                          item.kind === 'waiting' ? 'waiting' : item.kind === 'blocked' ? 'blocked' : 'alert'
+                        }
+                      />
                       <span className="needs-text">
                         {projectButton(item.projectId)}
                         <span>{item.title}</span>
@@ -335,7 +346,9 @@ export default function Dashboard({
                 ))}
               </dd>
               <dd className="kpi-note sr-only">
-                {TOKEN_PARTS.map((part) => `${part.label} ${formatCount(totals.tokens[part.key])}`).join(' · ')}
+                {TOKEN_PARTS.map((part) => `${part.label} ${formatCount(totals.tokens[part.key])}`).join(
+                  ' · ',
+                )}
               </dd>
             </div>
           </dl>
@@ -389,7 +402,11 @@ export default function Dashboard({
             >
               {events.map((event) => (
                 <li key={event.id} className={`log-row severity-${event.severity}`}>
-                  <time className="num" dateTime={new Date(event.ts).toISOString()} title={relativeTime(event.ts, now)}>
+                  <time
+                    className="num"
+                    dateTime={new Date(event.ts).toISOString()}
+                    title={relativeTime(event.ts, now)}
+                  >
                     {clockTime(event.ts)}
                   </time>
                   <i className="sev" aria-label={event.severity} />
@@ -401,7 +418,9 @@ export default function Dashboard({
             </ol>
             {!events.length && (
               <Empty quiet icon="live" title={query ? `No events match “${query}”.` : 'No recent events.'}>
-                {query ? 'Clear the search with Esc.' : 'Tool calls, merges and deploys stream in here as they happen.'}
+                {query
+                  ? 'Clear the search with Esc.'
+                  : 'Tool calls, merges and deploys stream in here as they happen.'}
               </Empty>
             )}
           </section>
@@ -459,7 +478,11 @@ export default function Dashboard({
                 </thead>
                 <tbody>
                   {sessions.map((session) => (
-                    <tr key={session.id} data-selected={selected('session', session.id)} className={`row-${session.status}`}>
+                    <tr
+                      key={session.id}
+                      data-selected={selected('session', session.id)}
+                      className={`row-${session.status}`}
+                    >
                       <td data-label="Title" className="cell-title">
                         <button
                           type="button"
@@ -519,7 +542,10 @@ export default function Dashboard({
       )}
       {tab === 'armies' && (
         <>
-          <PanelHead title="Armies" meta={`${armies.length} orchestrated ${armies.length === 1 ? 'project' : 'projects'}`} />
+          <PanelHead
+            title="Armies"
+            meta={`${armies.length} orchestrated ${armies.length === 1 ? 'project' : 'projects'}`}
+          />
           {armies.map((project) => {
             const run = project.orch!;
             const landed = run.tasks.filter((task) => task.state === 'landed').length;
@@ -558,8 +584,8 @@ export default function Dashboard({
           })}
           {!armies.length && (
             <Empty icon="army" title="No armies running.">
-              An army appears when a repo has an orchestrator state folder. Its task graph, inflight agents and blockers
-              show here.
+              An army appears when a repo has an orchestrator state folder. Its task graph, inflight agents
+              and blockers show here.
             </Empty>
           )}
         </>
@@ -635,7 +661,9 @@ export default function Dashboard({
                 ))}
             </ul>
             {!snapshot.deploys.length && (
-              <p className="dashboard-empty quiet">No deploys. Connect Vercel in the collector config to see them.</p>
+              <p className="dashboard-empty quiet">
+                No deploys. Connect Vercel in the collector config to see them.
+              </p>
             )}
           </section>
         </>
@@ -644,7 +672,11 @@ export default function Dashboard({
         <>
           <PanelHead title="Alerts" meta={`${urgent.length} waiting on you`}>
             {alerts.length > 1 && onDismissAlerts && (
-              <button type="button" className="btn btn-quiet btn-sm" onClick={() => onDismissAlerts(alerts.map((alert) => alert.id))}>
+              <button
+                type="button"
+                className="btn btn-quiet btn-sm"
+                onClick={() => onDismissAlerts(alerts.map((alert) => alert.id))}
+              >
                 <Icon name="check" />
                 Clear all
               </button>
@@ -692,7 +724,11 @@ export default function Dashboard({
                     </small>
                   </div>
                   {onDismissAlerts && (
-                    <button type="button" className="btn btn-quiet btn-sm" onClick={() => onDismissAlerts([alert.id])}>
+                    <button
+                      type="button"
+                      className="btn btn-quiet btn-sm"
+                      onClick={() => onDismissAlerts([alert.id])}
+                    >
                       Clear
                     </button>
                   )}
@@ -703,12 +739,14 @@ export default function Dashboard({
               <div className="needs needs-calm">
                 <h2 className="needs-title">Nothing needs you.</h2>
                 <p className="needs-body">
-                  {lastAlert ? `Last alert ${relativeTime(lastAlert, now)}.` : 'No alerts recorded yet.'} Blocked agents,
-                  failed CI and spend spikes land here first.
+                  {lastAlert ? `Last alert ${relativeTime(lastAlert, now)}.` : 'No alerts recorded yet.'}{' '}
+                  Blocked agents, failed CI and spend spikes land here first.
                 </p>
               </div>
             )}
-            {!alerts.length && blocked.length > 0 && <p className="dashboard-empty quiet">No active alerts.</p>}
+            {!alerts.length && blocked.length > 0 && (
+              <p className="dashboard-empty quiet">No active alerts.</p>
+            )}
           </section>
         </>
       )}

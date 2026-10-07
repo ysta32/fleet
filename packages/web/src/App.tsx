@@ -115,7 +115,10 @@ function Shell() {
   const startReplay = useCallback(
     (hours: number) => {
       view.startReplay(hours);
-      toast.push({ tone: 'info', message: `Replaying the last ${hours}h. Space plays, [ and ] scrub, L returns to live.` });
+      toast.push({
+        tone: 'info',
+        message: `Replaying the last ${hours}h. Space plays, [ and ] scrub, L returns to live.`,
+      });
     },
     [view, toast],
   );
@@ -126,10 +129,16 @@ function Shell() {
       ?.writeText(url.toString())
       .then(() =>
         toast.push({
-          message: 'Link copied. Phones on your network also need the token: run fleet token on this machine.',
+          message:
+            'Link copied. Phones on your network also need the token: run fleet token on this machine.',
         }),
       )
-      .catch(() => toast.push({ tone: 'danger', message: 'Clipboard blocked by the browser. Copy the address bar instead.' }));
+      .catch(() =>
+        toast.push({
+          tone: 'danger',
+          message: 'Clipboard blocked by the browser. Copy the address bar instead.',
+        }),
+      );
   }, [toast]);
 
   useHotkeys({
@@ -188,11 +197,32 @@ function Shell() {
         run: () => startReplay(entry.hours),
       });
     if (view.mode === 'replay')
-      items.push({ id: 'live', group: 'Commands', label: 'Back to live', icon: 'live', shortcut: ['L'], run: view.replay.exit });
+      items.push({
+        id: 'live',
+        group: 'Commands',
+        label: 'Back to live',
+        icon: 'live',
+        shortcut: ['L'],
+        run: view.replay.exit,
+      });
     items.push(
-      { id: 'theme', group: 'Commands', label: 'Toggle light and dark', icon: theme.resolved === 'dark' ? 'sun' : 'moon', shortcut: ['T'], run: theme.toggle },
+      {
+        id: 'theme',
+        group: 'Commands',
+        label: 'Toggle light and dark',
+        icon: theme.resolved === 'dark' ? 'sun' : 'moon',
+        shortcut: ['T'],
+        run: theme.toggle,
+      },
       { id: 'lan', group: 'Commands', label: 'Copy link for another device', icon: 'phone', run: copyLink },
-      { id: 'help', group: 'Commands', label: 'Keyboard shortcuts', icon: 'command', shortcut: ['?'], run: () => setLayer('help') },
+      {
+        id: 'help',
+        group: 'Commands',
+        label: 'Keyboard shortcuts',
+        icon: 'command',
+        shortcut: ['?'],
+        run: () => setLayer('help'),
+      },
     );
     if (snapshot) {
       const names = new Map(snapshot.projects.map((project) => [project.id, project.name]));
@@ -229,7 +259,14 @@ function Shell() {
 
   if (link.state === 'unauthorized') return <TokenGate />;
 
-  const modeLabel = view.mode === 'replay' ? 'Replay' : view.mode === 'demo' ? 'Demo' : view.connected ? 'Live' : 'Connecting';
+  const modeLabel =
+    view.mode === 'replay'
+      ? 'Replay'
+      : view.mode === 'demo'
+        ? 'Demo'
+        : view.connected
+          ? 'Live'
+          : 'Connecting';
   return (
     <div className={`app${sheet ? ' sheet-open' : ''}${firstRun ? ' first-run' : ''}`} data-mode={view.mode}>
       <a className="skip-link" href="#inspector">
@@ -240,7 +277,11 @@ function Shell() {
           <Mark className="brand-mark" />
           <span className="brand-name">fleet</span>
         </a>
-        <span className={`mode mode-${view.mode}${view.connected ? ' is-on' : ''}`} role="status" title={view.connected ? 'Receiving updates' : 'Not connected'}>
+        <span
+          className={`mode mode-${view.mode}${view.connected ? ' is-on' : ''}`}
+          role="status"
+          title={view.connected ? 'Receiving updates' : 'Not connected'}
+        >
           <i aria-hidden="true" />
           {modeLabel}
         </span>
@@ -273,7 +314,12 @@ function Shell() {
           </div>
         </dl>
         <div className="bar-actions">
-          <button type="button" className="btn btn-quiet palette-trigger" onClick={() => setLayer('palette')} aria-label="Command palette (Cmd K)">
+          <button
+            type="button"
+            className="btn btn-quiet palette-trigger"
+            onClick={() => setLayer('palette')}
+            aria-label="Command palette (Cmd K)"
+          >
             <Icon name="command" />
             <span className="palette-trigger-label">Commands</span>
             <Kbd>⌘K</Kbd>
@@ -287,8 +333,16 @@ function Shell() {
           >
             <Icon name={theme.resolved === 'dark' ? 'sun' : 'moon'} />
           </button>
-          <button type="button" className="icon-button hide-phone" onClick={() => setLayer('help')} aria-label="Keyboard shortcuts (?)" title="Keyboard shortcuts (?)">
-            <span className="glyph" aria-hidden="true">?</span>
+          <button
+            type="button"
+            className="icon-button hide-phone"
+            onClick={() => setLayer('help')}
+            aria-label="Keyboard shortcuts (?)"
+            title="Keyboard shortcuts (?)"
+          >
+            <span className="glyph" aria-hidden="true">
+              ?
+            </span>
           </button>
         </div>
       </header>
@@ -303,7 +357,8 @@ function Shell() {
             else if (result === 'down')
               toast.push({
                 tone: 'danger',
-                message: 'Still unreachable. Run fleet doctor on this machine to see why the collector is down.',
+                message:
+                  'Still unreachable. Run fleet doctor on this machine to see why the collector is down.',
               });
           }}
         />
@@ -342,7 +397,10 @@ function Shell() {
             ))}
           </svg>
         </div>
-        <ErrorBoundary area="The 3D view" fallbackHint="The dashboard on the right still shows every session.">
+        <ErrorBoundary
+          area="The 3D view"
+          fallbackHint="The dashboard on the right still shows every session."
+        >
           <Suspense fallback={null}>
             <div className="scene-slot">
               <FleetScene view={view} selection={selection} onSelect={setSelection} />
@@ -354,8 +412,8 @@ function Shell() {
           <div className="stage-hud" aria-hidden="true">
             <span className="micro">Harbour</span>
             <span className="hud-meta">
-              {snapshot.projects.length} {snapshot.projects.length === 1 ? 'project' : 'projects'} · {snapshot.agents.length}{' '}
-              {snapshot.agents.length === 1 ? 'vessel' : 'vessels'}
+              {snapshot.projects.length} {snapshot.projects.length === 1 ? 'project' : 'projects'} ·{' '}
+              {snapshot.agents.length} {snapshot.agents.length === 1 ? 'vessel' : 'vessels'}
             </span>
           </div>
         )}
@@ -363,10 +421,21 @@ function Shell() {
       </main>
 
       <aside className="inspector" id="inspector" ref={inspector} aria-label="Dashboard" tabIndex={-1}>
-        <button type="button" className="sheet-handle" onClick={() => setSheet((open) => !open)} aria-expanded={sheet} aria-label={sheet ? 'Show the harbour' : 'Expand the dashboard'}>
+        <button
+          type="button"
+          className="sheet-handle"
+          onClick={() => setSheet((open) => !open)}
+          aria-expanded={sheet}
+          aria-label={sheet ? 'Show the harbour' : 'Expand the dashboard'}
+        >
           <i aria-hidden="true" />
         </button>
-        <SelectionCard snapshot={snapshot} selection={selection} now={now} onClose={() => setSelection(null)} />
+        <SelectionCard
+          snapshot={snapshot}
+          selection={selection}
+          now={now}
+          onClose={() => setSelection(null)}
+        />
         <ErrorBoundary area="The dashboard" fallbackHint="The harbour view keeps updating.">
           <Suspense fallback={null}>
             <Dashboard

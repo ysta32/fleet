@@ -39,7 +39,12 @@ export function SelectionCard({
       ['Project', projectName(session.projectId)],
       ['Model', <span className={`dashboard-chip model-tag model-${session.model}`}>{session.model}</span>],
       ['Status', <span className={`status status-${session.status}`}>{session.status}</span>],
-      ['Last tool', session.lastTool ? `${session.lastTool.name}${session.lastTool.target ? ` · ${session.lastTool.target}` : ''}` : '—'],
+      [
+        'Last tool',
+        session.lastTool
+          ? `${session.lastTool.name}${session.lastTool.target ? ` · ${session.lastTool.target}` : ''}`
+          : '—',
+      ],
       ['Tokens', <span className="num">{formatCount(totalTokens(session.tokens))} tok</span>],
       ['Cost', <span className="num">{formatCost(session.costUsd)}</span>],
       ['Active', <span className="num">{relativeTime(session.lastActivity, now)}</span>],
@@ -61,14 +66,19 @@ export function SelectionCard({
     const project = snapshot.projects.find((item) => item.id === selection.id);
     if (!project) return null;
     const sessions = snapshot.sessions.filter((item) => item.projectId === project.id);
-    const working = snapshot.agents.filter((item) => item.projectId === project.id && item.status === 'working');
+    const working = snapshot.agents.filter(
+      (item) => item.projectId === project.id && item.status === 'working',
+    );
     kind = 'Project';
     title = project.name;
     rows = [
       ['Branch', <span className="num">{project.branch ?? '—'}</span>],
       ['Sessions', <span className="num">{sessions.length}</span>],
       ['Working', <span className="num">{working.length} agents</span>],
-      ['Cost', <span className="num">{formatCost(sessions.reduce((sum, item) => sum + item.costUsd, 0))}</span>],
+      [
+        'Cost',
+        <span className="num">{formatCost(sessions.reduce((sum, item) => sum + item.costUsd, 0))}</span>,
+      ],
       ['Army', project.orch ? project.orch.phase : 'none'],
     ];
   }

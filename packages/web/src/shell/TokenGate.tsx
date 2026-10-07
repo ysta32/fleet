@@ -21,8 +21,8 @@ export function TokenGate() {
         <Mark className="gate-mark" />
         <h1 className="gate-title">This fleet is locked.</h1>
         <p className="gate-lead">
-          The collector answered 401: this browser has no valid access token. On the machine running Fleet, run{' '}
-          <code>fleet token</code> and open the link it prints, or paste the token here.
+          The collector answered 401: this browser has no valid access token. On the machine running Fleet,
+          run <code>fleet token</code> and open the link it prints, or paste the token here.
         </p>
         <label className="field-label" htmlFor={id}>
           Access token
@@ -44,7 +44,9 @@ export function TokenGate() {
             Open fleet
           </button>
         </div>
-        <p className="gate-meta">The token is kept in this browser only and is never sent anywhere but this collector.</p>
+        <p className="gate-meta">
+          The token is kept in this browser only and is never sent anywhere but this collector.
+        </p>
       </form>
     </main>
   );

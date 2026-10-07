@@ -1,7 +1,14 @@
 /* Fleet app-shell service worker. Caches the shell (HTML, hashed assets, icons) only.
  * Never caches /api: live fleet data, history and tokens always go to the network. */
 const VERSION = 'fleet-shell-v1';
-const SHELL = ['/', '/manifest.webmanifest', '/favicon.svg', '/theme-init.js', '/icons/icon-192.png', '/icons/icon-512.png'];
+const SHELL = [
+  '/',
+  '/manifest.webmanifest',
+  '/favicon.svg',
+  '/theme-init.js',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
+];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -45,7 +52,11 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  if (url.pathname.startsWith('/assets/') || url.pathname.startsWith('/icons/') || SHELL.includes(url.pathname)) {
+  if (
+    url.pathname.startsWith('/assets/') ||
+    url.pathname.startsWith('/icons/') ||
+    SHELL.includes(url.pathname)
+  ) {
     // Hashed assets are immutable: cache first.
     event.respondWith(
       caches.match(request).then(

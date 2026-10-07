@@ -25,7 +25,10 @@ export function CommandPalette({ items, onClose }: { items: readonly PaletteItem
   };
   let lastGroup = '';
   return (
-    <div className="overlay overlay-top" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <div
+      className="overlay overlay-top"
+      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
+    >
       <div className="palette" role="dialog" aria-modal="true" aria-label="Command palette">
         <div className="palette-input">
           <Icon name="search" />
@@ -61,7 +64,11 @@ export function CommandPalette({ items, onClose }: { items: readonly PaletteItem
             lastGroup = item.group;
             return (
               <li key={item.id} role="presentation">
-                {header && <div className="palette-group micro" aria-hidden="true">{item.group}</div>}
+                {header && (
+                  <div className="palette-group micro" aria-hidden="true">
+                    {item.group}
+                  </div>
+                )}
                 <div
                   id={`${id}-${index}`}
                   role="option"

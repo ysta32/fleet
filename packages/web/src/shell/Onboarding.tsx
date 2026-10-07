@@ -36,8 +36,8 @@ export function Onboarding() {
         No sessions yet.
       </h2>
       <p className="onboarding-lead">
-        Fleet watches the Claude Code transcripts on this machine, the orchestration state in each repo, and your PRs,
-        CI and deploys. Nothing leaves this computer.
+        Fleet watches the Claude Code transcripts on this machine, the orchestration state in each repo, and
+        your PRs, CI and deploys. Nothing leaves this computer.
       </p>
       <ol className="onboarding-steps">
         <li>
