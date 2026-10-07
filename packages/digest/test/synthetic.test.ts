@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { computeHealth } from '../src/summarize/fallback.js';
 import { syntheticArchive, syntheticDigest } from '../src/demo/synthetic.js';
 
 const FIXTURE = fileURLToPath(new URL('../fixtures/demo-digest.json', import.meta.url));
@@ -53,10 +54,6 @@ describe('syntheticDigest', () => {
         expect(order[ps[i - 1]!.health]).toBeLessThanOrEqual(order[ps[i]!.health]);
       }
       for (const p of ps) {
-        const failing =
-          p.deployments.some((x) => x.target === 'production' && x.state === 'ERROR') ||
-          p.ciFailures.some((c) => c.branch === 'main');
-        expect(p.health === 'red').toBe(failing);
         expect(p.highlights.length).toBeLessThanOrEqual(5);
         expect(p.summary.length).toBeGreaterThan(0);
         for (const dep of p.deployments) expect(dep.url).toBe(`https://${p.name}.example.app`);
@@ -94,6 +91,37 @@ describe('syntheticDigest', () => {
 
   it('rejects invalid dates', () => {
     expect(() => syntheticDigest('2026-13-40')).toThrow();
+  });
+});
+
+describe('regressions over a 60-day archive', () => {
+  const days = syntheticArchive(60, '2026-10-07');
+
+  it('every project health equals computeHealth of its raw data', () => {
+    for (const d of days) {
+      for (const p of d.projects) expect(p.health, `${d.id} ${p.name}`).toBe(computeHealth(p));
+    }
+  });
+
+  it('headline never claims healthy when any project is red or yellow', () => {
+    for (const d of days) {
+      if (d.projects.some((p) => p.health === 'red' || p.health === 'yellow')) {
+        expect(d.headline, d.id).not.toMatch(/healthy/i);
+      }
+    }
+  });
+
+  it('release versions stay unique and increasing across years', () => {
+    const seen = new Map<string, string>();
+    for (const d of syntheticArchive(400, '2026-10-07')) {
+      for (const p of d.projects) {
+        for (const r of p.releases) {
+          expect(seen.get(p.name), `${d.id} ${p.name}`).not.toBe(r.tag);
+          seen.set(p.name, r.tag);
+        }
+      }
+    }
+    expect(syntheticDigest('2025-11-17').projects.length).toBe(10);
   });
 });
 

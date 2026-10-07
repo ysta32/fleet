@@ -7,17 +7,18 @@ import type {
   DeploymentItem,
   IssueItem,
   ProjectActivity,
-  ProjectHealth,
   PullRequestItem,
   ReleaseItem,
 } from '../types.js';
 import { DIGEST_SCHEMA } from '../types.js';
+import { computeTotals, sortProjects } from '../digest.js';
+import { computeHealth } from '../summarize/fallback.js';
 
 /** Synthetic demo data: all names, repos and people are fictional. */
 
 const OWNER = 'acme-dev';
 const DAY_MS = 86_400_000;
-const EPOCH = Date.UTC(2026, 0, 1);
+const EPOCH = Date.UTC(2020, 0, 1);
 
 const HUMAN: Actor = { login: 'acme-dev', isBot: false };
 const CLAUDE: Actor = { login: 'claude[bot]', isBot: true };
@@ -336,6 +337,7 @@ function buildProject(
       dep.target = 'production';
       dep.branch = 'main';
       dep.state = 'ERROR';
+      dep.at = new Date(since + DAY_MS - 60_000).toISOString();
     } else {
       ciFailures.push(makeCiFailure(base, since, rng, 'main', commits[0]?.message));
     }
@@ -352,9 +354,6 @@ function buildProject(
     }
   }
 
-  const prodFailing = deployments.some((d) => d.target === 'production' && d.state === 'ERROR');
-  const mainCiFailing = ciFailures.some((c) => c.branch === 'main');
-  const anyDeployFailed = deployments.some((d) => d.state === 'ERROR' || d.state === 'CANCELED');
   const hasActivity =
     mergedPRs.length +
       commits.length +
@@ -363,12 +362,6 @@ function buildProject(
       issues.length +
       deployments.length >
     0;
-
-  let health: ProjectHealth;
-  if (prodFailing || mainCiFailing) health = 'red';
-  else if (!hasActivity) health = 'quiet';
-  else if (ciFailures.length > 0 || anyDeployFailed || openPRs.length > 0) health = 'yellow';
-  else health = 'green';
 
   const stars = 40 + repoIdx * 37 + dayIdx;
   const starsDelta = hasActivity ? rng.int(0, 6) : 0;
@@ -393,10 +386,11 @@ function buildProject(
       forksDelta: rng.chance(0.05) ? 1 : 0,
       openIssues: rng.int(2, 18),
     },
-    health,
+    health: 'green',
     summary: '',
     highlights: [],
   };
+  project.health = computeHealth(project);
   const text = describe(project);
   project.summary = text.summary;
   project.highlights = text.highlights;
@@ -459,57 +453,19 @@ function describe(p: ProjectActivity): { summary: string; highlights: string[] }
   return { summary: parts.join(' '), highlights: highlights.slice(0, 5) };
 }
 
-function computeTotalsLocal(projects: ProjectActivity[]): DigestTotals {
-  const t: DigestTotals = {
-    projectsActive: 0,
-    mergedPRs: 0,
-    commits: 0,
-    releases: 0,
-    ciFailures: 0,
-    openPRsNeedingAttention: 0,
-    issuesOpened: 0,
-    issuesClosed: 0,
-    deployments: 0,
-    deploymentsFailed: 0,
-    starsDelta: 0,
-    agentContributions: 0,
-  };
-  for (const p of projects) {
-    if (p.health !== 'quiet') t.projectsActive++;
-    t.mergedPRs += p.mergedPRs.length;
-    t.commits += p.commits.length;
-    t.releases += p.releases.length;
-    t.ciFailures += p.ciFailures.length;
-    t.openPRsNeedingAttention += p.openPRs.length;
-    t.issuesOpened += p.issues.filter((i) => i.state === 'opened').length;
-    t.issuesClosed += p.issues.filter((i) => i.state === 'closed').length;
-    t.deployments += p.deployments.length;
-    t.deploymentsFailed += p.deployments.filter((d) => d.state === 'ERROR' || d.state === 'CANCELED').length;
-    t.starsDelta += p.stats?.starsDelta ?? 0;
-    t.agentContributions +=
-      p.mergedPRs.filter((x) => x.author.isBot).length + p.commits.filter((x) => x.author.isBot).length;
-  }
-  return t;
-}
-
-const HEALTH_ORDER: Record<ProjectHealth, number> = { red: 0, yellow: 1, green: 2, quiet: 3 };
-
-function volume(p: ProjectActivity): number {
-  return (
-    p.mergedPRs.length +
-    p.commits.length +
-    p.releases.length +
-    p.ciFailures.length +
-    p.issues.length +
-    p.deployments.length
-  );
-}
-
 function headlineFor(totals: DigestTotals, projects: ProjectActivity[]): string {
   const red = projects.filter((p) => p.health === 'red');
+  const yellow = projects.filter((p) => p.health === 'yellow');
   const first = `${plural(totals.mergedPRs, 'pull request')} merged and ${plural(totals.commits, 'commit')} pushed across ${plural(totals.projectsActive, 'project')}, with ${totals.agentContributions} contributions from agents.`;
   if (red.length > 0) {
-    return `${first} ${red.map((p) => p.name).join(' and ')} ${red.length === 1 ? 'needs' : 'need'} attention.`;
+    const tail =
+      yellow.length > 0
+        ? ` and ${yellow.length} more ${yellow.length === 1 ? 'is' : 'are'} worth a look`
+        : '';
+    return `${first} ${red.map((p) => p.name).join(' and ')} ${red.length === 1 ? 'needs' : 'need'} attention${tail}.`;
+  }
+  if (yellow.length > 0) {
+    return `${first} ${plural(yellow.length, 'project')} ${yellow.length === 1 ? 'has' : 'have'} minor items to review.`;
   }
   return `${first} Everything looks healthy.`;
 }
@@ -522,13 +478,8 @@ export function syntheticDigest(date: string, seed = 7): Digest {
   const redIdx = rng.chance(0.85) ? rng.int(0, REPOS.length - 1) : -1;
   const counters = { pr: 0 };
   const built = REPOS.map((spec, i) => buildProject(spec, i, dayIdx, sinceMs, i === redIdx, rng, counters));
-  const projects = built.sort(
-    (a, b) =>
-      HEALTH_ORDER[a.health] - HEALTH_ORDER[b.health] ||
-      volume(b) - volume(a) ||
-      a.name.localeCompare(b.name),
-  );
-  const totals = computeTotalsLocal(projects);
+  const projects = sortProjects(built);
+  const totals = computeTotals(projects);
   const until = new Date(untilMs).toISOString();
   return {
     schema: DIGEST_SCHEMA,
