@@ -266,6 +266,32 @@ describe('terminal rendering', () => {
     },
   );
 
+  it.each([true, false])('fills exactly 0, 20 or 40 budget cells (unicode=%s)', (unicode) => {
+    const s = summary();
+    s.budget.monthlyUsd = 1000;
+    s.forecastMonthEndUsd = 1000;
+    const spent = unicode ? '█' : '#';
+    const empty = unicode ? '░' : '.';
+    const tick = unicode ? '┊' : ':';
+    for (const [amount, filled] of [
+      [0, 0],
+      [500, 20],
+      [1000, 40],
+    ] as const) {
+      s.monthToDateUsd = amount;
+      const track = renderBudget(s, { ...opts, unicode })
+        .split('\n')
+        .find((line) => line.trimStart().startsWith('['))!
+        .trim();
+      expect(track).toBe(
+        `[${spent.repeat(Math.min(filled, 39))}${empty.repeat(Math.max(39 - filled, 0))}${tick}]`,
+      );
+      const cells = Array.from(track.slice(1, -1));
+      expect(cells).toHaveLength(40);
+      expect(cells.filter((cell) => cell === spent).length + (filled === 40 ? 1 : 0)).toBe(filled);
+    }
+  });
+
   it.each([true, false])('preserves coincident budget and forecast markers (unicode=%s)', (unicode) => {
     const s = summary();
     s.forecastMonthEndUsd = s.budget.monthlyUsd!;

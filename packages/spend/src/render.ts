@@ -257,10 +257,10 @@ function budgetLines(s: SpendSummary, o: RenderOpts): Line[] {
     const size = Math.min(40, width(o) - 4);
     const scale = Math.max(budget, s.monthToDateUsd, s.forecastMonthEndUsd, 0.01);
     const position = (value: number): number =>
-      Math.max(0, Math.min(size - 1, Math.round((value / scale) * (size - 1))));
+      Math.max(0, Math.min(size - 1, Math.round((value / scale) * size)));
     const budgetAt = position(budget);
     const forecastAt = position(s.forecastMonthEndUsd);
-    const spentAt = position(s.monthToDateUsd);
+    const filled = Math.round((s.monthToDateUsd / scale) * size);
     const spent = o.unicode ? '█' : '#';
     const tick = o.unicode ? '┊' : ':';
     const forecast = o.unicode ? '▼' : 'v';
@@ -270,7 +270,7 @@ function budgetLines(s: SpendSummary, o: RenderOpts): Line[] {
           ? tick
           : i === forecastAt
             ? forecast
-            : i <= spentAt && s.monthToDateUsd > 0
+            : i < filled
               ? i > budgetAt
                 ? o.unicode
                   ? '▓'
@@ -279,7 +279,7 @@ function budgetLines(s: SpendSummary, o: RenderOpts): Line[] {
               : o.unicode
                 ? '░'
                 : '.',
-      tone: i > budgetAt && i <= spentAt && over ? 'danger' : 'subtle',
+      tone: i > budgetAt && i < filled && over ? 'danger' : 'subtle',
     }));
     if (forecastAt === budgetAt)
       lines.push({ text: `${' '.repeat(forecastAt + 1)}${forecast}`, tone: 'subtle' });
