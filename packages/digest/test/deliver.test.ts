@@ -95,6 +95,26 @@ function fakeFetch() {
 }
 
 describe('Notion delivery', () => {
+  it.each(['javascript:alert(1)', 'not a url'])(
+    'delivers without an archive link for invalid siteUrl %s',
+    async (siteUrl) => {
+      for (const destination of [{ databaseId: 'database' }, { pageId: 'page' }]) {
+        const c = config();
+        c.siteUrl = siteUrl;
+        c.deliver.notion = { enabled: true, ...destination };
+        const fetch = fakeFetch().mockResolvedValue(response(200, { properties: {} }));
+        expect((await deliverNotion(digest(), c, secrets, fetch)).ok).toBe(true);
+        const request = fetch.mock.calls.at(-1)![1]!;
+        const body = JSON.parse(request.body!);
+        expect(body.children).toHaveLength(5);
+        expect(body.children[1].paragraph.rich_text[0].text.content).toBe('Changes shipped.');
+        expect(body.children[3].paragraph.rich_text[0].text.content).toBe('A failed build.');
+        expect(request.body).not.toContain('"link"');
+        expect(request.body).not.toContain('View full digest');
+      }
+    },
+  );
+
   it('discovers the database title and Date properties before creating a page', async () => {
     const fetch = fakeFetch().mockResolvedValueOnce(
       response(200, { properties: { Title: { type: 'title' }, Date: { type: 'date' } } }),
@@ -212,6 +232,19 @@ describe('email delivery', () => {
 });
 
 describe('ntfy delivery', () => {
+  it.each(['javascript:alert(1)', 'not a url'])(
+    'delivers without a Click header for invalid siteUrl %s',
+    async (siteUrl) => {
+      const c = config();
+      c.siteUrl = siteUrl;
+      const fetch = fakeFetch();
+      expect((await deliverNtfy(digest(), c, secrets, fetch)).ok).toBe(true);
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(fetch.mock.calls[0]?.[1]?.headers).not.toHaveProperty('Click');
+      expect(fetch.mock.calls[0]?.[1]?.body).toBe(renderPlainText(digest(), 3500));
+    },
+  );
+
   it('sends bounded plain text with red priority, optional auth and archive click headers', async () => {
     const d = digest();
     d.headline = 'x'.repeat(5000);

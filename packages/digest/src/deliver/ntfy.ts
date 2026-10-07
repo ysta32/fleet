@@ -1,5 +1,5 @@
 import type { DeliveryResult, Digest, FetchLike, OvernightConfig, Secrets } from '../types.js';
-import { renderPlainText } from '../render/text.js';
+import { archiveUrl, renderPlainText } from '../render/text.js';
 
 export async function deliverNtfy(
   d: Digest,
@@ -18,8 +18,8 @@ export async function deliverNtfy(
       Priority: d.projects.some((project) => project.health === 'red') ? '4' : '3',
       Markdown: 'yes',
     };
-    if (config.siteUrl)
-      headers.Click = `${config.siteUrl.replace(/\/+$/, '')}/digests/${encodeURIComponent(d.id)}.html`;
+    const archiveLink = archiveUrl(d, config.siteUrl);
+    if (archiveLink) headers.Click = archiveLink;
     if (secrets.ntfyToken) headers.Authorization = `Bearer ${secrets.ntfyToken}`;
     const response = await fetch(`${server.replace(/\/+$/, '')}/${encodeURIComponent(topic)}`, {
       method: 'POST',

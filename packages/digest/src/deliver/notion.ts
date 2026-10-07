@@ -1,4 +1,5 @@
 import type { DeliveryResult, Digest, FetchLike, OvernightConfig, Secrets } from '../types.js';
+import { archiveUrl } from '../render/text.js';
 
 function richText(
   content: string,
@@ -52,15 +53,10 @@ export async function deliverNotion(
         ...project.highlights.map((highlight) => block('bulleted_list_item', highlight)),
       );
     }
-    if (config.siteUrl) {
+    const archiveLink = archiveUrl(d, config.siteUrl);
+    if (archiveLink) {
       children = children.slice(0, 99);
-      children.push(
-        block(
-          'paragraph',
-          'View full digest',
-          `${config.siteUrl.replace(/\/+$/, '')}/digests/${encodeURIComponent(d.id)}.html`,
-        ),
-      );
+      children.push(block('paragraph', 'View full digest', archiveLink));
     }
     children = children.slice(0, 100);
     let url: string;

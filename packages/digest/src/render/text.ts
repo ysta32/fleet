@@ -8,7 +8,7 @@ function truncate(value: string, limit: number): string {
   return `${prefix}…`;
 }
 
-function archiveUrl(d: Digest, siteUrl?: string): string | undefined {
+export function archiveUrl(d: Digest, siteUrl?: string): string | undefined {
   if (!siteUrl) return undefined;
   try {
     const url = new URL(`${siteUrl.replace(/\/+$/, '')}/digests/${encodeURIComponent(d.id)}.html`);
