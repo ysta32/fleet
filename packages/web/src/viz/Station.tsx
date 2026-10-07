@@ -4,7 +4,7 @@ import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import type { CiState, OrchPhase } from '@fleet/shared';
 import { easing, ease } from '@fleet/ui';
-import { anchorOffset, clamp, hash01, taskOrbitRadius, TASKS_PER_RING, vec3 } from './layout';
+import { alertPulse, anchorOffset, clamp, hash01, taskOrbitRadius, TASKS_PER_RING, vec3 } from './layout';
 import { useSceneStore } from './store';
 import { FONTS, useVizTheme } from './theme';
 
@@ -223,9 +223,10 @@ function StationImpl({
     const al = store.alerts.get(d.id);
     const au = al ? (t - al.start) / ALERT_DUR : 1;
     const alerting = au >= 0 && au < 1;
-    const pulse = alerting ? Math.sin(Math.PI * ease(easing.alert, au)) : 0;
+    // reduced motion: no scale pulse, a static alert glow for the alert's duration
+    const { scale: pulse, glow } = alertPulse(au, store.reduced);
     const live = (d.orch && d.phase !== 'idle') || d.working > 0;
-    const k = (needs ? 3 : live ? 1.7 + busy * 0.9 : 0.8) + recent * 0.8 + pulse * 2.5;
+    const k = (needs ? 3 : live ? 1.7 + busy * 0.9 : 0.8) + recent * 0.8 + glow * 2.5;
     const alertColor = al?.kind === 'fail' ? colors.danger : colors.accent;
     if (coreMat.current) {
       coreMat.current.emissive.copy(alerting ? alertColor : colors.base);
@@ -238,7 +239,7 @@ function StationImpl({
     if (wire.current) {
       tmpColor.copy(alerting ? alertColor : colors.line);
       wire.current.color.copy(tmpColor);
-      wire.current.opacity = (vt.dark ? 0.32 : 0.45) + recent * 0.2 + pulse * 0.4;
+      wire.current.opacity = (vt.dark ? 0.32 : 0.45) + recent * 0.2 + glow * 0.4;
     }
     // motion means work: rings turn only while the station is busy
     const spin = busy * 0.25;

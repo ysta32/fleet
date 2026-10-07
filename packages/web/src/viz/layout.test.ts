@@ -9,6 +9,8 @@ import {
   cameraFitDistance,
   cameraMaxDistance,
   fogRange,
+  alertPulse,
+  ALERT_STATIC_GLOW,
   layoutRadius,
   arcHeight,
   arcPoint,
@@ -238,5 +240,21 @@ describe('fogRange', () => {
         expect(near).toBeLessThan(far);
       }
     }
+  });
+});
+
+describe('alertPulse', () => {
+  it('pulses once (scale + glow) and is silent outside the alert window', () => {
+    expect(alertPulse(-0.1, false)).toEqual({ scale: 0, glow: 0 });
+    expect(alertPulse(1, false)).toEqual({ scale: 0, glow: 0 });
+    const mid = alertPulse(0.2, false); // rising edge (the alert curve overshoots past 1 later)
+    expect(mid.scale).toBeGreaterThan(0);
+    expect(mid.glow).toBe(mid.scale);
+  });
+  it('never scales under reduced motion; glow is static for the whole alert', () => {
+    for (const u of [0, 0.1, 0.25, 0.5, 0.75, 0.99]) {
+      expect(alertPulse(u, true)).toEqual({ scale: 0, glow: ALERT_STATIC_GLOW });
+    }
+    expect(alertPulse(1, true)).toEqual({ scale: 0, glow: 0 });
   });
 });

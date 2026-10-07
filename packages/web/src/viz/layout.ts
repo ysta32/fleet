@@ -4,6 +4,7 @@
  * Functions taking an `out` parameter write into it and return it (no per-frame allocation).
  */
 import type { LocationKind } from '@fleet/shared';
+import { easing, ease } from '@fleet/ui';
 
 export interface Vec3 {
   x: number;
@@ -329,3 +330,20 @@ export function formatTokens(n: number): string {
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return String(Math.round(n));
 }
+
+/**
+ * One-shot alert at progress `u` (0..1 over the alert duration; outside that range = no alert).
+ * `scale` is the overshoot pulse (motion), `glow` the emissive boost. Under reduced motion there is
+ * no scale pulse and the glow is a static level held for the alert's duration.
+ */
+export const ALERT_STATIC_GLOW = 0.6;
+export function alertPulse(u: number, reduced: boolean): { scale: number; glow: number } {
+  const on = u >= 0 && u < 1;
+  if (!on) return NO_ALERT;
+  if (reduced) return REDUCED_ALERT;
+  pulseOut.scale = pulseOut.glow = Math.sin(Math.PI * ease(easing.alert, u));
+  return pulseOut;
+}
+const NO_ALERT = Object.freeze({ scale: 0, glow: 0 });
+const REDUCED_ALERT = Object.freeze({ scale: 0, glow: ALERT_STATIC_GLOW });
+const pulseOut = { scale: 0, glow: 0 };
