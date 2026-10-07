@@ -9,19 +9,27 @@ import {
 } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Grid, OrbitControls, PerformanceMonitor, Stars } from '@react-three/drei';
-import { Bloom, ChromaticAberration, EffectComposer, Noise, Vignette } from '@react-three/postprocessing';
-import { BlendFunction } from 'postprocessing';
+import { Bloom, EffectComposer, Vignette } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import type { Agent, FleetSnapshot } from '@fleet/shared';
 import type { FleetView, Selection } from '../data/contract';
 import { Bot } from './Bots';
+import { useVizDevView } from './devView';
 import { Effects } from './Effects';
 import { Hud } from './Hud';
-import { cameraFitPosition, damp, layoutRadius, needsRefit } from './layout';
+import {
+  cameraFitPosition,
+  cameraMaxDistance,
+  damp,
+  fitScaleForAspect,
+  fogRange,
+  layoutRadius,
+  needsRefit,
+} from './layout';
 import { Station, type StationData } from './Station';
 import { SceneStore, SceneStoreContext, useSceneStore } from './store';
 import { TaskSatellites } from './TaskSatellites';
-import { HALYARD, MODEL_COLORS, THEME } from './theme';
+import { FONTS, VizThemeContext, useThemeName, useVizTheme, vizTheme, type VizTheme } from './theme';
 
 export interface FleetSceneProps {
   view: FleetView;
@@ -30,6 +38,26 @@ export interface FleetSceneProps {
 }
 
 const MAX_BOTS = 240;
+/** Halyard grain (same SVG noise as --fl-grain), inlined so the scene does not depend on tokens.css. */
+const GRAIN =
+  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0.55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")";
+
+function useNarrow(): boolean {
+  const q = '(max-width: 560px)';
+  const [narrow, setNarrow] = useState(() =>
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia(q).matches
+      : false,
+  );
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const mq = window.matchMedia(q);
+    const on = () => setNarrow(mq.matches);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+  return narrow;
+}
 
 function usePrefersReducedMotion(): boolean {
   const [reduced, setReduced] = useState(() =>
@@ -58,16 +86,45 @@ function SceneClock() {
   return null;
 }
 
-function Floor({ radius }: { radius: number }) {
+function Floor({ radius, vt }: { radius: number; vt: VizTheme }) {
   const rings = useMemo(() => {
     const out: THREE.BufferGeometry[] = [];
+    out.push(new THREE.RingGeometry(0.88, 0.9, 96).rotateX(-Math.PI / 2));
     for (const k of [0.45, 1, 1.6])
-      out.push(new THREE.RingGeometry(radius * k - 0.012, radius * k, 256).rotateX(-Math.PI / 2));
+      out.push(new THREE.RingGeometry(radius * k - 0.01, radius * k, 256).rotateX(-Math.PI / 2));
     return out;
   }, [radius]);
   const ticks = useMemo(() => {
     const pts: number[] = [];
     const r = radius * 1.6;
+    // centre compass: the operator's mark the fleet circles
+    const c = 0.9;
+    pts.push(
+      -c * 1.6,
+      0,
+      0,
+      -c * 0.4,
+      0,
+      0,
+      c * 0.4,
+      0,
+      0,
+      c * 1.6,
+      0,
+      0,
+      0,
+      0,
+      -c * 1.6,
+      0,
+      0,
+      -c * 0.4,
+      0,
+      0,
+      c * 0.4,
+      0,
+      0,
+      c * 1.6,
+    );
     for (let i = 0; i < 180; i++) {
       const a = (i / 180) * Math.PI * 2;
       const l = i % 15 === 0 ? 1.2 : i % 5 === 0 ? 0.6 : 0.3;
@@ -84,6 +141,7 @@ function Floor({ radius }: { radius: number }) {
     },
     [rings, ticks],
   );
+  const k = vt.dark ? 1 : 1.6;
   return (
     <group>
       <Grid
@@ -92,26 +150,26 @@ function Floor({ radius }: { radius: number }) {
         infiniteGrid
         cellSize={1}
         cellThickness={0.5}
-        cellColor={THEME.gridCell}
+        cellColor={vt.gridCell}
         sectionSize={5}
         sectionThickness={0.9}
-        sectionColor={THEME.gridSection}
-        fadeDistance={radius * 4.5}
-        fadeStrength={1.6}
+        sectionColor={vt.gridSection}
+        fadeDistance={radius * 4}
+        fadeStrength={1.8}
         followCamera={false}
       />
       {rings.map((g, i) => (
         <mesh key={i} geometry={g} position={[0, 0.005, 0]}>
           <meshBasicMaterial
-            color={HALYARD.fg}
+            color={vt.fg}
             transparent
-            opacity={i === 1 ? 0.1 : 0.06}
+            opacity={(i === 0 ? 0.2 : i === 2 ? 0.09 : 0.05) * k}
             depthWrite={false}
           />
         </mesh>
       ))}
       <lineSegments geometry={ticks} position={[0, 0.005, 0]}>
-        <lineBasicMaterial color={HALYARD.fg} transparent opacity={0.16} depthWrite={false} />
+        <lineBasicMaterial color={vt.fg} transparent opacity={0.14 * k} depthWrite={false} />
       </lineSegments>
     </group>
   );
@@ -124,26 +182,29 @@ const offset = new THREE.Vector3();
 const HOME = new THREE.Vector3(0, 1.2, 0);
 const fitPos = new THREE.Vector3();
 const fitTmp = { x: 0, y: 0, z: 0 };
-const REFIT_SECONDS = 2.2;
+/** camera reframe (first load is a slow cinematic dolly-in from further out) */
+const REFIT_SECONDS = 3;
 
 function CameraRig({
   selection,
   radius,
   projectCount,
-  initialFit,
 }: {
   selection: Selection;
   radius: number;
   projectCount: number;
-  /** layout radius the initial camera was framed for, or null if it was framed without data */
-  initialFit: number | null;
 }) {
   const store = useSceneStore();
   const controls = useRef<ControlsImpl>(null);
   const camera = useThree((s) => s.camera);
+  const aspect = useThree((s) => s.size.width / Math.max(1, s.size.height));
+  const framed = radius * fitScaleForAspect(aspect);
   const lastInteract = useRef(-Infinity);
   const focusStart = useRef(-Infinity);
-  const fitted = useRef<number | null>(initialFit);
+  /** layout radius the camera is framed for (null: never framed for real data) */
+  const fitted = useRef<number | null>(null);
+  /** a refit that is due but deferred while something is selected */
+  const pending = useRef<number | null>(null);
   const refitStart = useRef(-Infinity);
   const selKey = selection ? `${selection.kind}:${selection.id}` : '';
 
@@ -153,12 +214,9 @@ function CameraRig({
 
   // reframe on the first non-empty snapshot and when the fleet grows/shrinks a lot
   useEffect(() => {
-    if (!needsRefit(fitted.current, radius, projectCount)) return;
-    fitted.current = radius;
-    refitStart.current = store.t;
-    cameraFitPosition(radius, fitTmp);
-    fitPos.set(fitTmp.x, fitTmp.y, fitTmp.z);
-  }, [radius, projectCount, store]);
+    if (needsRefit(fitted.current, framed, projectCount)) pending.current = framed;
+    else pending.current = null;
+  }, [framed, projectCount]);
 
   useFrame((_, dtRaw) => {
     const c = controls.current;
@@ -166,9 +224,17 @@ function CameraRig({
     const dt = Math.min(dtRaw, 0.05);
     const userActive = performance.now() - lastInteract.current < 8000;
     c.autoRotate = !store.reduced && !selection && !userActive;
-    c.autoRotateSpeed = 0.28;
+    c.autoRotateSpeed = 0.22;
+    // a due refit starts only once nothing is selected; until then it stays pending
+    if (pending.current !== null && !selection) {
+      fitted.current = pending.current;
+      pending.current = null;
+      refitStart.current = store.t;
+      cameraFitPosition(fitted.current, fitTmp);
+      fitPos.set(fitTmp.x, fitTmp.y, fitTmp.z);
+    }
     if (!selection && store.t - refitStart.current < REFIT_SECONDS) {
-      const k = store.reduced ? 1 : damp(2.6, dt);
+      const k = store.reduced ? 1 : damp(1.9, dt);
       camera.position.lerp(fitPos, k);
       c.target.lerp(HOME, k);
       if (store.reduced) refitStart.current = -Infinity;
@@ -202,7 +268,7 @@ function CameraRig({
       enableDamping
       dampingFactor={0.08}
       minDistance={2.5}
-      maxDistance={Math.max(40, radius * 4)}
+      maxDistance={cameraMaxDistance(framed)}
       minPolarAngle={0.12}
       maxPolarAngle={Math.PI * 0.47}
       enablePan={!selection}
@@ -248,24 +314,27 @@ function buildStations(snap: FleetSnapshot, store: SceneStore): StationData[] {
       review: tasks.filter((t) => t.state === 'review').length,
       running: tasks.filter((t) => t.state === 'running').length,
       ci: pr?.ci ?? 'none',
+      index: l.index,
+      needs:
+        tasks.filter((t) => t.state === 'blocked').length +
+        agents.filter((a) => a.status === 'waiting').length,
     });
   }
   return out;
 }
 
-function SceneContents({
-  view,
-  selection,
-  onSelect,
-  initialFit,
-}: FleetSceneProps & { initialFit: number | null }) {
+function SceneContents({ view, selection, onSelect }: FleetSceneProps) {
   const store = useSceneStore();
+  const vt = useVizTheme();
+  store.vt = vt;
   const snap = view.snapshot;
   const replayAt = view.mode === 'replay' ? view.replay.at : null;
   store.syncClock(view.mode, replayAt ?? snap?.generatedAt ?? -Infinity);
   store.setSnapshot(snap);
   const stations = useMemo(() => (snap ? buildStations(snap, store) : []), [snap, store]);
   const radius = layoutRadius(store.projectCount);
+  const aspect = useThree((s) => s.size.width / Math.max(1, s.size.height));
+  const fog = fogRange(radius, aspect);
 
   useEffect(() => {
     const scratch = new THREE.Vector3();
@@ -274,25 +343,39 @@ function SceneContents({
 
   const selectProject = useCallback((id: string) => onSelect({ kind: 'project', id }), [onSelect]);
   const selectAgent = useCallback((id: string) => onSelect({ kind: 'agent', id }), [onSelect]);
-  const agents = useMemo(() => (snap ? snap.agents.slice(0, MAX_BOTS) : []), [snap]);
+  const agents = useMemo(() => {
+    if (!snap) return [];
+    const perProject = new Map<string, number>();
+    return snap.agents.slice(0, MAX_BOTS).map((a) => {
+      const order = perProject.get(a.projectId) ?? 0;
+      perProject.set(a.projectId, order + 1);
+      return { a, order };
+    });
+  }, [snap]);
 
   return (
     <>
       <SceneClock />
-      <color attach="background" args={[THEME.background]} />
-      <fog attach="fog" args={[THEME.fog, radius * 1.2, radius * 5]} />
-      <ambientLight intensity={0.25} color={HALYARD.fg} />
-      <directionalLight position={[8, 14, 6]} intensity={0.6} color={HALYARD.fg} />
-      <Stars
-        radius={160}
-        depth={70}
-        count={1400}
-        factor={2.2}
-        saturation={0}
-        fade
-        speed={store.reduced ? 0 : 0.25}
+      <color attach="background" args={[vt.bg]} />
+      <fog attach="fog" args={[vt.bg, fog.near, fog.far]} />
+      <ambientLight intensity={vt.dark ? 0.25 : 0.9} color={vt.dark ? vt.fg : '#ffffff'} />
+      <directionalLight
+        position={[8, 14, 6]}
+        intensity={vt.dark ? 0.6 : 1.2}
+        color={vt.dark ? vt.fg : '#ffffff'}
       />
-      <Floor radius={radius} />
+      {vt.dark && (
+        <Stars
+          radius={160}
+          depth={70}
+          count={1200}
+          factor={2}
+          saturation={0}
+          fade
+          speed={store.reduced ? 0 : 0.2}
+        />
+      )}
+      <Floor radius={radius} vt={vt} />
       {stations.map((d) => (
         <Station
           key={d.id}
@@ -302,10 +385,11 @@ function SceneContents({
         />
       ))}
       {snap && <TaskSatellites snapshot={snap} onSelectProject={selectProject} />}
-      {agents.map((a) => (
+      {agents.map(({ a, order }) => (
         <Bot
           key={a.id}
           agent={a}
+          order={order}
           selected={
             !!selection &&
             (selection.kind === 'agent' || selection.kind === 'session') &&
@@ -316,96 +400,98 @@ function SceneContents({
       ))}
       <Effects />
       <Hud selection={selection} snapshot={snap} replayAt={replayAt} onClose={() => onSelect(null)} />
-      <CameraRig
-        selection={selection}
-        radius={radius}
-        projectCount={store.projectCount}
-        initialFit={initialFit}
-      />
+      <CameraRig selection={selection} radius={radius} projectCount={store.projectCount} />
     </>
   );
 }
 
-const overlayText: CSSProperties = {
+const overlayText = (vt: VizTheme): CSSProperties => ({
   position: 'absolute',
-  fontFamily: HALYARD.fontMono,
+  fontFamily: FONTS.mono,
   fontSize: 10,
-  letterSpacing: HALYARD.trackingCaps,
+  letterSpacing: FONTS.trackingCaps,
   textTransform: 'uppercase',
-  color: HALYARD.fgSubtle,
+  color: vt.fgSubtle,
   pointerEvents: 'none',
   userSelect: 'none',
-};
+});
 
-function Legend() {
-  return (
-    <div style={{ ...overlayText, left: 16, bottom: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div style={{ display: 'flex', gap: 14 }}>
-        {(Object.keys(MODEL_COLORS) as (keyof typeof MODEL_COLORS)[])
-          .filter((m) => m !== 'unknown')
-          .map((m) => (
-            <span key={m} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <span
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: 6,
-                  background: MODEL_COLORS[m],
-                  display: 'inline-block',
-                }}
-              />
-              {m}
-            </span>
-          ))}
+function Legend({ vt }: { vt: VizTheme }) {
+  const models = ['opus', 'sonnet', 'haiku', 'fable', 'astra'] as const;
+  const narrow = useNarrow();
+  if (narrow)
+    return (
+      <div
+        style={{ ...overlayText(vt), left: 12, bottom: 10, display: 'flex', alignItems: 'center', gap: 10 }}
+      >
+        {models.map((m) => (
+          <span
+            key={m}
+            title={m}
+            style={{ width: 6, height: 6, borderRadius: 6, background: vt.model[m], display: 'inline-block' }}
+          />
+        ))}
+        <span style={{ color: vt.accent, marginLeft: 4 }}>● needs you</span>
       </div>
-      <div style={{ display: 'flex', gap: 14, color: HALYARD.fgSubtle }}>
+    );
+  return (
+    <div
+      style={{
+        ...overlayText(vt),
+        left: 16,
+        bottom: 14,
+        right: 16,
+        display: 'flex',
+        flexWrap: 'wrap',
+        columnGap: 24,
+        rowGap: 6,
+      }}
+    >
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+        {models.map((m) => (
+          <span key={m} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <span
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: 6,
+                background: vt.model[m],
+                display: 'inline-block',
+              }}
+            />
+            {m}
+          </span>
+        ))}
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
         <span>◆ lead</span>
         <span>■ coder</span>
         <span>▲ critic</span>
         <span>● scout</span>
         <span>○ tester</span>
+        <span style={{ color: vt.accent }}>● needs you</span>
       </div>
     </div>
   );
 }
 
-function StatusLine({ view }: { view: FleetView }) {
-  const s = view.snapshot;
-  const working = s ? s.agents.filter((a) => a.status === 'working').length : 0;
-  const mode = view.mode === 'live' ? (view.connected ? 'live' : 'offline') : view.mode;
-  return (
-    <div style={{ ...overlayText, left: 16, top: 14, display: 'flex', gap: 16 }}>
-      <span style={{ color: view.mode === 'live' && view.connected ? HALYARD.success : HALYARD.accent }}>
-        ● {mode}
-      </span>
-      {s && (
-        <>
-          <span>{String(s.projects.length).padStart(2, '0')} stations</span>
-          <span>
-            {String(working).padStart(2, '0')}/{String(s.agents.length).padStart(2, '0')} agents active
-          </span>
-          {s.demo && <span style={{ color: HALYARD.fgMuted }}>synthetic data</span>}
-        </>
-      )}
-    </div>
-  );
-}
-
-export default function FleetScene({ view, selection, onSelect }: FleetSceneProps) {
+export default function FleetScene({ view: viewProp, selection, onSelect }: FleetSceneProps) {
+  // dev/screenshot harness: `?vizdev=1` swaps in synthetic data (never real transcripts)
+  const devView = useVizDevView();
+  const view = devView ?? viewProp;
   const [store] = useState(() => new SceneStore());
   const reduced = usePrefersReducedMotion();
   store.reduced = reduced;
+  const vt = vizTheme(useThemeName());
   const [dpr, setDpr] = useState(() =>
     typeof window === 'undefined' ? 1 : Math.min(2, window.devicePixelRatio || 1),
   );
-  const [initialFit] = useState<number | null>(() =>
-    view.snapshot && view.snapshot.projects.length > 0 ? layoutRadius(view.snapshot.projects.length) : null,
-  );
+  // start further out; the rig dollies in to the fitted framing once data is present
   const [initialCamera] = useState(() => {
-    const p = cameraFitPosition(initialFit ?? layoutRadius(1));
+    const n = view.snapshot?.projects.length ?? 0;
+    const p = cameraFitPosition(layoutRadius(Math.max(1, n)) * (reduced ? 1 : 1.45));
     return { position: [p.x, p.y, p.z] as [number, number, number], fov: 40, near: 0.1, far: 600 };
   });
-  const chroma = useMemo(() => new THREE.Vector2(0.00035, 0.00035), []);
 
   return (
     <div
@@ -414,8 +500,9 @@ export default function FleetScene({ view, selection, onSelect }: FleetSceneProp
         width: '100%',
         height: '100%',
         minHeight: 320,
-        background: THEME.background,
+        background: vt.bg,
         overflow: 'hidden',
+        isolation: 'isolate',
       }}
     >
       <Canvas
@@ -424,44 +511,64 @@ export default function FleetScene({ view, selection, onSelect }: FleetSceneProp
         gl={{ antialias: false, powerPreference: 'high-performance', stencil: false }}
         onPointerMissed={() => onSelect(null)}
       >
-        <SceneStoreContext.Provider value={store}>
-          <PerformanceMonitor
-            onIncline={() => setDpr((d) => Math.min(2, d + 0.5, window.devicePixelRatio || 1))}
-            onDecline={() => setDpr((d) => Math.max(1, d - 0.5))}
-            flipflops={3}
-            onFallback={() => setDpr(1)}
-          >
-            <SceneContents view={view} selection={selection} onSelect={onSelect} initialFit={initialFit} />
-            <EffectComposer multisampling={4} enableNormalPass={false}>
-              <Bloom
-                mipmapBlur
-                luminanceThreshold={1}
-                luminanceSmoothing={0.25}
-                intensity={0.85}
-                radius={0.72}
-              />
-              <ChromaticAberration offset={chroma} radialModulation modulationOffset={0.45} />
-              <Vignette darkness={0.62} offset={0.28} />
-              <Noise premultiply blendFunction={BlendFunction.SOFT_LIGHT} opacity={0.32} />
-            </EffectComposer>
-          </PerformanceMonitor>
-        </SceneStoreContext.Provider>
+        <VizThemeContext.Provider value={vt}>
+          <SceneStoreContext.Provider value={store}>
+            <PerformanceMonitor
+              onIncline={() => setDpr((d) => Math.min(2, d + 0.5, window.devicePixelRatio || 1))}
+              onDecline={() => setDpr((d) => Math.max(1, d - 0.5))}
+              flipflops={3}
+              onFallback={() => setDpr(1)}
+            >
+              <SceneContents view={view} selection={selection} onSelect={onSelect} />
+              <EffectComposer multisampling={4} enableNormalPass={false}>
+                <Bloom
+                  mipmapBlur
+                  luminanceThreshold={1}
+                  luminanceSmoothing={0.2}
+                  intensity={vt.bloom}
+                  radius={0.6}
+                />
+                <Vignette darkness={vt.dark ? 0.5 : 0.12} offset={0.3} />
+              </EffectComposer>
+            </PerformanceMonitor>
+          </SceneStoreContext.Provider>
+        </VizThemeContext.Provider>
       </Canvas>
-      <StatusLine view={view} />
-      <Legend />
+      <style>{`@media (max-width: 560px) { .fl-viz-name { font-size: 14px !important; } .fl-viz-sub[data-needs='0'] { display: none; } }`}</style>
+      {/* depth: Halyard vignette + film grain (DOM, composited by the browser; no per-frame GPU cost) */}
+      <div
+        aria-hidden
+        style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: vt.vignette }}
+      />
+      <div
+        aria-hidden
+        style={{
+          position: 'absolute',
+          inset: 0,
+          pointerEvents: 'none',
+          backgroundImage: GRAIN,
+          backgroundSize: '160px 160px',
+          mixBlendMode: 'overlay',
+          opacity: vt.grainOpacity,
+        }}
+      />
+      {view.snapshot?.demo && (
+        <div style={{ ...overlayText(vt), top: 14, right: 16, color: vt.fgMuted }}>synthetic data</div>
+      )}
+      <Legend vt={vt} />
       {!view.snapshot && (
         <div
           style={{
-            ...overlayText,
+            ...overlayText(vt),
             inset: 0,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             fontSize: 11,
-            color: HALYARD.fgMuted,
+            color: vt.fgMuted,
           }}
         >
-          awaiting telemetry
+          waiting for the collector
         </div>
       )}
     </div>

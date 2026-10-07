@@ -3,9 +3,11 @@ import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import { Trail } from '@react-three/drei';
 import * as THREE from 'three';
 import type { Agent, AgentStatus } from '@fleet/shared';
-import { arcPoint, damp, flightDuration, hash01, hoverOffset, locationKey, vec3 } from './layout';
+import { easing, ease } from '@fleet/ui';
+import { arcPoint, clamp, damp, flightDuration, hash01, hoverOffset, locationKey, vec3 } from './layout';
+import { INTRO_DELAY, INTRO_STAGGER } from './Station';
 import { useSceneStore } from './store';
-import { MODEL_COLORS, ROLE_SCALE, ROLE_SHAPES, THEME, type BotShape } from './theme';
+import { ROLE_SCALE, ROLE_SHAPES, useVizTheme, type BotShape } from './theme';
 
 let geos: Record<BotShape, THREE.BufferGeometry> | null = null;
 function botGeometries(): Record<BotShape, THREE.BufferGeometry> {
@@ -24,16 +26,19 @@ function botGeometries(): Record<BotShape, THREE.BufferGeometry> {
 }
 const hitGeo = new THREE.SphereGeometry(1, 8, 6);
 const selGeo = new THREE.TorusGeometry(1, 0.025, 4, 48);
-const SEL_COLOR = new THREE.Color(THEME.accent).multiplyScalar(1.6);
 const hitMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
 
+/** static glow per status: persistent states never loop (DESIGN.md motion language) */
 const STATUS_INTENSITY: Record<AgentStatus, number> = {
-  working: 1.9,
-  waiting: 1.3,
-  idle: 0.8,
-  done: 0.35,
+  working: 1.7,
+  waiting: 2.4,
+  idle: 0.75,
+  done: 0.3,
   failed: 2.2,
 };
+/** first-load landing: vessels drop in, army by army, 24ms apart (max 8 staggered, then together) */
+const INTRO_DROP = 3.5;
+const INTRO_LAND = 0.9;
 const trailAttenuation = (w: number) => w * w;
 
 // per-frame scratch (shared by all bots; each frame is processed sequentially)
@@ -49,18 +54,26 @@ interface Motion {
   start: number;
   dur: number;
   flying: boolean;
+  /** first-load landing (vertical drop with land easing) instead of an arc */
+  landing: boolean;
+  /** per-bot hover clock: advances only while working */
+  hoverT: number;
 }
 
 function BotImpl({
   agent,
+  order,
   selected,
   onSelect,
 }: {
   agent: Agent;
+  /** index among its project's agents (intro stagger) */
+  order: number;
   selected: boolean;
   onSelect(id: string): void;
 }) {
   const store = useSceneStore();
+  const vt = useVizTheme();
   const group = useRef<THREE.Group>(null!);
   const body = useRef<THREE.Mesh>(null);
   const mat = useRef<THREE.MeshStandardMaterial>(null);
@@ -68,10 +81,12 @@ function BotImpl({
   const phase = useMemo(() => hash01(agent.id), [agent.id]);
   const shape = ROLE_SHAPES[agent.role];
   const size = ROLE_SCALE[agent.role] * (agent.status === 'done' ? 0.7 : 1);
-  const color = agent.status === 'failed' ? THEME.failure : MODEL_COLORS[agent.model];
+  const color =
+    agent.status === 'failed' ? vt.danger : agent.status === 'waiting' ? vt.accent : vt.model[agent.model];
   const baseColor = useMemo(() => new THREE.Color(color), [color]);
-  const trailColor = useMemo(() => new THREE.Color(color).multiplyScalar(1.15), [color]);
-  const wireColor = useMemo(() => new THREE.Color(color).multiplyScalar(0.8), [color]);
+  const trailColor = useMemo(() => new THREE.Color(color).multiplyScalar(vt.gain(1.1)), [color, vt]);
+  const wireColor = useMemo(() => new THREE.Color(color).multiplyScalar(vt.dark ? 0.7 : 1), [color, vt]);
+  const selColor = useMemo(() => new THREE.Color(vt.focus).multiplyScalar(vt.gain(1.5)), [vt]);
   const status = agent.status;
 
   // initial position: spawned bots emerge from their station core, initial-load bots start in place
@@ -80,20 +95,26 @@ function BotImpl({
     const r = store.resolveLocation(loc, agent.projectId, target);
     const fresh = store.t > 1.5;
     const from = new THREE.Vector3();
+    const hoverT = phase * 20;
+    const l = store.layouts.get(agent.projectId);
     if (fresh) {
-      const l = store.layouts.get(agent.projectId);
       if (l) from.copy(l.pos);
       else from.copy(target);
     } else {
-      hoverOffset(phase, store.at, r, hov);
-      from.set(target.x + hov.x, target.y + hov.y, target.z + hov.z);
+      hoverOffset(phase, hoverT, r, hov);
+      from.set(target.x + hov.x, target.y + hov.y + (store.reduced ? 0 : INTRO_DROP), target.z + hov.z);
     }
+    const intro = !fresh && !store.reduced;
     return {
       key: fresh ? '' : locationKey(loc.kind, loc.projectId, loc.ref),
       from,
-      start: store.t,
-      dur: 1,
-      flying: false,
+      start: intro
+        ? INTRO_DELAY + (l?.index ?? 0) * INTRO_STAGGER + 0.35 + Math.min(order, 8) * 0.024
+        : store.t,
+      dur: INTRO_LAND,
+      flying: intro,
+      landing: intro,
+      hoverT,
     };
   });
   const [initialPos] = useState<[number, number, number]>(() => [
@@ -118,17 +139,17 @@ function BotImpl({
     if (!g) return;
     const dt = store.reduced ? 0 : Math.min(dtRaw, 0.05);
     const t = store.t;
-    const at = store.at;
     const live = store.agents.get(agent.id) ?? agent;
     const loc = store.effectiveLocation(live);
     const radius = store.resolveLocation(loc, live.projectId, target);
-    const idle = live.status !== 'working';
-    hoverOffset(phase, at * (idle ? 0.6 : 1), radius * (idle ? 1.15 : 1), hov);
+    const working = live.status === 'working';
+    if (working) motion.hoverT += dt;
+    hoverOffset(phase, motion.hoverT, radius * (working ? 1 : 1.15), hov);
     target.x += hov.x;
     target.y += hov.y;
     target.z += hov.z;
     const key = locationKey(loc.kind, loc.projectId, loc.ref);
-    if (key !== motion.key) {
+    if (key !== motion.key && !motion.landing) {
       motion.key = key;
       motion.from.copy(pos);
       motion.start = t;
@@ -137,7 +158,17 @@ function BotImpl({
       motion.flying = !store.reduced && dist > 0.25;
       if (store.reduced) pos.copy(target);
     }
-    if (motion.flying) {
+    if (motion.landing) {
+      const u = (t - motion.start) / motion.dur;
+      g.visible = u >= 0;
+      const e = ease(easing.land, clamp(u, 0, 1));
+      pos.set(target.x, target.y + (1 - e) * INTRO_DROP, target.z);
+      if (u >= 1) {
+        motion.landing = false;
+        motion.flying = false;
+        motion.key = key;
+      }
+    } else if (motion.flying) {
       const u = (t - motion.start) / motion.dur;
       if (u >= 1) motion.flying = false;
       fromV.x = motion.from.x;
@@ -154,22 +185,19 @@ function BotImpl({
     }
     g.position.copy(pos);
     if (body.current) {
-      const spin = live.status === 'working' ? 1.6 : 0.5;
-      body.current.rotation.y += dt * spin * (motion.flying ? 3 : 1);
-      body.current.rotation.x = Math.sin(at * 1.1 + phase * 7) * 0.4;
+      const spin = working ? 1.2 : 0;
+      body.current.rotation.y += dt * (spin + (motion.flying ? 3 : 0));
+      body.current.rotation.x = 0.35 * Math.sin(phase * 7);
     }
     if (mat.current) {
       let k = STATUS_INTENSITY[live.status];
-      if (live.status === 'working') k *= 0.8 + 0.3 * Math.sin(at * 4 + phase * 9);
-      if (live.status === 'failed') k *= Math.sin(at * 10) > 0 ? 1 : 0.25;
-      if (live.status === 'waiting') k *= 0.7 + 0.5 * Math.abs(Math.sin(at * 2));
-      if (motion.flying) k *= 1.4;
-      mat.current.emissiveIntensity = k;
+      if (motion.flying) k *= 1.3;
+      mat.current.emissiveIntensity = vt.gain(k);
     }
     if (sel.current) {
       sel.current.visible = selected;
-      sel.current.rotation.x = Math.PI / 2 + Math.sin(at * 2) * 0.2;
-      sel.current.rotation.z += dt * 2;
+      sel.current.rotation.x = Math.PI / 2;
+      sel.current.rotation.z += dt * 0.8;
     }
   });
 
@@ -181,13 +209,13 @@ function BotImpl({
   const g = botGeometries()[shape];
   return (
     <>
-      <group ref={group} position={initialPos}>
+      <group ref={group} position={initialPos} visible={!motion.landing}>
         <mesh ref={body} geometry={g} scale={size}>
           <meshStandardMaterial
             ref={mat}
-            color="#0a0f18"
+            color={vt.coreBody}
             emissive={baseColor}
-            emissiveIntensity={STATUS_INTENSITY[status]}
+            emissiveIntensity={vt.gain(STATUS_INTENSITY[status])}
             metalness={0.4}
             roughness={0.3}
             flatShading
@@ -205,7 +233,7 @@ function BotImpl({
           />
         </mesh>
         <mesh ref={sel} geometry={selGeo} scale={size * 2.4} visible={selected}>
-          <meshBasicMaterial color={SEL_COLOR} toneMapped={false} />
+          <meshBasicMaterial color={selColor} toneMapped={false} />
         </mesh>
         <mesh geometry={hitGeo} material={hitMat} scale={Math.max(0.45, size * 2)} onClick={click} />
       </group>

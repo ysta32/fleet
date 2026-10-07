@@ -5,6 +5,13 @@ import {
   anchorOffset,
   cameraFitPosition,
   needsRefit,
+  fitScaleForAspect,
+  cameraFitDistance,
+  cameraMaxDistance,
+  fogRange,
+  alertPulse,
+  ALERT_STATIC_GLOW,
+  layoutRadius,
   arcHeight,
   arcPoint,
   easeInOutCubic,
@@ -196,5 +203,58 @@ describe('camera fit', () => {
     const b = cameraFitPosition(20);
     expect(Math.hypot(b.x, b.y, b.z)).toBeGreaterThan(Math.hypot(a.x, a.y, a.z));
     expect(b.y).toBeGreaterThan(0);
+  });
+});
+
+describe('fitScaleForAspect', () => {
+  it('leaves landscape alone and backs off for portrait', () => {
+    expect(fitScaleForAspect(16 / 9)).toBe(1);
+    expect(fitScaleForAspect(375 / 812)).toBeGreaterThan(3);
+    expect(fitScaleForAspect(1)).toBeCloseTo(1.6);
+    expect(fitScaleForAspect(0)).toBe(1);
+  });
+});
+
+describe('cameraMaxDistance', () => {
+  it('never clamps the fitted (or intro) pose, even on portrait screens', () => {
+    for (const n of [1, 3, 5, 8, 12, 40]) {
+      for (const aspect of [16 / 9, 1, 375 / 812, 0.3]) {
+        const framed = layoutRadius(n) * fitScaleForAspect(aspect);
+        const fit = cameraFitDistance(framed);
+        const max = cameraMaxDistance(framed);
+        expect(max).toBeGreaterThanOrEqual(fit * 1.45);
+        expect(max).toBeGreaterThanOrEqual(40);
+      }
+    }
+  });
+});
+
+describe('fogRange', () => {
+  it('keeps the whole layout inside the fog far plane at the fitted pose, across aspects', () => {
+    for (const n of [1, 3, 5, 8, 12, 40]) {
+      const r = layoutRadius(n);
+      for (const aspect of [21 / 9, 16 / 9, 1, 375 / 812, 0.3]) {
+        const { near, far } = fogRange(r, aspect);
+        expect(far).toBeGreaterThan(cameraFitDistance(r * fitScaleForAspect(aspect)) + r);
+        expect(near).toBeGreaterThanOrEqual(0);
+        expect(near).toBeLessThan(far);
+      }
+    }
+  });
+});
+
+describe('alertPulse', () => {
+  it('pulses once (scale + glow) and is silent outside the alert window', () => {
+    expect(alertPulse(-0.1, false)).toEqual({ scale: 0, glow: 0 });
+    expect(alertPulse(1, false)).toEqual({ scale: 0, glow: 0 });
+    const mid = alertPulse(0.2, false); // rising edge (the alert curve overshoots past 1 later)
+    expect(mid.scale).toBeGreaterThan(0);
+    expect(mid.glow).toBe(mid.scale);
+  });
+  it('never scales under reduced motion; glow is static for the whole alert', () => {
+    for (const u of [0, 0.1, 0.25, 0.5, 0.75, 0.99]) {
+      expect(alertPulse(u, true)).toEqual({ scale: 0, glow: ALERT_STATIC_GLOW });
+    }
+    expect(alertPulse(1, true)).toEqual({ scale: 0, glow: 0 });
   });
 });

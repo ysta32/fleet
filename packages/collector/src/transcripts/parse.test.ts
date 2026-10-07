@@ -330,6 +330,38 @@ describe('Bash detection privacy (only executed commands match)', () => {
   }
 
   it.each([
+    ['pytest -q', 'pytest'],
+    ['vitest run', 'vitest'],
+    ['jest', 'jest'],
+    ['npm test', 'npm'],
+  ])('detects the test command %s', (command, runner) => {
+    expect(bashEvents(command)).toMatchObject([
+      { kind: 'test.run', label: `Tests (${runner})`, data: { runner } },
+    ]);
+  });
+
+  it.each(['--subject', '--body', '-t', '--title', '-b', '--repo', '-R'])(
+    'skips the value of merge option %s',
+    (option) => {
+      expect(bashEvents(`gh pr merge ${option} 123 42`)).toMatchObject([
+        { kind: 'merge', label: 'PR #42 merged', data: { pr: 42 } },
+      ]);
+      const withoutPr = bashEvents(`gh pr merge ${option} 123`);
+      expect(withoutPr).toMatchObject([{ kind: 'merge', label: 'Branch merged' }]);
+      expect(withoutPr[0]?.data).toBeUndefined();
+      const events = bashEvents(`gh pr merge ${option} "${SECRET}" --squash 42`);
+      expect(events).toMatchObject([{ kind: 'merge', data: { pr: 42 } }]);
+      expect(JSON.stringify(events)).not.toContain(SECRET);
+    },
+  );
+
+  it('handles attached merge option values and an option terminator', () => {
+    expect(bashEvents('gh pr merge --subject=123 -R123 -- 42')).toMatchObject([
+      { kind: 'merge', data: { pr: 42 } },
+    ]);
+  });
+
+  it.each([
     ['double-quoted', `printf %s "example gh release create ${SECRET} text"`],
     [
       'single-quoted',

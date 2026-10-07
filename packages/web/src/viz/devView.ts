@@ -18,6 +18,9 @@ import type {
   Session,
   Severity,
 } from '@fleet/shared';
+import * as shared from '@fleet/shared';
+import type { DemoFleet } from '@fleet/shared';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import type { FleetView, ReplayControls } from '../data/contract';
 
 function mulberry32(seed: number): () => number {
@@ -52,6 +55,8 @@ export interface DevFleet {
   subscribe(cb: () => void): () => void;
   start(): void;
   stop(): void;
+  /** dev/screenshot trigger: fire a synthetic event of `kind` on the n-th project */
+  fire(kind: FleetEventKind, projectIndex?: number): void;
 }
 
 export function createDevFleet(opts: { seed?: number; projects?: number; tickMs?: number } = {}): DevFleet {
@@ -170,6 +175,11 @@ export function createDevFleet(opts: { seed?: number; projects?: number; tickMs?
       }
     }
   }
+
+  // one agent waits on the operator: the scene's single "needs you" signal
+  const waitIn = projects[Math.min(1, projects.length - 1)]!.id;
+  const waiter = agents.find((x) => x.role !== 'lead' && x.projectId === waitIn);
+  if (waiter) waiter.status = 'waiting';
 
   const listeners = new Set<(e: FleetEvent) => void>();
   const changeListeners = new Set<() => void>();
@@ -346,5 +356,143 @@ export function createDevFleet(opts: { seed?: number; projects?: number; tickMs?
       if (timer) clearInterval(timer);
       timer = null;
     },
+    fire(kind, projectIndex = 0) {
+      const p = projects[Math.abs(projectIndex) % projects.length]!;
+      const sev: Severity = kind === 'failure' ? 'error' : kind === 'blocked' ? 'warn' : 'success';
+      emit(kind, p.id, sev, `synthetic ${kind}`);
+    },
   };
+}
+
+/**
+ * Adapter: drive a FleetView from the shared synthetic demo generator (createDemoFleet) when
+ * @fleet/shared exports it. Events are emitted as the internal clock advances; the snapshot is
+ * refreshed at most every second.
+ */
+export function fromDemoFleet(demo: DemoFleet, tickMs = 250): DevFleet {
+  const listeners = new Set<(e: FleetEvent) => void>();
+  const changeListeners = new Set<() => void>();
+  const events: FleetEvent[] = [];
+  const t0 = Date.now();
+  let snapshot = demo.snapshot();
+  let lastSnap = 0;
+  let timer: ReturnType<typeof setInterval> | null = null;
+  const replay: ReplayControls = {
+    from: t0,
+    to: t0,
+    at: t0,
+    playing: false,
+    speed: 1,
+    seek: () => undefined,
+    setPlaying: () => undefined,
+    setSpeed: () => undefined,
+    load: () => undefined,
+    exit: () => undefined,
+  };
+  const make = (): FleetView => ({
+    mode: 'demo',
+    connected: true,
+    snapshot,
+    events: events.slice(),
+    onEvent(cb) {
+      listeners.add(cb);
+      return () => listeners.delete(cb);
+    },
+    replay,
+    startReplay: () => undefined,
+  });
+  let current = make();
+  const push = (e: FleetEvent) => {
+    events.push(e);
+    if (events.length > 300) events.shift();
+    for (const l of listeners) l(e);
+  };
+  return {
+    view: () => current,
+    subscribe(cb) {
+      changeListeners.add(cb);
+      return () => changeListeners.delete(cb);
+    },
+    start() {
+      if (timer) return;
+      timer = setInterval(() => {
+        for (const e of demo.tick(tickMs)) push(e);
+        const now = Date.now();
+        if (now - lastSnap >= 1000) {
+          lastSnap = now;
+          snapshot = demo.snapshot();
+          current = make();
+          for (const l of changeListeners) l();
+        }
+      }, tickMs);
+    },
+    stop() {
+      if (timer) clearInterval(timer);
+      timer = null;
+    },
+    fire(kind, projectIndex = 0) {
+      const ps = snapshot.projects;
+      if (!ps.length) return;
+      const p = ps[Math.abs(projectIndex) % ps.length]!;
+      const ts = Date.now();
+      push({
+        id: `${ts}-dev`,
+        ts,
+        kind,
+        projectId: p.id,
+        severity: kind === 'failure' ? 'error' : 'success',
+        label: `synthetic ${kind}`,
+      });
+    },
+  };
+}
+
+type DemoFactory = (opts?: { seed?: number; projects?: number }) => DemoFleet;
+
+/** Prefer the shared demo generator when exported; fall back to the local synthetic one. */
+export function createVizDevFleet(opts: { seed?: number; projects?: number } = {}): DevFleet {
+  const factory: unknown = Reflect.get(shared, 'createDemoFleet');
+  if (typeof factory === 'function') return fromDemoFleet((factory as DemoFactory)(opts));
+  return createDevFleet(opts);
+}
+
+/** True when the page was opened with `?vizdev=1` (dev/screenshot harness for the visualizer). */
+export function isVizDevRequested(
+  search: string = typeof window === 'undefined' ? '' : window.location.search,
+): boolean {
+  const v = new URLSearchParams(search).get('vizdev');
+  return v !== null && v !== '0' && v !== 'false';
+}
+
+/**
+ * When `?vizdev=1` is present, returns a synthetic FleetView (and exposes `window.__vizdev.fire`
+ * for screenshot choreography); otherwise null and does nothing.
+ */
+let sharedFleet: DevFleet | null = null;
+let sharedUsers = 0;
+
+/** One synthetic fleet per page: every useVizDevView caller (harness + nested scene) shares it. */
+function sharedVizDevFleet(): DevFleet {
+  return (sharedFleet ??= createVizDevFleet());
+}
+
+function acquireSharedFleet(fleet: DevFleet): () => void {
+  if (sharedUsers++ === 0) {
+    fleet.start();
+    const w = window as unknown as { __vizdev?: { fire: DevFleet['fire'] } };
+    w.__vizdev = { fire: fleet.fire };
+  }
+  return () => {
+    if (--sharedUsers > 0) return;
+    fleet.stop();
+    delete (window as unknown as { __vizdev?: unknown }).__vizdev;
+  };
+}
+
+export function useVizDevView(): FleetView | null {
+  const [fleet] = useState<DevFleet | null>(() => (isVizDevRequested() ? sharedVizDevFleet() : null));
+  useEffect(() => (fleet ? acquireSharedFleet(fleet) : undefined), [fleet]);
+  const sub = useCallback((cb: () => void) => (fleet ? fleet.subscribe(cb) : () => undefined), [fleet]);
+  const get = useCallback(() => (fleet ? fleet.view() : null), [fleet]);
+  return useSyncExternalStore(sub, get);
 }

@@ -4,6 +4,7 @@
  * Functions taking an `out` parameter write into it and return it (no per-frame allocation).
  */
 import type { LocationKind } from '@fleet/shared';
+import { easing, ease } from '@fleet/ui';
 
 export interface Vec3 {
   x: number;
@@ -102,6 +103,38 @@ export function cameraFitPosition(r: number, out: Vec3 = vec3()): Vec3 {
   out.y = r * 0.95;
   out.z = r * 1.85;
   return out;
+}
+
+/** Camera-to-target distance of the fitted framing for a layout radius `r`. */
+export function cameraFitDistance(r: number): number {
+  return r * Math.hypot(0.1, 0.95, 1.85);
+}
+
+/**
+ * OrbitControls max distance for a fitted (aspect-scaled) radius: leaves room for the 1.45x intro
+ * dolly plus some user zoom-out, so the fitted pose is never clamped (which would crop portrait).
+ */
+export function cameraMaxDistance(framed: number): number {
+  return Math.max(40, cameraFitDistance(framed) * 1.45 * 1.2);
+}
+
+/**
+ * Fog near/far for a layout radius at a viewport aspect: measured from the fitted camera distance so
+ * portrait framings (camera much further out) do not fog the stations away. Landscape stays at the
+ * original ~1.1r / ~4.2r look.
+ */
+export function fogRange(radius: number, aspect: number): { near: number; far: number } {
+  const d = cameraFitDistance(radius * fitScaleForAspect(aspect));
+  return { near: Math.max(0, d - radius * 0.95), far: d + radius * 2.1 };
+}
+
+/**
+ * Distance multiplier so a ring layout framed for a landscape viewport still fits portrait screens
+ * (the horizontal field of view shrinks with the aspect ratio).
+ */
+export function fitScaleForAspect(aspect: number): number {
+  if (!(aspect > 0)) return 1;
+  return aspect >= 1.6 ? 1 : 1.6 / aspect;
 }
 
 /**
@@ -297,3 +330,20 @@ export function formatTokens(n: number): string {
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return String(Math.round(n));
 }
+
+/**
+ * One-shot alert at progress `u` (0..1 over the alert duration; outside that range = no alert).
+ * `scale` is the overshoot pulse (motion), `glow` the emissive boost. Under reduced motion there is
+ * no scale pulse and the glow is a static level held for the alert's duration.
+ */
+export const ALERT_STATIC_GLOW = 0.6;
+export function alertPulse(u: number, reduced: boolean): { scale: number; glow: number } {
+  const on = u >= 0 && u < 1;
+  if (!on) return NO_ALERT;
+  if (reduced) return REDUCED_ALERT;
+  pulseOut.scale = pulseOut.glow = Math.sin(Math.PI * ease(easing.alert, u));
+  return pulseOut;
+}
+const NO_ALERT = Object.freeze({ scale: 0, glow: 0 });
+const REDUCED_ALERT = Object.freeze({ scale: 0, glow: ALERT_STATIC_GLOW });
+const pulseOut = { scale: 0, glow: 0 };
