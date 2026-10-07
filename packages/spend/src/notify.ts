@@ -14,16 +14,43 @@ export interface NotifyDeps {
   writeFile?: typeof writeFileSync;
   mkdir?: typeof mkdirSync;
   chmod?: typeof chmodSync;
+  env?: Record<string, string | undefined>;
+  fleetConfigPath?: string;
 }
 
 function appleScriptString(value: string): string {
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\r/g, '\\r').replace(/\n/g, '\\n')}"`;
 }
 
-function connectionRefused(error: unknown): boolean {
-  if (error === null || typeof error !== 'object') return false;
-  const value = error as { code?: unknown; cause?: unknown };
-  return value.code === 'ECONNREFUSED' || (value.cause !== undefined && connectionRefused(value.cause));
+type Channel = 'macos' | 'fleet' | 'ntfy';
+
+function isSentState(value: unknown): value is Record<string, Channel[]> {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.values(value).every(
+      (channels: unknown) =>
+        Array.isArray(channels) &&
+        channels.every(
+          (channel: unknown) => channel === 'macos' || channel === 'fleet' || channel === 'ntfy',
+        ),
+    )
+  );
+}
+
+function fleetToken(deps: NotifyDeps, readFile: typeof readFileSync): string | undefined {
+  const token = (deps.env ?? process.env).FLEET_TOKEN;
+  if (token) return token;
+  try {
+    const config: unknown = JSON.parse(
+      readFile(deps.fleetConfigPath ?? join(homedir(), '.config/fleet/config.json'), 'utf8'),
+    );
+    if (config !== null && typeof config === 'object' && 'token' in config) {
+      return typeof config.token === 'string' && config.token ? config.token : undefined;
+    }
+  } catch {}
+  return undefined;
 }
 
 export async function dispatchAlerts(
@@ -38,67 +65,69 @@ export async function dispatchAlerts(
   const writeFile = deps.writeFile ?? writeFileSync;
   const mkdir = deps.mkdir ?? mkdirSync;
   const chmod = deps.chmod ?? chmodSync;
-  let ids: unknown = [];
+  let sent = new Map<string, Channel[]>();
   try {
     const state: unknown = JSON.parse(readFile(statePath, 'utf8'));
-    ids = state !== null && typeof state === 'object' ? (state as { sentIds?: unknown }).sentIds : undefined;
-    if (!Array.isArray(ids) || !ids.every((id: unknown) => typeof id === 'string')) {
-      throw new TypeError('Invalid spend notification state');
-    }
+    if (isSentState(state)) sent = new Map(Object.entries(state));
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    if (!(error instanceof SyntaxError) && (error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
-  const sent = new Set(ids as string[]);
+  const token = cfg.notify.fleet ? fleetToken(deps, readFile) : undefined;
   const newlySent: SpendAlert[] = [];
+  const attempted = new Set<string>();
   for (const alert of alerts) {
-    if (sent.has(alert.id)) continue;
+    if (attempted.has(alert.id)) continue;
+    attempted.add(alert.id);
+    const channels = sent.get(alert.id) ?? [];
     let delivered = false;
-    const errors: unknown[] = [];
-    if (cfg.notify.macos && (deps.platform ?? process.platform) === 'darwin') {
+    if (cfg.notify.macos && !channels.includes('macos') && (deps.platform ?? process.platform) === 'darwin') {
       try {
         await exec('osascript', [
           '-e',
           `display notification ${appleScriptString(alert.body)} with title "Fleet Spend" subtitle ${appleScriptString(alert.title)}`,
         ]);
+        channels.push('macos');
         delivered = true;
-      } catch (error) {
-        errors.push(error);
-      }
+      } catch {}
     }
-    if (cfg.notify.fleet) {
+    if (cfg.notify.fleet && token && !channels.includes('fleet')) {
       try {
         const response = await fetch('http://127.0.0.1:4747/api/alerts', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ kind: 'spend.budget', title: alert.title, body: alert.body, id: alert.id }),
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            kind: 'spend.budget',
+            title: alert.title.slice(0, 80),
+            body: alert.body.slice(0, 200),
+            id: alert.id,
+          }),
         });
-        if (!response.ok) throw new Error(`Fleet notification failed (${response.status})`);
-        delivered = true;
-      } catch (error) {
-        if (!connectionRefused(error)) errors.push(error);
-      }
+        if (response.ok) {
+          channels.push('fleet');
+          delivered = true;
+        }
+      } catch {}
     }
-    if (cfg.notify.ntfyUrl) {
+    if (cfg.notify.ntfyUrl && !channels.includes('ntfy')) {
       try {
         const response = await fetch(cfg.notify.ntfyUrl, {
           method: 'POST',
           headers: { Title: alert.title.replace(/[\r\n]+/g, ' ') },
           body: alert.body,
         });
-        if (!response.ok) throw new Error(`ntfy notification failed (${response.status})`);
-        delivered = true;
-      } catch (error) {
-        errors.push(error);
-      }
+        if (response.ok) {
+          channels.push('ntfy');
+          delivered = true;
+        }
+      } catch {}
     }
     if (delivered) {
-      sent.add(alert.id);
+      sent.set(alert.id, channels);
       mkdir(dirname(statePath), { recursive: true, mode: 0o700 });
-      writeFile(statePath, `${JSON.stringify({ sentIds: [...sent] })}\n`, { mode: 0o600 });
+      writeFile(statePath, `${JSON.stringify(Object.fromEntries(sent))}\n`, { mode: 0o600 });
       chmod(statePath, 0o600);
       newlySent.push(alert);
     }
-    if (errors.length > 0) throw errors[0];
   }
   return newlySent;
 }
