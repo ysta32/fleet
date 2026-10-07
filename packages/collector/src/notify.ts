@@ -123,7 +123,11 @@ export class Notifier {
         Tags: meta.tags,
         Priority: meta.high ? 'high' : 'default',
       };
-      this.safe(() => f(url, { method: 'POST', headers, body: alert.body }), 'ntfy failed');
+      this.safe(async () => {
+        const res = (await f(url, { method: 'POST', headers, body: alert.body })) as
+          { ok?: boolean; status?: number } | undefined;
+        if (res && res.ok === false) this.log(`ntfy delivery failed: HTTP ${res.status ?? 'unknown'}`);
+      }, 'ntfy failed');
     }
   }
 

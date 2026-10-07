@@ -129,4 +129,19 @@ describe('Notifier', () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(log).toHaveBeenCalledTimes(2);
   });
+
+  it('logs non-ok ntfy responses with status only', async () => {
+    const log = vi.fn();
+    const nt = new Notifier(cfg({ macos: false }), {
+      fetch: async () => ({ ok: false, status: 429 }),
+      platform: 'linux',
+      now: () => 1,
+      log,
+    });
+    nt.handle(ev('army.done'), snap());
+    await new Promise((r) => setTimeout(r, 0));
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(String(log.mock.calls[0][0])).toContain('429');
+    expect(String(log.mock.calls[0][0])).not.toContain('127.0.0.1');
+  });
 });
