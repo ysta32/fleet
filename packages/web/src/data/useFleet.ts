@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DemoFleet, FleetEvent, FleetSnapshot, HistoryResponse } from '@fleet/shared';
-import type { FleetView } from './contract';
+import type { FleetView, ReplayControls } from './contract';
 import { createDemoSource } from './demoSource';
 import { connectLive, fetchHistory } from './liveSource';
-import { clampPlayhead, eventsCrossed, normalizeHistory, reconstruct } from './replay';
+import { advancePlayhead, clampPlayhead, eventsCrossed, normalizeHistory, reconstruct } from './replay';
 
 interface Playback {
   history: HistoryResponse;
@@ -45,7 +45,19 @@ export function useFleet(): FleetView {
       setEvents((previous) => [...previous, event].slice(-300));
       if (!playbackRef.current) emit(event);
     };
-    if (!demo) return connectLive({ snapshot: setSnapshot, event: receive, connected: setConnected });
+    if (!demo) {
+      let stopped = false;
+      let disconnect: (() => void) | undefined;
+      queueMicrotask(() => {
+        if (!stopped) {
+          disconnect = connectLive({ snapshot: setSnapshot, event: receive, connected: setConnected });
+        }
+      });
+      return () => {
+        stopped = true;
+        disconnect?.();
+      };
+    }
     const fleet = createDemoSource();
     source.current = fleet;
     setSnapshot(fleet.snapshot());
@@ -70,7 +82,7 @@ export function useFleet(): FleetView {
     const tick = (now: number) => {
       const current = playbackRef.current;
       if (current?.playing) {
-        const at = clampPlayhead(current.history, current.at + (now - previous) * current.speed);
+        const at = advancePlayhead(current.history, current.at, now - previous, current.speed);
         updatePlayback({ ...current, at, playing: at < current.history.to });
         eventsCrossed(current.history, current.at, at).forEach(emit);
       }
@@ -94,8 +106,8 @@ export function useFleet(): FleetView {
       if (!Number.isFinite(hours) || hours <= 0) return;
       const duration = Math.min(hours, 24);
       request.current?.abort();
-      if (demo && source.current) {
-        load(source.current.history(duration));
+      if (demo) {
+        if (source.current) load(source.current.history(duration));
         return;
       }
       const controller = new AbortController();
@@ -116,36 +128,63 @@ export function useFleet(): FleetView {
     },
     [demo, load],
   );
-  const current = playback ? reconstruct(playback.history, playback.at) : { snapshot, events };
+  const seek = useCallback(
+    (at: number) => {
+      const p = playbackRef.current;
+      if (p && Number.isFinite(at)) updatePlayback({ ...p, at: clampPlayhead(p.history, at) });
+    },
+    [updatePlayback],
+  );
+  const setPlaying = useCallback(
+    (playing: boolean) => {
+      const p = playbackRef.current;
+      if (p) updatePlayback({ ...p, playing: playing && p.at < p.history.to });
+    },
+    [updatePlayback],
+  );
+  const setSpeed = useCallback(
+    (speed: number) => {
+      const p = playbackRef.current;
+      if (p && [1, 4, 16, 60].includes(speed)) updatePlayback({ ...p, speed });
+    },
+    [updatePlayback],
+  );
+  const exit = useCallback(() => {
+    request.current?.abort();
+    updatePlayback(null);
+  }, [updatePlayback]);
+  const history = playback?.history;
+  const at = playback?.at;
+  const reconstructed = useMemo(
+    () => (history && at !== undefined ? reconstruct(history, at) : null),
+    [history, at],
+  );
+  const from = history?.from ?? snapshot?.generatedAt ?? 0;
+  const to = history?.to ?? snapshot?.generatedAt ?? 0;
+  const replayAt = at ?? snapshot?.generatedAt ?? 0;
+  const playing = playback?.playing ?? false;
+  const speed = playback?.speed ?? 1;
+  const replay = useMemo<ReplayControls>(
+    () => ({
+      from,
+      to,
+      at: replayAt,
+      playing,
+      speed,
+      seek,
+      setPlaying,
+      setSpeed,
+      load,
+      exit,
+    }),
+    [from, to, replayAt, playing, speed, seek, setPlaying, setSpeed, load, exit],
+  );
   return {
     mode: playback ? 'replay' : demo ? 'demo' : 'live',
     connected,
-    ...current,
+    ...(reconstructed ?? { snapshot, events }),
     onEvent,
     startReplay,
-    replay: {
-      from: playback?.history.from ?? snapshot?.generatedAt ?? 0,
-      to: playback?.history.to ?? snapshot?.generatedAt ?? 0,
-      at: playback?.at ?? snapshot?.generatedAt ?? 0,
-      playing: playback?.playing ?? false,
-      speed: playback?.speed ?? 1,
-      seek(at) {
-        const p = playbackRef.current;
-        if (p && Number.isFinite(at)) updatePlayback({ ...p, at: clampPlayhead(p.history, at) });
-      },
-      setPlaying(playing) {
-        const p = playbackRef.current;
-        if (p) updatePlayback({ ...p, playing: playing && p.at < p.history.to });
-      },
-      setSpeed(speed) {
-        const p = playbackRef.current;
-        if (p && [1, 4, 16, 60].includes(speed)) updatePlayback({ ...p, speed });
-      },
-      load,
-      exit() {
-        request.current?.abort();
-        updatePlayback(null);
-      },
-    },
+    replay,
   };
 }

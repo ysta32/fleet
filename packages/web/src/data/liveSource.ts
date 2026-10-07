@@ -1,16 +1,30 @@
 import type { FleetEvent, FleetSnapshot, HistoryResponse } from '@fleet/shared';
 
+function initialToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  const url = new URL(window.location.href);
+  if (url.searchParams.has('token')) {
+    const token = url.searchParams.get('token');
+    try {
+      window.localStorage.setItem('fleet.token', token ?? '');
+    } catch {
+      // Keep authentication available when storage is disabled.
+    }
+    url.searchParams.delete('token');
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+    return token;
+  }
+  try {
+    return window.localStorage.getItem('fleet.token');
+  } catch {
+    return null;
+  }
+}
+
+let token = initialToken();
+
 export function apiUrl(path: string): string {
   const url = new URL(path, window.location.origin);
-  let token = new URLSearchParams(window.location.search).get('token');
-  if (!token) {
-    try {
-      token = window.localStorage.getItem('fleet.token') ?? window.localStorage.getItem('token');
-    } catch {
-      // Storage can be disabled; URL authentication remains available.
-    }
-  }
-  if (token) url.searchParams.set('token', token);
   return `${url.pathname}${url.search}`;
 }
 
@@ -32,7 +46,10 @@ export function connectLive(handlers: {
   const connect = () => {
     if (stopped) return;
     try {
-      source = new EventSource(apiUrl('/api/events'));
+      const url = new URL('/api/events', window.location.origin);
+      if (token) url.searchParams.set('token', token);
+      token = null;
+      source = new EventSource(`${url.pathname}${url.search}`);
     } catch {
       reconnect();
       return;
@@ -72,7 +89,10 @@ export function connectLive(handlers: {
 }
 
 export async function fetchHistory(from: number, to: number, signal: AbortSignal): Promise<HistoryResponse> {
-  const response = await fetch(apiUrl(`/api/history?from=${from}&to=${to}`), { signal });
+  const response = await fetch(apiUrl(`/api/history?from=${from}&to=${to}`), {
+    signal,
+    credentials: 'same-origin',
+  });
   if (!response.ok) throw new Error(`History unavailable (${response.status})`);
   return response.json() as Promise<HistoryResponse>;
 }

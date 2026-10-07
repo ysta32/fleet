@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { apiUrl, connectLive, fetchHistory } from '../data/liveSource';
+let liveSource: typeof import('../data/liveSource');
+const handlers = () => ({ snapshot: vi.fn(), event: vi.fn(), connected: vi.fn() });
 
 class MockEventSource {
   static instances: MockEventSource[] = [];
@@ -15,14 +16,17 @@ class MockEventSource {
   }
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  vi.resetModules();
   vi.useFakeTimers();
   MockEventSource.instances = [];
   vi.stubGlobal('EventSource', MockEventSource);
   vi.stubGlobal('window', {
-    location: { origin: 'http://localhost:4501', search: '' },
-    localStorage: { getItem: vi.fn(() => null) },
+    location: new URL('http://localhost:4501/'),
+    history: { state: { route: 'fleet' }, replaceState: vi.fn() },
+    localStorage: { getItem: vi.fn(() => null), setItem: vi.fn() },
   });
+  liveSource = await import('../data/liveSource');
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -30,25 +34,59 @@ afterEach(() => {
 });
 
 describe('live source', () => {
-  it('encodes URL tokens and preserves history parameters', () => {
-    window.location.search = '?token=a%26b';
-    const url = new URL(apiUrl('/api/history?from=1&to=2'), window.location.origin);
-    expect(url.searchParams.get('token')).toBe('a&b');
-    expect(url.searchParams.get('from')).toBe('1');
-    expect(url.searchParams.get('to')).toBe('2');
-    expect(window.localStorage.getItem).not.toHaveBeenCalled();
+  it('stores and strips URL tokens on load and sends them only on the first events connection', async () => {
+    window.location.href = 'http://localhost:4501/?demo=0&token=a%26b#fleet';
+    vi.resetModules();
+    liveSource = await import('../data/liveSource');
+    expect(window.localStorage.setItem).toHaveBeenCalledWith('fleet.token', 'a&b');
+    expect(window.history.replaceState).toHaveBeenCalledWith({ route: 'fleet' }, '', '/?demo=0#fleet');
+    expect(window.localStorage.getItem).toHaveBeenCalledTimes(1);
+    expect(liveSource.apiUrl('/api/history?from=1&to=2')).toBe('/api/history?from=1&to=2');
+    const stop = liveSource.connectLive(handlers());
+    expect(MockEventSource.instances[0].url).toBe('/api/events?token=a%26b');
+    MockEventSource.instances[0].onerror?.();
+    vi.advanceTimersByTime(1000);
+    expect(MockEventSource.instances[1].url).toBe('/api/events');
+    stop();
+    const stopAgain = liveSource.connectLive(handlers());
+    expect(MockEventSource.instances[2].url).toBe('/api/events');
+    stopAgain();
   });
-  it('uses stored authentication and tolerates unavailable storage', () => {
+  it('reads only the fleet.token storage key', async () => {
     vi.mocked(window.localStorage.getItem).mockReturnValue('synthetic-token');
-    expect(apiUrl('/api/events')).toBe('/api/events?token=synthetic-token');
+    vi.resetModules();
+    liveSource = await import('../data/liveSource');
+    expect(window.localStorage.getItem).toHaveBeenLastCalledWith('fleet.token');
+    expect(window.localStorage.getItem).not.toHaveBeenCalledWith('token');
+    const stop = liveSource.connectLive(handlers());
+    expect(MockEventSource.instances[0].url).toBe('/api/events?token=synthetic-token');
+    stop();
+  });
+  it('strips and uses URL authentication even when storage writes fail', async () => {
+    window.location.href = 'http://localhost:4501/?token=synthetic';
+    vi.mocked(window.localStorage.setItem).mockImplementation(() => {
+      throw new Error('disabled');
+    });
+    vi.resetModules();
+    liveSource = await import('../data/liveSource');
+    expect(window.history.replaceState).toHaveBeenCalledWith({ route: 'fleet' }, '', '/');
+    const stop = liveSource.connectLive(handlers());
+    expect(MockEventSource.instances[0].url).toBe('/api/events?token=synthetic');
+    stop();
+  });
+  it('tolerates unavailable storage without a URL token', async () => {
     vi.mocked(window.localStorage.getItem).mockImplementation(() => {
       throw new Error('disabled');
     });
-    expect(apiUrl('/api/events')).toBe('/api/events');
+    vi.resetModules();
+    liveSource = await import('../data/liveSource');
+    const stop = liveSource.connectLive(handlers());
+    expect(MockEventSource.instances[0].url).toBe('/api/events');
+    stop();
   });
   it('backs off, resets on connection, and cancels reconnection on teardown', () => {
     const handlers = { snapshot: vi.fn(), event: vi.fn(), connected: vi.fn() };
-    const stop = connectLive(handlers);
+    const stop = liveSource.connectLive(handlers);
     const first = MockEventSource.instances[0];
     expect(first.url).toBe('/api/events');
     first.onerror?.();
@@ -74,7 +112,7 @@ describe('live source', () => {
   });
   it('routes named events and reconnects after malformed JSON', () => {
     const handlers = { snapshot: vi.fn(), event: vi.fn(), connected: vi.fn() };
-    const stop = connectLive(handlers);
+    const stop = liveSource.connectLive(handlers);
     const source = MockEventSource.instances[0];
     source.listeners.get('snapshot')?.({ data: '{"version":1}' });
     source.listeners.get('fleet')?.({ data: '{"id":"synthetic"}' });
@@ -89,7 +127,12 @@ describe('live source', () => {
     const fetch = vi.fn().mockResolvedValue({ ok: false, status: 401 });
     vi.stubGlobal('fetch', fetch);
     const controller = new AbortController();
-    await expect(fetchHistory(1, 2, controller.signal)).rejects.toThrow('History unavailable (401)');
-    expect(fetch).toHaveBeenCalledWith('/api/history?from=1&to=2', { signal: controller.signal });
+    await expect(liveSource.fetchHistory(1, 2, controller.signal)).rejects.toThrow(
+      'History unavailable (401)',
+    );
+    expect(fetch).toHaveBeenCalledWith('/api/history?from=1&to=2', {
+      signal: controller.signal,
+      credentials: 'same-origin',
+    });
   });
 });

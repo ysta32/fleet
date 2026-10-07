@@ -12,6 +12,21 @@ export function clampPlayhead(history: HistoryResponse, at: number): number {
   return Math.max(history.from, Math.min(history.to, at));
 }
 
+export function advancePlayhead(history: HistoryResponse, at: number, delta: number, speed: number): number {
+  return clampPlayhead(history, at + Math.max(0, Math.min(delta, 100)) * speed);
+}
+
+function upperBound<T>(entries: T[], at: number, timestamp: (entry: T) => number): number {
+  let low = 0;
+  let high = entries.length;
+  while (low < high) {
+    const mid = low + Math.floor((high - low) / 2);
+    if (timestamp(entries[mid]) <= at) low = mid + 1;
+    else high = mid;
+  }
+  return low;
+}
+
 export function reconstruct(
   history: HistoryResponse,
   at: number,
@@ -19,22 +34,17 @@ export function reconstruct(
   snapshot: FleetSnapshot | null;
   events: FleetEvent[];
 } {
-  let snapshot: FleetSnapshot | null = null;
-  for (const frame of history.frames) {
-    if (frame.generatedAt <= at && (!snapshot || frame.generatedAt >= snapshot.generatedAt)) {
-      snapshot = frame;
-    }
-  }
+  const frameEnd = upperBound(history.frames, at, (frame) => frame.generatedAt);
+  const eventEnd = upperBound(history.events, at, (event) => event.ts);
   return {
-    snapshot,
-    events: history.events
-      .filter((event) => event.ts <= at)
-      .sort((a, b) => a.ts - b.ts)
-      .slice(-300),
+    snapshot: history.frames[Math.max(0, frameEnd - 1)] ?? null,
+    events: history.events.slice(Math.max(0, eventEnd - 300), eventEnd),
   };
 }
 
 export function eventsCrossed(history: HistoryResponse, from: number, to: number): FleetEvent[] {
   if (to <= from) return [];
-  return history.events.filter((event) => event.ts > from && event.ts <= to).sort((a, b) => a.ts - b.ts);
+  const start = upperBound(history.events, from, (event) => event.ts);
+  const end = upperBound(history.events, to, (event) => event.ts);
+  return history.events.slice(start, end);
 }
