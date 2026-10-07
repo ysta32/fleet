@@ -1,0 +1,507 @@
+import { createHash, timingSafeEqual } from 'node:crypto';
+import { createReadStream, promises as fsp } from 'node:fs';
+import http from 'node:http';
+import { isIP } from 'node:net';
+import path from 'node:path';
+import { PROTOCOL_VERSION } from '@fleet/shared';
+import type { FleetConfig, FleetEvent, FleetSnapshot, HistoryResponse } from '@fleet/shared';
+
+/** Minimal store surface the server needs (FleetStore satisfies this). */
+export interface StoreLike {
+  snapshot(): FleetSnapshot;
+  history(from: number, to: number): HistoryResponse;
+  on(ev: 'event', cb: (e: FleetEvent) => void): unknown;
+  on(ev: 'change', cb: () => void): unknown;
+  off(ev: 'event', cb: (e: FleetEvent) => void): unknown;
+  off(ev: 'change', cb: () => void): unknown;
+}
+
+export interface CreateServerOptions {
+  store: StoreLike;
+  config: FleetConfig;
+  webDir?: string;
+  digestDir?: string;
+  /** override loopback detection (tests simulate remote clients with this) */
+  isLoopback?: (req: http.IncomingMessage) => boolean;
+}
+
+export const SERVER_VERSION = '0.1.0';
+const SNAPSHOT_MIN_INTERVAL_MS = 2000;
+const PING_INTERVAL_MS = 15000;
+const DEFAULT_HISTORY_MS = 6 * 3600_000;
+const MAX_HISTORY_MS = 24 * 3600_000;
+/** drop SSE clients that stop reading once this much output is buffered */
+const MAX_SSE_BUFFER_BYTES = 8 * 1024 * 1024;
+const TOKEN_COOKIE = 'fleet_token';
+
+const LOOPBACK_ADDRS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+/** Host header values accepted for token-less loopback access (DNS-rebinding defence). */
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+const SECURITY_HEADERS: Record<string, string> = {
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'no-referrer',
+  'X-Frame-Options': 'DENY',
+  'Content-Security-Policy':
+    "default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; " +
+    "worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+};
+
+const CONTENT_TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.txt': 'text/plain; charset=utf-8',
+  '.map': 'application/json; charset=utf-8',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.wasm': 'application/wasm',
+  '.glb': 'model/gltf-binary',
+  '.gltf': 'model/gltf+json',
+  '.hdr': 'application/octet-stream',
+  '.ktx2': 'image/ktx2',
+};
+
+function defaultIsLoopback(req: http.IncomingMessage): boolean {
+  const addr = req.socket.remoteAddress;
+  return addr !== undefined && LOOPBACK_ADDRS.has(addr);
+}
+
+/** Host header without port, lowercased. */
+function hostName(req: http.IncomingMessage): string {
+  const host = (req.headers.host ?? '').trim().toLowerCase();
+  if (host.startsWith('[')) {
+    const end = host.indexOf(']');
+    return end === -1 ? host : host.slice(0, end + 1);
+  }
+  const colon = host.indexOf(':');
+  return colon === -1 ? host : host.slice(0, colon);
+}
+
+function digest(s: string): Buffer {
+  return createHash('sha256').update(s, 'utf8').digest();
+}
+
+/** Constant-time token comparison; an empty configured token never matches. */
+function tokenMatches(candidate: string | undefined, expected: string): boolean {
+  if (!expected || candidate === undefined || candidate === '') return false;
+  // hash both sides so timingSafeEqual always sees equal-length buffers
+  return timingSafeEqual(digest(candidate), digest(expected));
+}
+
+function bearerToken(req: http.IncomingMessage): string | undefined {
+  const h = req.headers.authorization;
+  if (typeof h !== 'string') return undefined;
+  const m = /^Bearer[ \t]+(\S+)[ \t]*$/i.exec(h);
+  return m ? m[1] : undefined;
+}
+
+function cookieToken(req: http.IncomingMessage): string | undefined {
+  const h = req.headers.cookie;
+  if (typeof h !== 'string') return undefined;
+  for (const part of h.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq === -1) continue;
+    if (part.slice(0, eq).trim() === TOKEN_COOKIE) {
+      try {
+        return decodeURIComponent(part.slice(eq + 1).trim());
+      } catch {
+        return undefined;
+      }
+    }
+  }
+  return undefined;
+}
+
+/** Opaque, stable per-install replacement for a projectId (which encodes the absolute path). */
+export function opaqueProjectId(id: string, salt: string): string {
+  return 'p_' + createHash('sha256').update(`${salt}:${id}`, 'utf8').digest('hex').slice(0, 12);
+}
+
+/** Agent ids may embed the projectId ("<projectId>:astra:<task>"); rewrite that prefix. */
+function redactAgentId(id: string, projectId: string, salt: string): string {
+  if (id === projectId) return opaqueProjectId(id, salt);
+  return id.startsWith(projectId + ':') ? opaqueProjectId(projectId, salt) + id.slice(projectId.length) : id;
+}
+
+export interface RedactOptions {
+  /** remote clients allowed to see content: only Project.path is blanked */
+  shareContent?: boolean;
+}
+
+/**
+ * Pure redaction for non-loopback clients. Never mutates the input.
+ * Always blanks Project.path. Unless shareContent: blanks orch statusText/handoffText and
+ * replaces every projectId-bearing field with opaqueProjectId(id, salt).
+ */
+export function redactSnapshot(s: FleetSnapshot, salt: string, opts: RedactOptions = {}): FleetSnapshot {
+  if (opts.shareContent) return { ...s, projects: s.projects.map((p) => ({ ...p, path: '' })) };
+  const pid = (id: string): string => opaqueProjectId(id, salt);
+  return {
+    ...s,
+    projects: s.projects.map((p) => ({
+      ...p,
+      id: pid(p.id),
+      path: '',
+      ...(p.orch
+        ? { orch: { ...p.orch, projectId: pid(p.orch.projectId), statusText: '', handoffText: '' } }
+        : {}),
+    })),
+    sessions: s.sessions.map((x) => ({
+      ...x,
+      projectId: pid(x.projectId),
+      agentIds: x.agentIds.map((a) => redactAgentId(a, x.projectId, salt)),
+    })),
+    agents: s.agents.map((a) => ({
+      ...a,
+      id: redactAgentId(a.id, a.projectId, salt),
+      projectId: pid(a.projectId),
+      location: { ...a.location, projectId: pid(a.location.projectId) },
+    })),
+    prs: s.prs.map((x) => ({ ...x, projectId: pid(x.projectId) })),
+    releases: s.releases.map((x) => ({ ...x, projectId: pid(x.projectId) })),
+    deploys: s.deploys.map((x) => ({ ...x, projectId: pid(x.projectId) })),
+    alerts: s.alerts.map((x) => ({ ...x, projectId: pid(x.projectId) })),
+  };
+}
+
+/** Event counterpart of redactSnapshot. */
+export function redactEvent(e: FleetEvent, salt: string, opts: RedactOptions = {}): FleetEvent {
+  if (opts.shareContent) return e;
+  const out: FleetEvent = { ...e, projectId: opaqueProjectId(e.projectId, salt) };
+  if (e.agentId !== undefined) out.agentId = redactAgentId(e.agentId, e.projectId, salt);
+  if (e.to) out.to = { ...e.to, projectId: opaqueProjectId(e.to.projectId, salt) };
+  return out;
+}
+
+function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
+  const data = JSON.stringify(body);
+  res.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Length': Buffer.byteLength(data),
+    'Cache-Control': 'no-store',
+  });
+  res.end(data);
+}
+
+function sendError(res: http.ServerResponse, status: number, message: string): void {
+  sendJson(res, status, { error: message });
+}
+
+interface ParsedUrl {
+  /** raw (still percent-encoded) pathname */
+  rawPath: string;
+  query: URLSearchParams;
+}
+
+function parseUrl(url: string | undefined): ParsedUrl {
+  const u = url ?? '/';
+  const q = u.indexOf('?');
+  const rawPath = (q === -1 ? u : u.slice(0, q)).split('#')[0] || '/';
+  const query = new URLSearchParams(q === -1 ? '' : u.slice(q + 1));
+  return { rawPath, query };
+}
+
+function parseTime(v: string | null): number | undefined | null {
+  if (v === null || v === '') return undefined;
+  if (!/^\d{1,16}$/.test(v)) return null;
+  const n = Number(v);
+  return Number.isSafeInteger(n) ? n : null;
+}
+
+function isWithin(root: string, target: string): boolean {
+  const rel = path.relative(root, target);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+export function createServer(opts: CreateServerOptions): http.Server {
+  const { store, config } = opts;
+  const isLoopback = opts.isLoopback ?? defaultIsLoopback;
+  const redactOpts: RedactOptions = { shareContent: config.shareContent === true };
+  const rawAllowed: unknown = (config as FleetConfig & { allowedHosts?: unknown }).allowedHosts;
+  const extraHosts = new Set(
+    (Array.isArray(rawAllowed) ? rawAllowed : [])
+      .filter((h): h is string => typeof h === 'string')
+      .map((h) => h.trim().toLowerCase()),
+  );
+
+  /** DNS-rebinding defence: only known host names may reach the server at all. */
+  function hostAllowed(req: http.IncomingMessage): boolean {
+    const h = hostName(req);
+    if (!h) return false;
+    if (LOOPBACK_HOSTS.has(h)) return true;
+    if (!config.lan) return false;
+    if (isIP(h) !== 0) return true;
+    if (h.startsWith('[') && h.endsWith(']') && isIP(h.slice(1, -1)) === 6) return true;
+    if (/^[a-z0-9-]+(\.[a-z0-9-]+)*\.(local|ts\.net)$/.test(h)) return true;
+    return extraHosts.has(h);
+  }
+  const webRoot = opts.webDir ? path.resolve(opts.webDir) : undefined;
+  let webRootReal: Promise<string | undefined> | undefined;
+  const realWebRoot = (): Promise<string | undefined> => {
+    if (!webRoot) return Promise.resolve(undefined);
+    webRootReal ??= fsp.realpath(webRoot).catch(() => undefined);
+    return webRootReal;
+  };
+
+  /** true when the client is local: loopback socket AND a loopback Host header. */
+  function isLocal(req: http.IncomingMessage): boolean {
+    return isLoopback(req) && LOOPBACK_HOSTS.has(hostName(req));
+  }
+
+  function authorize(req: http.IncomingMessage, query: URLSearchParams, res: http.ServerResponse): boolean {
+    const queryToken = query.get('token') ?? undefined;
+    if (tokenMatches(queryToken, config.token)) {
+      // lets the web UI load its own assets after being opened with ?token=
+      res.setHeader(
+        'Set-Cookie',
+        `${TOKEN_COOKIE}=${encodeURIComponent(config.token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000`,
+      );
+      return true;
+    }
+    return tokenMatches(bearerToken(req), config.token) || tokenMatches(cookieToken(req), config.token);
+  }
+
+  function handleEvents(req: http.IncomingMessage, res: http.ServerResponse, local: boolean): void {
+    const view = (s: FleetSnapshot): FleetSnapshot =>
+      local ? s : redactSnapshot(s, config.token, redactOpts);
+    const viewEvent = (e: FleetEvent): FleetEvent => (local ? e : redactEvent(e, config.token, redactOpts));
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-store',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    req.socket.setTimeout(0);
+    req.socket.setNoDelay(true);
+
+    let closed = false;
+    let lastSnapshotAt = 0;
+    let pending: NodeJS.Timeout | undefined;
+
+    const write = (chunk: string): void => {
+      if (closed) return;
+      res.write(chunk);
+      if (res.writableLength > MAX_SSE_BUFFER_BYTES) cleanup(true);
+    };
+    const sendSnapshot = (): void => {
+      if (closed) return;
+      lastSnapshotAt = Date.now();
+      let snap: FleetSnapshot;
+      try {
+        snap = view(store.snapshot());
+      } catch {
+        cleanup(true);
+        return;
+      }
+      write(`event: snapshot\ndata: ${JSON.stringify(snap)}\n\n`);
+    };
+    const onChange = (): void => {
+      if (closed || pending) return;
+      const wait = lastSnapshotAt + SNAPSHOT_MIN_INTERVAL_MS - Date.now();
+      if (wait <= 0) {
+        sendSnapshot();
+      } else {
+        pending = setTimeout(() => {
+          pending = undefined;
+          sendSnapshot();
+        }, wait);
+      }
+    };
+    const onEvent = (e: FleetEvent): void => {
+      write(`event: fleet\ndata: ${JSON.stringify(viewEvent(e))}\n\n`);
+    };
+    const ping = setInterval(() => write(': ping\n\n'), PING_INTERVAL_MS);
+
+    function cleanup(destroy = false): void {
+      if (closed) return;
+      closed = true;
+      clearInterval(ping);
+      if (pending) clearTimeout(pending);
+      pending = undefined;
+      store.off('change', onChange);
+      store.off('event', onEvent);
+      if (destroy) res.destroy();
+    }
+
+    store.on('change', onChange);
+    store.on('event', onEvent);
+    req.on('close', () => cleanup());
+    res.on('close', () => cleanup());
+    res.on('error', () => cleanup(true));
+    write('retry: 3000\n\n');
+    sendSnapshot();
+  }
+
+  async function handleDigest(res: http.ServerResponse, local: boolean): Promise<void> {
+    if (!local && config.shareContent !== true) return sendError(res, 403, 'forbidden');
+    if (!opts.digestDir) return sendError(res, 404, 'not found');
+    let raw: string;
+    try {
+      raw = await fsp.readFile(path.join(opts.digestDir, 'latest.json'), 'utf8');
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR')
+        return sendError(res, 404, 'not found');
+      throw err;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return sendError(res, 502, 'invalid digest');
+    }
+    sendJson(res, 200, parsed);
+  }
+
+  async function serveFile(res: http.ServerResponse, file: string, size: number): Promise<void> {
+    const ext = path.extname(file).toLowerCase();
+    const isIndex = path.basename(file) === 'index.html';
+    res.writeHead(200, {
+      'Content-Type': CONTENT_TYPES[ext] ?? 'application/octet-stream',
+      'Content-Length': size,
+      'Cache-Control': isIndex || ext === '.webmanifest' ? 'no-cache' : 'public, max-age=3600',
+    });
+    if (res.req.method === 'HEAD') {
+      res.end();
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      const stream = createReadStream(file);
+      stream.on('error', () => {
+        res.destroy();
+        resolve();
+      });
+      stream.on('end', resolve);
+      res.on('close', () => {
+        stream.destroy();
+        resolve();
+      });
+      stream.pipe(res);
+    });
+  }
+
+  /** Resolve a file inside the web root, following symlinks only if they stay inside it. */
+  async function statInRoot(root: string, rel: string): Promise<{ file: string; size: number } | undefined> {
+    const candidate = path.resolve(root, rel);
+    if (!isWithin(root, candidate)) return undefined;
+    let real: string;
+    try {
+      real = await fsp.realpath(candidate);
+    } catch {
+      return undefined;
+    }
+    if (!isWithin(root, real)) return undefined;
+    const st = await fsp.stat(real).catch(() => undefined);
+    if (st?.isDirectory()) {
+      return statInRoot(root, path.join(path.relative(root, real), 'index.html'));
+    }
+    if (!st?.isFile()) return undefined;
+    return { file: real, size: st.size };
+  }
+
+  async function handleStatic(res: http.ServerResponse, rawPath: string): Promise<void> {
+    const root = await realWebRoot();
+    if (!root) return sendError(res, 404, 'not found');
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(rawPath);
+    } catch {
+      return sendError(res, 400, 'bad request');
+    }
+    if (decoded.includes('\0') || decoded.includes('\\')) return sendError(res, 400, 'bad request');
+    const segments = decoded.split('/').filter((s) => s !== '');
+    if (segments.some((s) => s === '..' || s === '.')) return sendError(res, 403, 'forbidden');
+    // never serve dotfiles (.env, .git, ...)
+    if (segments.some((s) => s.startsWith('.'))) return sendError(res, 404, 'not found');
+
+    const found = await statInRoot(root, segments.join('/'));
+    if (found) return serveFile(res, found.file, found.size);
+
+    // SPA fallback: route-like paths (no extension) get index.html
+    const last = segments[segments.length - 1] ?? '';
+    if (!last.includes('.')) {
+      const index = await statInRoot(root, 'index.html');
+      if (index) return serveFile(res, index.file, index.size);
+    }
+    sendError(res, 404, 'not found');
+  }
+
+  async function handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
+
+    const method = req.method ?? 'GET';
+    if (method !== 'GET' && method !== 'HEAD') {
+      res.setHeader('Allow', 'GET, HEAD');
+      return sendError(res, 405, 'method not allowed');
+    }
+
+    if (!hostAllowed(req)) return sendError(res, 421, 'misdirected request');
+    const { rawPath, query } = parseUrl(req.url);
+    const local = isLocal(req);
+    if (!local && !authorize(req, query, res)) {
+      res.removeHeader('Set-Cookie');
+      res.setHeader('WWW-Authenticate', 'Bearer');
+      return sendError(res, 401, 'unauthorized');
+    }
+
+    if (rawPath === '/api' || rawPath.startsWith('/api/')) {
+      switch (rawPath) {
+        case '/api/health':
+          return sendJson(res, 200, { ok: true, version: SERVER_VERSION, protocol: PROTOCOL_VERSION });
+        case '/api/snapshot': {
+          const snap = store.snapshot();
+          return sendJson(res, 200, local ? snap : redactSnapshot(snap, config.token, redactOpts));
+        }
+        case '/api/events':
+          if (method === 'HEAD') return sendError(res, 405, 'method not allowed');
+          return handleEvents(req, res, local);
+        case '/api/history': {
+          const fromQ = parseTime(query.get('from'));
+          const toQ = parseTime(query.get('to'));
+          if (fromQ === null || toQ === null) return sendError(res, 400, 'invalid from/to');
+          const to = toQ ?? Date.now();
+          let from = fromQ ?? to - DEFAULT_HISTORY_MS;
+          if (from > to) return sendError(res, 400, 'from must be <= to');
+          if (to - from > MAX_HISTORY_MS) from = to - MAX_HISTORY_MS;
+          const h = store.history(from, to);
+          return sendJson(
+            res,
+            200,
+            local
+              ? h
+              : {
+                  ...h,
+                  frames: h.frames.map((f) => redactSnapshot(f, config.token, redactOpts)),
+                  events: h.events.map((e) => redactEvent(e, config.token, redactOpts)),
+                },
+          );
+        }
+        case '/api/digest/latest':
+          return handleDigest(res, local);
+        default:
+          return sendError(res, 404, 'not found');
+      }
+    }
+    return handleStatic(res, rawPath);
+  }
+
+  return http.createServer((req, res) => {
+    handle(req, res).catch(() => {
+      if (!res.headersSent) sendError(res, 500, 'internal error');
+      else res.destroy();
+    });
+  });
+}
