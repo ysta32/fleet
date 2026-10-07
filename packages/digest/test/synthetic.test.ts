@@ -125,6 +125,23 @@ describe('regressions over a 60-day archive', () => {
   });
 });
 
+describe('dates around 2020', () => {
+  it('keeps release versions unique across 2019-12-25..2020-01-05 and rejects pre-2000 dates', () => {
+    const seen = new Set<string>();
+    for (const d of syntheticArchive(12, '2020-01-05')) {
+      for (const p of d.projects) {
+        for (const r of p.releases) {
+          const key = `${p.name}@${r.tag}`;
+          expect(seen.has(key), key).toBe(false);
+          seen.add(key);
+          expect(r.tag).toMatch(/^v\d+\.\d+\.\d+$/);
+        }
+      }
+    }
+    expect(() => syntheticDigest('1999-12-31')).toThrow(/before 2000/);
+  });
+});
+
 describe('syntheticArchive', () => {
   it('returns days ordered oldest first ending at endDate', () => {
     const a = syntheticArchive(3, '2026-10-07');

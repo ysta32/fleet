@@ -18,7 +18,7 @@ import { computeHealth } from '../summarize/fallback.js';
 
 const OWNER = 'acme-dev';
 const DAY_MS = 86_400_000;
-const EPOCH = Date.UTC(2020, 0, 1);
+const EPOCH = Date.UTC(2000, 0, 1);
 
 const HUMAN: Actor = { login: 'acme-dev', isBot: false };
 const CLAUDE: Actor = { login: 'claude[bot]', isBot: true };
@@ -473,7 +473,8 @@ function headlineFor(totals: DigestTotals, projects: ProjectActivity[]): string 
 export function syntheticDigest(date: string, seed = 7): Digest {
   const untilMs = parseDate(date) + 6 * 3_600_000;
   const sinceMs = untilMs - DAY_MS;
-  const dayIdx = Math.max(0, Math.round((parseDate(date) - EPOCH) / DAY_MS));
+  const dayIdx = Math.round((parseDate(date) - EPOCH) / DAY_MS);
+  if (dayIdx < 0) throw new Error(`Date "${date}" is before 2000-01-01`);
   const rng = new Rng((seed ^ hashString(date)) >>> 0);
   const redIdx = rng.chance(0.85) ? rng.int(0, REPOS.length - 1) : -1;
   const counters = { pr: 0 };
