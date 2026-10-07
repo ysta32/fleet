@@ -18,6 +18,7 @@ const REST_BASE = 'https://api.github.com';
 const DETAIL_BATCH_SIZE = 10;
 const MAX_LIST_PAGES = 10;
 const NOTES_MAX = 2000;
+const PR_BODY_MAX = 4000;
 const DAY_MS = 86_400_000;
 
 /** Logins of well-known AI coding agents (compared case-insensitively, "[bot]" suffix stripped). */
@@ -56,6 +57,7 @@ interface GqlLabels {
 interface GqlCommitNode {
   oid: string;
   messageHeadline: string;
+  messageBody?: string | null;
   url: string;
   committedDate: string;
   author?: { name?: string | null; user?: { login?: string | null } | null } | null;
@@ -91,6 +93,7 @@ interface GqlListData {
 interface GqlPrNode {
   number: number;
   title: string;
+  body?: string | null;
   url: string;
   isDraft?: boolean | null;
   additions?: number | null;
@@ -176,7 +179,7 @@ const LIST_QUERY = `query OvernightRepos($owner: String!, $since: GitTimestamp!,
           target {
             ... on Commit {
               history(since: $since, until: $until, first: 50) {
-                nodes { oid messageHeadline url committedDate author { name user { login } } }
+                nodes { oid messageHeadline messageBody url committedDate author { name user { login } } }
               }
             }
           }
@@ -187,7 +190,7 @@ const LIST_QUERY = `query OvernightRepos($owner: String!, $since: GitTimestamp!,
 }`;
 
 const PR_COMMON =
-  'number title url isDraft additions deletions author { login __typename } labels(first: 10) { nodes { name } }';
+  'number title body url isDraft additions deletions author { login __typename } labels(first: 10) { nodes { name } }';
 
 /** Cheap per-repo fields fetched for every listed repo (activity that does not bump pushedAt). */
 const REPO_LIGHT_FRAGMENT = `fragment OvernightRepoLight on Repository {
@@ -251,6 +254,24 @@ function batchByCost<T>(items: T[], isFull: (t: T) => boolean, maxCost = DETAIL_
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+export function detectAgent(text: string): string | undefined {
+  if (
+    /^Co-Authored-By:[\t ]*Claude\b/im.test(text) ||
+    /\bGenerated with \[Claude Code\]/i.test(text) ||
+    /\bclaude\.com\/claude-code\b/i.test(text)
+  )
+    return 'claude';
+  if (/^Co-Authored-By:[^\r\n]*codex/im.test(text) || /\bOpenAI Codex\b/i.test(text)) return 'codex';
+  if (
+    /^Co-Authored-By:[\t ]*Copilot\b/im.test(text) ||
+    /^Co-Authored-By:[^\r\n]*\bcopilot@github\.com\b/im.test(text)
+  )
+    return 'copilot';
+  if (/\bdevin-ai-integration\b/i.test(text)) return 'devin';
+  if (/\b(?:cursoragent|Cursor Agent)\b/i.test(text)) return 'cursor';
+  return undefined;
+}
 
 function makeActorFactory(
   config: OvernightConfig,
@@ -441,14 +462,18 @@ export async function collectGitHub(ctx: CollectContext): Promise<CollectResult>
     const commits: CommitItem[] = compact(r.defaultBranchRef?.target?.history?.nodes)
       .filter((c) => !c.messageHeadline.startsWith('Merge pull request'))
       .filter((c) => inWindow(c.committedDate, sinceMs, untilMs))
-      .map((c) => ({
-        sha: c.oid,
-        message: c.messageHeadline,
-        url: c.url,
-        author: actor(c.author?.user?.login ?? c.author?.name ?? null),
-        at: c.committedDate,
-        branch: defaultBranch ?? '',
-      }));
+      .map((c) => {
+        const author = actor(c.author?.user?.login ?? c.author?.name ?? null);
+        if (detectAgent(c.messageBody ?? '')) author.isBot = true;
+        return {
+          sha: c.oid,
+          message: c.messageHeadline,
+          url: c.url,
+          author,
+          at: c.committedDate,
+          branch: defaultBranch ?? '',
+        };
+      });
     const prev = state.repoStats[id];
     const project: RawProject = {
       id,
@@ -590,14 +615,21 @@ export async function collectGitHub(ctx: CollectContext): Promise<CollectResult>
   }
 
   function basePr(pr: GqlPrNode): Omit<PullRequestItem, 'at'> {
+    const author = actor(pr.author?.login, pr.author?.__typename);
+    const labels = labelNames(pr.labels);
+    const agent = detectAgent((pr.body ?? '').slice(0, PR_BODY_MAX));
+    if (agent) {
+      author.isBot = true;
+      if (!labels.includes(`agent:${agent}`)) labels.push(`agent:${agent}`);
+    }
     return {
       number: pr.number,
       title: pr.title,
       url: pr.url,
-      author: actor(pr.author?.login, pr.author?.__typename),
+      author,
       ...(typeof pr.additions === 'number' ? { additions: pr.additions } : {}),
       ...(typeof pr.deletions === 'number' ? { deletions: pr.deletions } : {}),
-      labels: labelNames(pr.labels),
+      labels,
       ...(pr.isDraft ? { draft: true } : {}),
     };
   }
