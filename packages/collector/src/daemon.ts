@@ -468,12 +468,17 @@ async function runReal(cfg: FleetConfig, opts: DaemonOptions): Promise<Daemon> {
       projectJson.set(p.id, JSON.stringify(rest));
     }
     const live = new Set([...files.values()].filter((f) => f.parser).map((f) => sessionIdOf(f.file)));
+    const now = Date.now();
+    const liveAgents = new Set(
+      [...files.values()].flatMap((f) => (f.parser ? f.parser.agents(now).map((a) => a.id) : [])),
+    );
     for (const s of snap.sessions) {
       if (live.has(s.id) || s.status === 'ended') continue;
       store.upsertSession({ ...s, status: 'ended' });
     }
     for (const a of snap.agents) {
-      if (live.has(a.sessionId) || a.status === 'done' || a.status === 'failed') continue;
+      // by agent id, not session id: a live parent must not keep a restored, now unbacked subagent working
+      if (liveAgents.has(a.id) || a.status === 'done' || a.status === 'failed') continue;
       store.upsertAgent({ ...a, status: 'done' });
     }
   };

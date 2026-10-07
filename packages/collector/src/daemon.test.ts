@@ -4,7 +4,13 @@ import http from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { projectIdFromPath, type FleetConfig, type FleetEvent, type FleetSnapshot } from '@fleet/shared';
+import {
+  projectIdFromPath,
+  type Agent,
+  type FleetConfig,
+  type FleetEvent,
+  type FleetSnapshot,
+} from '@fleet/shared';
 import { runDaemon, type Daemon } from './daemon.js';
 import { FleetStore } from './store.js';
 
@@ -349,6 +355,22 @@ describe('runDaemon restart from history', () => {
         orch: orch(id),
       });
     }
+    // the previous run also saw two subagents of sess-old, both working
+    const restoredAgent = (id: string): Agent => ({
+      id,
+      sessionId: 'sess-old',
+      projectId: idA,
+      role: 'coder',
+      model: 'opus',
+      label: 'coder',
+      status: 'working',
+      location: { kind: 'project', projectId: idA },
+      tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      startedAt: now - 700_000,
+      lastActivity: now - 650_000,
+    });
+    prev.upsertAgent(restoredAgent('sess-old:gone'));
+    prev.upsertAgent(restoredAgent('sess-old:here'));
     prev.saveSync(dataDir);
     await prev.close();
 
@@ -360,6 +382,17 @@ describe('runDaemon restart from history', () => {
       [
         userLine(now - 601_000, projA),
         assistantLine(now - 600_000, projA, 'msg-old', [{ type: 'text', text: 'done' }], 'end_turn'),
+      ].join('\n') + '\n',
+    );
+    // only 'here' still has a transcript (still working); 'gone' has none
+    await mkdir(path.join(dir, 'sess-old', 'subagents'), { recursive: true });
+    await writeFile(
+      path.join(dir, 'sess-old', 'subagents', 'agent-here.jsonl'),
+      [
+        userLine(now - 2000, projA, { isSidechain: true, agentType: 'orch-coder' }),
+        assistantLine(now - 1000, projA, 'msg-here', [{ type: 'text', text: 'working' }], null, {
+          isSidechain: true,
+        }),
       ].join('\n') + '\n',
     );
 
@@ -392,6 +425,9 @@ describe('runDaemon restart from history', () => {
       const later = await getJson<FleetSnapshot>(d.port, '/api/snapshot');
       expect(later.alerts.filter((a) => a.kind === 'session.waiting')).toEqual([]);
       expect(execCalls).toEqual([]);
+      // restored agents are reconciled by agent id even though their parent session is live
+      expect(later.agents.find((a) => a.id === 'sess-old:gone')?.status).toBe('done');
+      expect(later.agents.find((a) => a.id === 'sess-old:here')?.status).toBe('working');
     } finally {
       await d.close();
     }
