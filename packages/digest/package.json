@@ -33,6 +33,8 @@
     "node": ">=20"
   },
   "scripts": {
+    "sync-tokens": "node scripts/sync-tokens.mjs",
+    "prebuild": "node scripts/sync-tokens.mjs",
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --root ../.. packages/digest",
