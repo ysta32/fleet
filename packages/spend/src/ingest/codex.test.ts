@@ -93,6 +93,36 @@ describe('ingestCodex', () => {
     expect(JSON.stringify(result)).not.toContain(home);
   });
 
+  it.each([true, false])('skips repeated totals with last usage present: %s', async (withLast) => {
+    const info = {
+      total_token_usage: usage(100, 30, 20),
+      ...(withLast ? { last_token_usage: usage(100, 30, 20) } : {}),
+    };
+    await fixture([event(info), event(info, '2026-10-07T12:01:00.000Z')]);
+    const result = await ingestCodex(ctx);
+    expect(result.status).toBe('ok');
+    expect(result.records).toHaveLength(1);
+    expect(result.records[0]?.tokens).toEqual({
+      input: 70,
+      cacheRead: 30,
+      output: 20,
+      cacheWrite5m: 0,
+      cacheWrite1h: 0,
+    });
+  });
+
+  it('skips zero cumulative usage and updates the baseline on a reset to zero', async () => {
+    await fixture([
+      event({ total_token_usage: usage(0, 0, 0) }),
+      event({ total_token_usage: usage(100, 30, 20) }),
+      event({ total_token_usage: usage(0, 0, 0) }),
+      event({ total_token_usage: usage(100, 30, 20) }),
+    ]);
+    const result = await ingestCodex(ctx);
+    expect(result.records.map((record) => record.tokens.input)).toEqual([70, 70]);
+    expect(result.records.map((record) => record.tokens.output)).toEqual([20, 20]);
+  });
+
   it('diffs cumulative totals, including totals before since and beside last usage', async () => {
     ctx.since = ts;
     await fixture([

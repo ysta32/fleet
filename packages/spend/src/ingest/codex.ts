@@ -84,6 +84,15 @@ async function readRollout(path: string, fileId: string, since: number): Promise
       if (!info) continue;
       const last = counts(info.last_token_usage);
       const total = counts(info.total_token_usage);
+      if (
+        total &&
+        total.input === previous.input &&
+        total.cached === previous.cached &&
+        total.output === previous.output
+      ) {
+        previous = total;
+        continue;
+      }
       let usage = last;
       if (!usage && total) {
         const reset =
@@ -103,6 +112,7 @@ async function readRollout(path: string, fileId: string, since: number): Promise
           cached: previous.cached + last.cached,
           output: previous.output + last.output,
         };
+      if (!last && usage && usage.input === 0 && usage.cached === 0 && usage.output === 0) continue;
       const ts = typeof event.timestamp === 'string' ? Date.parse(event.timestamp) : NaN;
       if (!usage || usage.cached > usage.input || !Number.isFinite(ts) || ts < since) continue;
       records.push({
