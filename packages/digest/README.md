@@ -103,11 +103,9 @@ Secrets come only from environment variables (or GitHub Actions secrets), never 
 
 ## Scheduling
 
-`.github/workflows/overnight-digest.yml` runs daily at 13:00 UTC (06:00 PT) and on demand. It builds the package,
-runs the digest, and commits the archive and state to the `overnight-archive` branch. The job is skipped when the
-`OVERNIGHT_GITHUB_TOKEN` secret is empty. Set the secrets above plus optional repository variables
-(`OVERNIGHT_OWNER`, `OVERNIGHT_SITE_URL`, `OVERNIGHT_NTFY_TOPIC`, `OVERNIGHT_NOTION_DATABASE_ID`,
-`OVERNIGHT_EMAIL_TO`, `OVERNIGHT_EMAIL_FROM`).
+A ready-made GitHub Actions workflow lives in [`examples/`](examples/README.md). It runs daily at 06:00 PT and
+commits the archive to an `overnight-archive` branch. **Run it from a private repository**: digests summarise
+private activity, so the workflow refuses to run in a public repo and never writes to ysta32/fleet.
 
 Alternative: Vercel Cron (or any cron host) can run the same CLI command, as long as it has Node 20+, the built
 package and the environment variables.

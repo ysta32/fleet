@@ -1,3 +1,7 @@
+# Overnight digest — example workflow.
+# Copy this file into a PRIVATE repository you own (e.g. <you>/overnight-archive) at
+# .github/workflows/overnight-digest.yml. The digest summarises private repo and deploy activity, so it
+# must never run in, or publish to, a public repository. The job refuses to run in a public repo.
 name: Overnight digest
 
 on:
@@ -23,6 +27,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Refuse to run in a public repository
+        if: ${{ github.event.repository.private != true }}
+        run: |
+          echo "::error::Overnight digests contain private activity. Run this workflow only in a private repository."
+          exit 1
+
       - name: Check for required secret
         id: gate
         env:
@@ -54,19 +64,27 @@ jobs:
             git -C archive commit --allow-empty -m "chore: init overnight-archive"
           fi
 
+      - name: Check out Fleet (Overnight source)
+        if: steps.gate.outputs.enabled == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ysta32/fleet
+          ref: ${{ vars.OVERNIGHT_FLEET_REF || 'main' }}
+          path: fleet
+
       - uses: actions/setup-node@v4
         if: steps.gate.outputs.enabled == 'true'
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: fleet/package-lock.json
 
-      - name: Install
+      - name: Install and build
         if: steps.gate.outputs.enabled == 'true'
-        run: npm ci
-
-      - name: Build
-        if: steps.gate.outputs.enabled == 'true'
-        run: npm run build -w @fleet/digest
+        working-directory: fleet
+        run: |
+          npm ci
+          npm run build -w @fleet/digest
 
       - name: Run digest
         if: steps.gate.outputs.enabled == 'true'
@@ -85,7 +103,7 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}
           SINCE: ${{ inputs.since }}
-        run: node packages/digest/dist/cli.js run --out archive/site --since "$SINCE"
+        run: node fleet/packages/digest/dist/cli.js run --out archive/site --since "$SINCE"
 
       - name: Commit and push archive
         if: steps.gate.outputs.enabled == 'true'
