@@ -49,6 +49,52 @@ interface Army {
   ciFailed: boolean;
 }
 
+function copySnapshot(state: FleetSnapshot, generatedAt = state.generatedAt): FleetSnapshot {
+  // Explicit copies keep history frames isolated without serializing the entire fleet.
+  return {
+    ...state,
+    generatedAt,
+    projects: state.projects.map((project) => ({
+      ...project,
+      ...(project.orch
+        ? {
+            orch: {
+              ...project.orch,
+              tasks: project.orch.tasks.map((task) => ({ ...task, depends: [...task.depends] })),
+              inflight: project.orch.inflight.map((entry) => ({ ...entry })),
+              worktrees: [...project.orch.worktrees],
+              blocked: [...project.orch.blocked],
+            },
+          }
+        : {}),
+    })),
+    sessions: state.sessions.map((session) => ({
+      ...session,
+      tokens: { ...session.tokens },
+      agentIds: [...session.agentIds],
+      ...(session.lastTool ? { lastTool: { ...session.lastTool } } : {}),
+    })),
+    agents: state.agents.map((agent) => ({
+      ...agent,
+      tokens: { ...agent.tokens },
+      location: { ...agent.location },
+      ...(agent.lastTool ? { lastTool: { ...agent.lastTool } } : {}),
+    })),
+    prs: state.prs.map((entry) => ({ ...entry })),
+    releases: state.releases.map((entry) => ({ ...entry })),
+    deploys: state.deploys.map((entry) => ({ ...entry })),
+    alerts: state.alerts.map((entry) => ({ ...entry })),
+  };
+}
+
+function copyEvent(event: FleetEvent): FleetEvent {
+  return {
+    ...event,
+    ...(event.data ? { data: { ...event.data } } : {}),
+    ...(event.to ? { to: { ...event.to } } : {}),
+  };
+}
+
 /** Purely synthetic metadata; dt and all timestamps are in milliseconds. */
 export function createDemoFleet(opts: { seed?: number; now?: number; projects?: number } = {}): DemoFleet {
   const seed = opts.seed ?? 42;
@@ -66,8 +112,10 @@ export function createDemoFleet(opts: { seed?: number; now?: number; projects?: 
   let alertSeq = 0;
   let turn = 0;
   let live: DemoFleet | undefined;
-  let historyFrames: FleetSnapshot[] = [];
-  let historyEvents: FleetEvent[] = [];
+  const historyFrames: FleetSnapshot[] = [];
+  const historyEvents = new Array<FleetEvent | undefined>(MAX_EVENTS);
+  let eventStart = 0;
+  let eventCount = 0;
   const state: FleetSnapshot = {
     version: 1,
     demo: true,
@@ -398,41 +446,20 @@ export function createDemoFleet(opts: { seed?: number; now?: number; projects?: 
 
   function snapshot(): FleetSnapshot {
     if (live) return live.snapshot();
-    // Explicit copies keep history frames isolated without serializing the entire fleet.
-    return {
-      ...state,
-      generatedAt: now,
-      projects: state.projects.map((project) => ({
-        ...project,
-        ...(project.orch
-          ? {
-              orch: {
-                ...project.orch,
-                tasks: project.orch.tasks.map((task) => ({ ...task, depends: [...task.depends] })),
-                inflight: project.orch.inflight.map((entry) => ({ ...entry })),
-                worktrees: [...project.orch.worktrees],
-                blocked: [...project.orch.blocked],
-              },
-            }
-          : {}),
-      })),
-      sessions: state.sessions.map((session) => ({
-        ...session,
-        tokens: { ...session.tokens },
-        agentIds: [...session.agentIds],
-        ...(session.lastTool ? { lastTool: { ...session.lastTool } } : {}),
-      })),
-      agents: state.agents.map((agent) => ({
-        ...agent,
-        tokens: { ...agent.tokens },
-        location: { ...agent.location },
-        ...(agent.lastTool ? { lastTool: { ...agent.lastTool } } : {}),
-      })),
-      prs: state.prs.map((entry) => ({ ...entry })),
-      releases: state.releases.map((entry) => ({ ...entry })),
-      deploys: state.deploys.map((entry) => ({ ...entry })),
-      alerts: state.alerts.map((entry) => ({ ...entry })),
-    };
+    return copySnapshot(state, now);
+  }
+
+  function rememberEvents(events: FleetEvent[], copy: boolean): void {
+    for (const event of events) {
+      historyEvents[(eventStart + eventCount) % MAX_EVENTS] = copy ? copyEvent(event) : event;
+      if (eventCount < MAX_EVENTS) eventCount++;
+      else eventStart = (eventStart + 1) % MAX_EVENTS;
+    }
+    while (eventCount > 0 && historyEvents[eventStart]!.ts < now - MAX_HISTORY_MS) {
+      historyEvents[eventStart] = undefined;
+      eventStart = (eventStart + 1) % MAX_EVENTS;
+      eventCount--;
+    }
   }
 
   function tick(dtMs: number): FleetEvent[] {
@@ -443,14 +470,12 @@ export function createDemoFleet(opts: { seed?: number; now?: number; projects?: 
     if (live) {
       const events = live.tick(dtMs);
       now = end;
-      historyEvents = historyEvents
-        .concat(structuredClone(events))
-        .filter((event) => event.ts >= now - MAX_HISTORY_MS)
-        .slice(-MAX_EVENTS);
+      rememberEvents(events, true);
       if (now - historyFrames.at(-1)!.generatedAt >= 30_000) historyFrames.push(live.snapshot());
-      historyFrames = historyFrames
-        .filter((frame) => frame.generatedAt >= now - MAX_HISTORY_MS)
-        .slice(-MAX_FRAMES);
+      let expired = 0;
+      while (expired < historyFrames.length && historyFrames[expired]!.generatedAt < now - MAX_HISTORY_MS)
+        expired++;
+      historyFrames.splice(0, Math.max(expired, historyFrames.length - MAX_FRAMES));
       return events;
     }
     const events: FleetEvent[] = [];
@@ -471,26 +496,31 @@ export function createDemoFleet(opts: { seed?: number; now?: number; projects?: 
     if (hours === 0) return { from, to: now, frames: [snapshot()], events: [] };
     if (!live) {
       const replay = createDemoFleet({ seed, now: from, projects: projectCount });
-      historyFrames = [replay.snapshot()];
+      historyFrames.push(replay.snapshot());
       const interval = Math.max(30_000, Math.ceil((now - from) / (MAX_FRAMES - 1)));
       for (let elapsed = 0; elapsed < now - from;) {
         const dt = Math.min(interval, now - from - elapsed);
-        historyEvents.push(...replay.tick(dt));
-        historyEvents = historyEvents.slice(-MAX_EVENTS);
+        rememberEvents(replay.tick(dt), false);
         elapsed += dt;
         historyFrames.push(replay.snapshot());
       }
       live = replay;
     }
-    const frames = historyFrames.filter(
-      (frame) => frame.generatedAt >= from && frame.generatedAt <= now - 30_000,
-    );
+    const frames = historyFrames
+      .filter((frame) => frame.generatedAt >= from && frame.generatedAt <= now - 30_000)
+      .slice(-(MAX_FRAMES - 1))
+      .map((frame) => copySnapshot(frame));
     frames.push(snapshot());
+    const events: FleetEvent[] = [];
+    for (let index = 0; index < eventCount; index++) {
+      const event = historyEvents[(eventStart + index) % MAX_EVENTS]!;
+      if (event.ts >= from) events.push(copyEvent(event));
+    }
     return {
       from,
       to: now,
-      frames: structuredClone(frames.slice(-MAX_FRAMES)),
-      events: structuredClone(historyEvents.filter((event) => event.ts >= from)),
+      frames,
+      events,
     };
   }
 
