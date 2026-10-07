@@ -17,10 +17,14 @@
     "dist",
     "tokens.css",
     "fonts.css",
-    "icons"
+    "icons",
+    "brand"
   ],
   "scripts": {
     "build": "tsc -b",
-    "typecheck": "tsc -b"
+    "typecheck": "tsc -b",
+    "icons": "node scripts/build-icons.mjs",
+    "contrast": "node scripts/contrast.mjs",
+    "check:design": "node scripts/build-icons.mjs --check && node scripts/contrast.mjs > /dev/null"
   }
 }
