@@ -91,6 +91,9 @@ export class SceneStore {
   activityAt = new Map<string, number>();
   /** agent.move events applied ahead of the next snapshot */
   locOverride = new Map<string, { loc: AgentLocation; ts: number }>();
+  /** data-source mode + playhead last seen; used to invalidate pending move overrides */
+  private clockMode: string | null = null;
+  private playhead = -Infinity;
   rings: RingFx[] = [];
   beams: BeamFx[] = [];
   particles: ParticleFx[] = [];
@@ -132,6 +135,18 @@ export class SceneStore {
         color: new THREE.Color(),
         size: 1,
       });
+  }
+
+  /**
+   * Track the data clock. Pending agent.move overrides are dropped when the source mode changes
+   * (live <-> demo <-> replay) or the playhead moves backward (replay seek), since they describe a
+   * future that no longer applies. Idempotent for repeated calls with the same values.
+   */
+  syncClock(mode: string, playhead: number): void {
+    if ((this.clockMode !== null && mode !== this.clockMode) || playhead < this.playhead)
+      this.locOverride.clear();
+    this.clockMode = mode;
+    this.playhead = playhead;
   }
 
   /** Apply a new snapshot: recompute station layout (stable by sorted id). Called during render, idempotent. */

@@ -194,15 +194,19 @@ function CardBody({
 export function Hud({
   selection,
   snapshot,
+  replayAt,
   onClose,
 }: {
   selection: Selection;
   snapshot: FleetSnapshot | null;
+  /** replay playhead (epoch ms) when in replay mode; ages/elapsed are measured against it */
+  replayAt: number | null;
   onClose(): void;
 }) {
   const store = useSceneStore();
   const anchor = useRef<THREE.Group>(null);
-  const [now, setNow] = useState(() => Date.now());
+  const [wallNow, setWallNow] = useState(() => Date.now());
+  const now = replayAt ?? wallNow;
   const [visible, setVisible] = useState(false);
   const visRef = useRef(false);
 
@@ -212,10 +216,11 @@ export function Hud({
   }, [selection]);
 
   useEffect(() => {
-    if (!selection) return;
-    const id = setInterval(() => setNow(Date.now()), 1000);
+    if (!selection || replayAt !== null) return;
+    setWallNow(Date.now());
+    const id = setInterval(() => setWallNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [selection]);
+  }, [selection, replayAt !== null]);
 
   useFrame(() => {
     const g = anchor.current;

@@ -3,6 +3,8 @@ import {
   STATION_Y,
   TASKS_PER_RING,
   anchorOffset,
+  cameraFitPosition,
+  needsRefit,
   arcHeight,
   arcPoint,
   easeInOutCubic,
@@ -178,5 +180,21 @@ describe('formatting', () => {
     expect(formatTokens(999)).toBe('999');
     expect(formatTokens(12_345)).toBe('12.3k');
     expect(formatTokens(1_250_000)).toBe('1.3M');
+  });
+});
+
+describe('camera fit', () => {
+  it('refits on first non-empty layout and on large radius changes only', () => {
+    expect(needsRefit(null, 10, 0)).toBe(false);
+    expect(needsRefit(null, 10, 3)).toBe(true);
+    expect(needsRefit(10, 11, 4)).toBe(false);
+    expect(needsRefit(10, 20, 12)).toBe(true);
+    expect(needsRefit(20, 10, 2)).toBe(true);
+  });
+  it('fit position grows with radius and looks down at the layout', () => {
+    const a = { ...cameraFitPosition(6) };
+    const b = cameraFitPosition(20);
+    expect(Math.hypot(b.x, b.y, b.z)).toBeGreaterThan(Math.hypot(a.x, a.y, a.z));
+    expect(b.y).toBeGreaterThan(0);
   });
 });

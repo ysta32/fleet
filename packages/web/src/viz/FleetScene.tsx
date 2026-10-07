@@ -17,7 +17,7 @@ import type { FleetView, Selection } from '../data/contract';
 import { Bot } from './Bots';
 import { Effects } from './Effects';
 import { Hud } from './Hud';
-import { damp, layoutRadius } from './layout';
+import { cameraFitPosition, damp, layoutRadius, needsRefit } from './layout';
 import { Station, type StationData } from './Station';
 import { SceneStore, SceneStoreContext, useSceneStore } from './store';
 import { TaskSatellites } from './TaskSatellites';
@@ -122,18 +122,43 @@ const desired = new THREE.Vector3();
 const delta = new THREE.Vector3();
 const offset = new THREE.Vector3();
 const HOME = new THREE.Vector3(0, 1.2, 0);
+const fitPos = new THREE.Vector3();
+const fitTmp = { x: 0, y: 0, z: 0 };
+const REFIT_SECONDS = 2.2;
 
-function CameraRig({ selection, radius }: { selection: Selection; radius: number }) {
+function CameraRig({
+  selection,
+  radius,
+  projectCount,
+  initialFit,
+}: {
+  selection: Selection;
+  radius: number;
+  projectCount: number;
+  /** layout radius the initial camera was framed for, or null if it was framed without data */
+  initialFit: number | null;
+}) {
   const store = useSceneStore();
   const controls = useRef<ControlsImpl>(null);
   const camera = useThree((s) => s.camera);
   const lastInteract = useRef(-Infinity);
   const focusStart = useRef(-Infinity);
+  const fitted = useRef<number | null>(initialFit);
+  const refitStart = useRef(-Infinity);
   const selKey = selection ? `${selection.kind}:${selection.id}` : '';
 
   useEffect(() => {
     focusStart.current = selKey ? store.t : -Infinity;
   }, [selKey, store]);
+
+  // reframe on the first non-empty snapshot and when the fleet grows/shrinks a lot
+  useEffect(() => {
+    if (!needsRefit(fitted.current, radius, projectCount)) return;
+    fitted.current = radius;
+    refitStart.current = store.t;
+    cameraFitPosition(radius, fitTmp);
+    fitPos.set(fitTmp.x, fitTmp.y, fitTmp.z);
+  }, [radius, projectCount, store]);
 
   useFrame((_, dtRaw) => {
     const c = controls.current;
@@ -142,6 +167,13 @@ function CameraRig({ selection, radius }: { selection: Selection; radius: number
     const userActive = performance.now() - lastInteract.current < 8000;
     c.autoRotate = !store.reduced && !selection && !userActive;
     c.autoRotateSpeed = 0.28;
+    if (!selection && store.t - refitStart.current < REFIT_SECONDS) {
+      const k = store.reduced ? 1 : damp(2.6, dt);
+      camera.position.lerp(fitPos, k);
+      c.target.lerp(HOME, k);
+      if (store.reduced) refitStart.current = -Infinity;
+      return;
+    }
     if (store.selectionPosition(selection, desired)) {
       const since = store.t - focusStart.current;
       const focusing = since < 1.8;
@@ -178,6 +210,7 @@ function CameraRig({ selection, radius }: { selection: Selection; radius: number
       zoomSpeed={0.8}
       onStart={() => {
         lastInteract.current = performance.now();
+        refitStart.current = -Infinity;
       }}
       onEnd={() => {
         lastInteract.current = performance.now();
@@ -220,9 +253,16 @@ function buildStations(snap: FleetSnapshot, store: SceneStore): StationData[] {
   return out;
 }
 
-function SceneContents({ view, selection, onSelect }: FleetSceneProps) {
+function SceneContents({
+  view,
+  selection,
+  onSelect,
+  initialFit,
+}: FleetSceneProps & { initialFit: number | null }) {
   const store = useSceneStore();
   const snap = view.snapshot;
+  const replayAt = view.mode === 'replay' ? view.replay.at : null;
+  store.syncClock(view.mode, replayAt ?? snap?.generatedAt ?? -Infinity);
   store.setSnapshot(snap);
   const stations = useMemo(() => (snap ? buildStations(snap, store) : []), [snap, store]);
   const radius = layoutRadius(store.projectCount);
@@ -275,8 +315,13 @@ function SceneContents({ view, selection, onSelect }: FleetSceneProps) {
         />
       ))}
       <Effects />
-      <Hud selection={selection} snapshot={snap} onClose={() => onSelect(null)} />
-      <CameraRig selection={selection} radius={radius} />
+      <Hud selection={selection} snapshot={snap} replayAt={replayAt} onClose={() => onSelect(null)} />
+      <CameraRig
+        selection={selection}
+        radius={radius}
+        projectCount={store.projectCount}
+        initialFit={initialFit}
+      />
     </>
   );
 }
@@ -353,13 +398,13 @@ export default function FleetScene({ view, selection, onSelect }: FleetSceneProp
   const [dpr, setDpr] = useState(() =>
     typeof window === 'undefined' ? 1 : Math.min(2, window.devicePixelRatio || 1),
   );
-  const radius = layoutRadius(view.snapshot?.projects.length ?? 1);
-  const [initialCamera] = useState(() => ({
-    position: [radius * 0.1, radius * 0.95, radius * 1.85] as [number, number, number],
-    fov: 40,
-    near: 0.1,
-    far: 600,
-  }));
+  const [initialFit] = useState<number | null>(() =>
+    view.snapshot && view.snapshot.projects.length > 0 ? layoutRadius(view.snapshot.projects.length) : null,
+  );
+  const [initialCamera] = useState(() => {
+    const p = cameraFitPosition(initialFit ?? layoutRadius(1));
+    return { position: [p.x, p.y, p.z] as [number, number, number], fov: 40, near: 0.1, far: 600 };
+  });
   const chroma = useMemo(() => new THREE.Vector2(0.00035, 0.00035), []);
 
   return (
@@ -386,7 +431,7 @@ export default function FleetScene({ view, selection, onSelect }: FleetSceneProp
             flipflops={3}
             onFallback={() => setDpr(1)}
           >
-            <SceneContents view={view} selection={selection} onSelect={onSelect} />
+            <SceneContents view={view} selection={selection} onSelect={onSelect} initialFit={initialFit} />
             <EffectComposer multisampling={4} enableNormalPass={false}>
               <Bloom
                 mipmapBlur

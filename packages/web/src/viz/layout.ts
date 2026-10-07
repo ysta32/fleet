@@ -96,6 +96,29 @@ export function layoutRadius(n: number): number {
   return 7 + 4.6 * Math.sqrt(n - 0.5) + 4;
 }
 
+/** Camera position that frames a layout of radius `r` (looking at the origin). */
+export function cameraFitPosition(r: number, out: Vec3 = vec3()): Vec3 {
+  out.x = r * 0.1;
+  out.y = r * 0.95;
+  out.z = r * 1.85;
+  return out;
+}
+
+/**
+ * Whether the camera should be refitted: always on the first non-empty layout (fitted === null),
+ * otherwise when the layout radius changed by more than `tolerance` (relative).
+ */
+export function needsRefit(
+  fitted: number | null,
+  next: number,
+  projectCount: number,
+  tolerance = 0.35,
+): boolean {
+  if (projectCount <= 0) return false;
+  if (fitted === null) return true;
+  return Math.abs(next - fitted) / Math.max(1e-6, fitted) > tolerance;
+}
+
 /** Station scale 0.8..1.8 from activity (working agents, running tasks, recency). */
 export function stationScale(workingAgents: number, runningTasks: number, msSinceActivity: number): number {
   const recency = msSinceActivity < 60_000 ? 1 : msSinceActivity < 15 * 60_000 ? 0.5 : 0;
