@@ -34,7 +34,7 @@ afterEach(() => {
 });
 
 describe('live source', () => {
-  it('stores and strips URL tokens on load and sends them only on the first events connection', async () => {
+  it('stores and strips URL tokens and retries with them until a connection opens', async () => {
     window.location.href = 'http://localhost:4501/?demo=0&token=a%26b#fleet';
     vi.resetModules();
     liveSource = await import('../data/liveSource');
@@ -46,11 +46,29 @@ describe('live source', () => {
     expect(MockEventSource.instances[0].url).toBe('/api/events?token=a%26b');
     MockEventSource.instances[0].onerror?.();
     vi.advanceTimersByTime(1000);
-    expect(MockEventSource.instances[1].url).toBe('/api/events');
+    expect(MockEventSource.instances[1].url).toBe('/api/events?token=a%26b');
+    MockEventSource.instances[1].onopen?.();
+    MockEventSource.instances[1].onerror?.();
+    vi.advanceTimersByTime(1000);
+    expect(MockEventSource.instances[2].url).toBe('/api/events');
     stop();
     const stopAgain = liveSource.connectLive(handlers());
-    expect(MockEventSource.instances[2].url).toBe('/api/events');
+    expect(MockEventSource.instances[3].url).toBe('/api/events');
     stopAgain();
+  });
+  it('falls back to stored tokens on retries only until a connection opens', () => {
+    const stop = liveSource.connectLive(handlers());
+    expect(MockEventSource.instances[0].url).toBe('/api/events');
+    vi.mocked(window.localStorage.getItem).mockReturnValue('stored-token');
+    MockEventSource.instances[0].onerror?.();
+    vi.advanceTimersByTime(1000);
+    expect(MockEventSource.instances[1].url).toBe('/api/events?token=stored-token');
+    expect(window.localStorage.getItem).toHaveBeenLastCalledWith('fleet.token');
+    MockEventSource.instances[1].onopen?.();
+    MockEventSource.instances[1].onerror?.();
+    vi.advanceTimersByTime(1000);
+    expect(MockEventSource.instances[2].url).toBe('/api/events');
+    stop();
   });
   it('reads only the fleet.token storage key', async () => {
     vi.mocked(window.localStorage.getItem).mockReturnValue('synthetic-token');
@@ -72,6 +90,9 @@ describe('live source', () => {
     expect(window.history.replaceState).toHaveBeenCalledWith({ route: 'fleet' }, '', '/');
     const stop = liveSource.connectLive(handlers());
     expect(MockEventSource.instances[0].url).toBe('/api/events?token=synthetic');
+    MockEventSource.instances[0].onerror?.();
+    vi.advanceTimersByTime(1000);
+    expect(MockEventSource.instances[1].url).toBe('/api/events?token=synthetic');
     stop();
   });
   it('tolerates unavailable storage without a URL token', async () => {

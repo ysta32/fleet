@@ -22,6 +22,7 @@ function initialToken(): string | null {
 }
 
 let token = initialToken();
+let opened = false;
 
 export function apiUrl(path: string): string {
   const url = new URL(path, window.location.origin);
@@ -47,14 +48,25 @@ export function connectLive(handlers: {
     if (stopped) return;
     try {
       const url = new URL('/api/events', window.location.origin);
-      if (token) url.searchParams.set('token', token);
-      token = null;
+      if (!opened) {
+        let connectionToken = token;
+        if (!connectionToken) {
+          try {
+            connectionToken = window.localStorage.getItem('fleet.token');
+          } catch {
+            // Storage may be disabled; still try connecting with the session cookie.
+          }
+        }
+        if (connectionToken) url.searchParams.set('token', connectionToken);
+      }
       source = new EventSource(`${url.pathname}${url.search}`);
     } catch {
       reconnect();
       return;
     }
     source.onopen = () => {
+      token = null;
+      opened = true;
       attempt = 0;
       handlers.connected(true);
     };
