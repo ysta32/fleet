@@ -279,3 +279,16 @@ export interface FleetConfig {
   github: boolean;
   githubPollMs: number;
 }
+
+/* ---------------- Synthetic demo generator (packages/shared/src/demo.ts) ----------------
+ * Fully synthetic, deterministic for a given seed. Never reads real data.
+ * export function createDemoFleet(opts?: { seed?: number; now?: number; projects?: number }): DemoFleet
+ */
+export interface DemoFleet {
+  /** current synthetic state at the internal clock */
+  snapshot(): FleetSnapshot;
+  /** advance the internal clock by dtMs; returns events that occurred, in order */
+  tick(dtMs: number): FleetEvent[];
+  /** synthetic history covering the last `hours` before the current clock */
+  history(hours: number): HistoryResponse;
+}
