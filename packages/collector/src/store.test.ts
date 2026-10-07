@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -204,18 +204,121 @@ describe('FleetStore', () => {
     expect(s.history(T0 + 10, T0).frames).toEqual([]);
   });
 
-  it('drops keyframes older than 24h but keeps the newest as baseline', () => {
+  it('drops keyframes older than 24h but keeps the immediate predecessor of the cutoff', () => {
     const s = new FleetStore({ now });
     s.upsertProject(project('p1', T0));
-    s.keyframe(T0 - 26 * HOUR);
+    s.keyframe(T0 - 27 * HOUR);
     s.upsertProject(project('p2', T0));
+    s.keyframe(T0 - 26 * HOUR);
+    s.upsertProject(project('p3', T0));
     s.keyframe(T0 - 25 * HOUR);
     s.prune();
     expect(s.history(0, Infinity).frames.map((f) => f.generatedAt)).toEqual([T0 - 25 * HOUR]);
-    s.upsertProject(project('p3', T0));
+    s.upsertProject(project('p4', T0));
+    s.keyframe(T0 - 23 * HOUR);
+    s.upsertProject(project('p5', T0));
     s.keyframe(T0);
     s.prune();
-    expect(s.history(0, Infinity).frames.map((f) => f.generatedAt)).toEqual([T0]);
+    // predecessor (-25h) kept as initial state for a replay starting at the cutoff
+    expect(s.history(0, Infinity).frames.map((f) => f.generatedAt)).toEqual([
+      T0 - 25 * HOUR,
+      T0 - 23 * HOUR,
+      T0,
+    ]);
+    const h = s.history(T0 - 24 * HOUR, T0);
+    expect(h.frames[0].generatedAt).toBe(T0 - 25 * HOUR);
+  });
+
+  it('load keeps the frame immediately before the retention cutoff', () => {
+    const dir = tmp();
+    const s = new FleetStore({ now, persistFrameMs: 1 });
+    for (const h of [30, 26, 20, 1]) {
+      s.upsertProject(project(`p${h}`, T0));
+      s.keyframe(T0 - h * HOUR);
+    }
+    s.saveSync(dir);
+    const r = new FleetStore({ now });
+    r.load(dir);
+    expect(r.history(0, Infinity).frames.map((f) => f.generatedAt)).toEqual([
+      T0 - 26 * HOUR,
+      T0 - 20 * HOUR,
+      T0 - 1 * HOUR,
+    ]);
+  });
+
+  it('setOrch(undefined) removes orch embedded via upsertProject or load', () => {
+    const orch = {
+      projectId: 'p1',
+      phase: 'running' as const,
+      statusText: '',
+      handoffText: '',
+      tasks: [],
+      inflight: [],
+      worktrees: [],
+      blocked: [],
+      updatedAt: T0,
+    };
+    const s = new FleetStore({ now });
+    s.upsertProject({ ...project('p1', T0), orch });
+    expect(s.snapshot().projects[0].orch?.phase).toBe('running');
+    s.setOrch('p1', undefined);
+    expect(s.snapshot().projects[0].orch).toBeUndefined();
+    // a later upsert without orch does not drop a separately set orch
+    s.setOrch('p1', orch);
+    s.upsertProject(project('p1', T0 + 1));
+    expect(s.snapshot().projects[0].orch?.phase).toBe('running');
+
+    const dir = tmp();
+    s.saveSync(dir);
+    const r = new FleetStore({ now });
+    r.load(dir);
+    expect(r.snapshot().projects[0].orch?.phase).toBe('running');
+    r.setOrch('p1', undefined);
+    expect(r.snapshot().projects[0].orch).toBeUndefined();
+  });
+
+  it('a failed save keeps the store dirty and the next save succeeds', async () => {
+    const base = tmp();
+    const blocker = join(base, 'file');
+    writeFileSync(blocker, 'x');
+    const badDir = join(blocker, 'sub'); // mkdir fails: parent is a regular file
+    const s = new FleetStore({ now });
+    s.upsertProject(project('p1', T0));
+    await expect(s.save(badDir)).rejects.toThrow();
+    expect((s as unknown as { dirtySinceSave: boolean }).dirtySinceSave).toBe(true);
+    expect(() => s.saveSync(badDir)).toThrow();
+    expect((s as unknown as { dirtySinceSave: boolean }).dirtySinceSave).toBe(true);
+    const good = join(base, 'ok');
+    await s.save(good);
+    expect(readdirSync(good)).toEqual([HISTORY_FILE]);
+    expect((s as unknown as { dirtySinceSave: boolean }).dirtySinceSave).toBe(false);
+  });
+
+  it('persists at most one frame per 5 minutes and at most 20k events', () => {
+    const dir = tmp();
+    const s = new FleetStore({ now, maxEvents: 25_000 });
+    // 24h of 30s keyframes
+    const start = T0 - 24 * HOUR + 1;
+    for (let t = start; t <= T0; t += 30_000) {
+      s.upsertProject(project('p1', t));
+      s.keyframe(t);
+    }
+    for (let i = 0; i < 25_000; i++) s.emitEvent(event(T0 - 25_000 + i, i));
+    expect(s.history(0, Infinity).frames.length).toBe(2880);
+    s.saveSync(dir);
+    const file = JSON.parse(readFileSync(join(dir, HISTORY_FILE), 'utf8')) as {
+      frames: { generatedAt: number }[];
+      events: { ts: number }[];
+    };
+    expect(file.frames.length).toBeLessThanOrEqual(289);
+    expect(file.frames.length).toBeGreaterThanOrEqual(287);
+    const buckets = file.frames.map((f) => Math.floor(f.generatedAt / 300_000));
+    expect(new Set(buckets).size).toBe(buckets.length);
+    expect(file.frames[file.frames.length - 1].generatedAt).toBe(
+      s.history(0, Infinity).frames.at(-1)!.generatedAt,
+    );
+    expect(file.events.length).toBe(20_000);
+    expect(file.events[file.events.length - 1].ts).toBe(T0 - 1);
   });
 
   it('start() captures keyframes every 30s when changed', () => {
@@ -271,7 +374,8 @@ describe('FleetStore', () => {
     const r = new FleetStore({ now });
     r.load(dir);
     expect(r.history(0, Infinity).events).toEqual([]);
-    expect(r.history(0, Infinity).frames).toEqual([]);
+    // the only frame precedes the cutoff, so it is kept as replay baseline
+    expect(r.history(0, Infinity).frames.map((f) => f.generatedAt)).toEqual([T0]);
 
     expect(new FleetStore({ now }).load(tmp())).toBe(false);
     const bad = tmp();

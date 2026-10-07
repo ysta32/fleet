@@ -1,5 +1,13 @@
 import { EventEmitter } from 'node:events';
-import { promises as fsp, mkdirSync, readFileSync, renameSync, writeFileSync, existsSync } from 'node:fs';
+import {
+  promises as fsp,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+  existsSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import {
   PROTOCOL_VERSION,
@@ -19,6 +27,8 @@ import {
 export const HISTORY_FILE = 'history.json';
 const HISTORY_FILE_VERSION = 1;
 const DAY_MS = 24 * 60 * 60 * 1000;
+/** max events written to history.json */
+export const PERSIST_MAX_EVENTS = 20_000;
 
 export interface FleetStoreOptions {
   /** directory for history.json; when set, start() enables periodic saves and close() saves */
@@ -37,6 +47,8 @@ export interface FleetStoreOptions {
   changeDebounceMs?: number;
   /** max alerts kept (default 500) */
   maxAlerts?: number;
+  /** history.json keeps at most one keyframe per this interval (default 5min); memory keeps all */
+  persistFrameMs?: number;
 }
 
 export interface GithubState {
@@ -74,6 +86,7 @@ export class FleetStore extends EventEmitter {
   private readonly saveMs: number;
   private readonly changeDebounceMs: number;
   private readonly maxAlerts: number;
+  private readonly persistFrameMs: number;
   private readonly dataDir?: string;
 
   private changeTimer?: NodeJS.Timeout;
@@ -93,13 +106,15 @@ export class FleetStore extends EventEmitter {
     this.saveMs = opts.saveMs ?? 60_000;
     this.changeDebounceMs = opts.changeDebounceMs ?? 250;
     this.maxAlerts = opts.maxAlerts ?? 500;
+    this.persistFrameMs = opts.persistFrameMs ?? 5 * 60_000;
     this.dataDir = opts.dataDir;
   }
 
   /* ---------------- mutations ---------------- */
 
   upsertProject(p: Project): void {
-    this.projects.set(p.id, p);
+    // the orch map is authoritative: an embedded orch is moved into it and stripped from the stored project
+    this.projects.set(p.id, stripOrch(p));
     if (p.orch) this.orch.set(p.id, p.orch);
     this.markChanged();
   }
@@ -312,10 +327,7 @@ export class FleetStore extends EventEmitter {
   }
 
   private pruneFrames(now: number): void {
-    const cutoff = now - this.retentionMs;
-    // strict retention, except the newest frame is always kept so replay has a baseline
-    const kept = this.frames.filter((f) => f.generatedAt >= cutoff);
-    if (kept.length === 0 && this.frames.length > 0) kept.push(this.frames[this.frames.length - 1]);
+    const kept = retainFrames(this.frames, now - this.retentionMs);
     if (kept.length !== this.frames.length) {
       this.frames = kept;
       this.dirtySinceSave = true;
@@ -340,8 +352,8 @@ export class FleetStore extends EventEmitter {
       version: HISTORY_FILE_VERSION,
       savedAt: this.now(),
       state: this.snapshot(),
-      frames: this.frames,
-      events: this.events,
+      frames: thinFrames(this.frames, this.persistFrameMs),
+      events: this.events.slice(Math.max(0, this.events.length - PERSIST_MAX_EVENTS)),
     };
     return JSON.stringify(file);
   }
@@ -353,11 +365,11 @@ export class FleetStore extends EventEmitter {
       .catch(() => undefined)
       .then(async () => {
         this.dirtySinceSave = false;
-        const data = this.serialize();
-        await fsp.mkdir(dir, { recursive: true });
         const target = join(dir, HISTORY_FILE);
         const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
         try {
+          const data = this.serialize();
+          await fsp.mkdir(dir, { recursive: true });
           await fsp.writeFile(tmp, data, { mode: 0o600 });
           await fsp.rename(tmp, target);
         } catch (err) {
@@ -377,12 +389,18 @@ export class FleetStore extends EventEmitter {
   /** synchronous variant used on shutdown */
   saveSync(dir: string): void {
     this.dirtySinceSave = false;
-    const data = this.serialize();
-    mkdirSync(dir, { recursive: true });
     const target = join(dir, HISTORY_FILE);
     const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
-    writeFileSync(tmp, data, { mode: 0o600 });
-    renameSync(tmp, target);
+    try {
+      const data = this.serialize();
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(tmp, data, { mode: 0o600 });
+      renameSync(tmp, target);
+    } catch (err) {
+      this.dirtySinceSave = true;
+      rmSync(tmp, { force: true });
+      throw err;
+    }
   }
 
   /**
@@ -401,15 +419,19 @@ export class FleetStore extends EventEmitter {
     if (!isHistoryFile(parsed)) throw new Error(`fleet: unsupported history file ${target}`);
     const now = this.now();
     const cutoff = now - this.retentionMs;
-    this.frames = parsed.frames
-      .filter((f) => f.generatedAt >= cutoff && f.generatedAt <= now)
-      .sort((a, b) => a.generatedAt - b.generatedAt);
+    this.frames = retainFrames(
+      parsed.frames.filter((f) => f.generatedAt <= now).sort((a, b) => a.generatedAt - b.generatedAt),
+      cutoff,
+    );
     const events = parsed.events.filter((e) => e.ts >= cutoff);
     this.events = events.slice(Math.max(0, events.length - this.maxEvents));
     const st = parsed.state;
     if (st) {
-      for (const p of st.projects) if (!this.projects.has(p.id)) this.projects.set(p.id, p);
-      for (const p of st.projects) if (p.orch && !this.orch.has(p.id)) this.orch.set(p.id, p.orch);
+      for (const p of st.projects) {
+        if (this.projects.has(p.id)) continue;
+        this.projects.set(p.id, stripOrch(p));
+        if (p.orch && !this.orch.has(p.id)) this.orch.set(p.id, p.orch);
+      }
       for (const s of st.sessions) if (!this.sessions.has(s.id)) this.sessions.set(s.id, s);
       for (const a of st.agents) if (!this.agents.has(a.id)) this.agents.set(a.id, a);
       for (const a of st.alerts) if (!this.alerts.has(a.id)) this.alerts.set(a.id, a);
@@ -428,6 +450,33 @@ export class FleetStore extends EventEmitter {
     this.markChanged();
     return true;
   }
+}
+
+function stripOrch(p: Project): Project {
+  if (p.orch === undefined) return p;
+  const copy = { ...p };
+  delete copy.orch;
+  return copy;
+}
+
+/** frames (chronological) at/after cutoff, plus the immediate predecessor so replay has an initial state */
+function retainFrames(frames: FleetSnapshot[], cutoff: number): FleetSnapshot[] {
+  const first = frames.findIndex((f) => f.generatedAt >= cutoff);
+  if (first === -1) return frames.length > 0 ? [frames[frames.length - 1]] : [];
+  return frames.slice(Math.max(0, first - 1));
+}
+
+/** at most one frame per `bucketMs` bucket (the latest in each), so the newest frame is always kept */
+function thinFrames(frames: FleetSnapshot[], bucketMs: number): FleetSnapshot[] {
+  const out: FleetSnapshot[] = [];
+  let lastBucket: number | undefined;
+  for (const f of frames) {
+    const b = Math.floor(f.generatedAt / bucketMs);
+    if (b === lastBucket) out[out.length - 1] = f;
+    else out.push(f);
+    lastBucket = b;
+  }
+  return out;
 }
 
 function isHistoryFile(v: unknown): v is HistoryFile {
