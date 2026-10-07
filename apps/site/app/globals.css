@@ -1499,3 +1499,15 @@ pre.code .c {
     order: 2;
   }
 }
+.demo-note {
+  position: absolute;
+  z-index: 2;
+  top: var(--fl-space-5);
+  left: var(--site-gutter);
+  max-width: 48ch;
+  padding: var(--fl-space-3) var(--fl-space-4);
+  background: var(--fl-glass);
+  border: var(--fl-hairline) solid var(--fl-border);
+  border-radius: var(--fl-radius-md);
+  font-size: var(--fl-text-sm);
+}
