@@ -1,0 +1,49 @@
+{
+  "name": "@fleet/digest",
+  "version": "0.1.0",
+  "description": "Overnight \u2014 Fleet's morning digest of everything that shipped across your repos and deploys.",
+  "type": "module",
+  "license": "MIT",
+  "author": "ysta32",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ysta32/fleet.git",
+    "directory": "packages/digest"
+  },
+  "homepage": "https://github.com/ysta32/fleet/tree/main/packages/digest",
+  "bin": {
+    "overnight": "dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "schema",
+    "fixtures",
+    "SCHEMA.md",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --root ../.. packages/digest",
+    "demo": "node dist/cli.js demo --out public"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.132.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.1"
+  },
+  "private": true
+}
