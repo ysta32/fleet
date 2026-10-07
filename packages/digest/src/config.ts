@@ -88,7 +88,7 @@ export async function loadConfig(
     if (path !== undefined || !isObject(error) || error.code !== 'ENOENT') throw error;
   }
   if (!isObject(file)) throw new Error('Config must be a JSON object');
-  let merged = merge(merge({ ...defaultConfig() }, file), { ...overrides });
+  const merged = merge({ ...defaultConfig() }, file);
   const env = process.env;
   const environment: Record<string, unknown> = {};
   for (const [key, variable] of Object.entries({
@@ -126,8 +126,7 @@ export async function loadConfig(
     };
   }
   environment.deliver = deliver;
-  merged = merge(merged, environment);
-  return configSchema.parse(merged);
+  return configSchema.parse(merge(merge(merged, environment), { ...overrides }));
 }
 
 export function readSecrets(env: NodeJS.ProcessEnv = process.env): Secrets {
@@ -173,13 +172,13 @@ export function resolveWindow(
       ? timestamp(opts.since)
       : current - parseDuration(opts.since);
   } else {
+    const lastRunAt = state.lastRunAt === undefined ? undefined : timestamp(state.lastRunAt);
     since =
-      state.lastRunAt === undefined
-        ? current - parseDuration(config.defaultSince)
-        : timestamp(state.lastRunAt);
+      lastRunAt === undefined || lastRunAt >= until ? until - parseDuration(config.defaultSince) : lastRunAt;
   }
-  since = Math.max(since, current - 14 * 86_400_000);
-  if (since > until) throw new Error('Window since must not be after until');
+  since = Math.max(since, until - 14 * 86_400_000);
+  if (opts.since !== undefined && since > until)
+    throw new Error('Invalid --since: must not be after --until');
   return { since: new Date(since).toISOString(), until: new Date(until).toISOString() };
 }
 

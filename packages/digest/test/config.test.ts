@@ -94,7 +94,7 @@ describe('configuration', () => {
     });
   });
 
-  it('applies environment settings over the file and overrides', async () => {
+  it('applies environment settings over the file and explicit overrides over environment', async () => {
     const path = join(dir, 'config.json');
     await writeFile(path, JSON.stringify({ owner: 'file-owner', outDir: 'file-out' }));
     const env = {
@@ -111,7 +111,7 @@ describe('configuration', () => {
       OVERNIGHT_SITE_URL: 'https://example.test',
     };
     for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
-    expect(await loadConfig(path, { owner: 'override' })).toMatchObject({
+    expect(await loadConfig(path)).toMatchObject({
       owner: 'env-owner',
       outDir: 'env-out',
       stateDir: 'env-state',
@@ -122,6 +122,33 @@ describe('configuration', () => {
         ntfy: { enabled: true, topic: 'topic' },
         notion: { enabled: true, databaseId: 'database', pageId: 'page' },
         email: { enabled: true, to: 'to@example.test', from: 'from@example.test' },
+      },
+    });
+    expect(
+      await loadConfig(path, {
+        owner: 'override-owner',
+        outDir: 'override-out',
+        stateDir: 'override-state',
+        include: ['override-*'],
+        exclude: [],
+        siteUrl: 'https://override.example.test',
+        deliver: {
+          ntfy: { enabled: false, server: 'https://ntfy.example.test' },
+          notion: { enabled: false },
+          email: { enabled: false },
+        },
+      }),
+    ).toMatchObject({
+      owner: 'override-owner',
+      outDir: 'override-out',
+      stateDir: 'override-state',
+      include: ['override-*'],
+      exclude: [],
+      siteUrl: 'https://override.example.test',
+      deliver: {
+        ntfy: { enabled: false, topic: 'topic', server: 'https://ntfy.example.test' },
+        notion: { enabled: false, databaseId: 'database', pageId: 'page' },
+        email: { enabled: false, to: 'to@example.test', from: 'from@example.test' },
       },
     });
   });
@@ -227,6 +254,43 @@ describe('time windows', () => {
     ]) {
       expect(() => resolveWindow(opts, { repoStats: {} }, defaultConfig(), now)).toThrow();
     }
+  });
+  it.each(['2026-10-07T12:00:00Z', '2026-10-08T12:00:00Z'])(
+    'falls back to defaultSince when saved run %s is at or after until',
+    (lastRunAt) => {
+      expect(
+        resolveWindow({}, { lastRunAt, repoStats: {} }, { ...defaultConfig(), defaultSince: '48h' }, now),
+      ).toEqual({ since: '2026-10-05T12:00:00.000Z', until: now.toISOString() });
+    },
+  );
+  it('clamps historical windows relative to until', () => {
+    const config = { ...defaultConfig(), defaultSince: '4w' };
+    for (const [opts, state] of [
+      [{ since: '2020-01-01' }, { repoStats: {} }],
+      [{}, { lastRunAt: '2020-01-01', repoStats: {} }],
+      [{}, { lastRunAt: now.toISOString(), repoStats: {} }],
+      [{}, { repoStats: {} }],
+    ] as const) {
+      expect(resolveWindow({ ...opts, until: '2026-08-01' }, state, config, now)).toEqual({
+        since: '2026-07-18T00:00:00.000Z',
+        until: '2026-08-01T00:00:00.000Z',
+      });
+    }
+  });
+  it('uses the default duration before a historical until when saved state is unusable', () => {
+    expect(
+      resolveWindow(
+        { until: '2026-08-01' },
+        { lastRunAt: now.toISOString(), repoStats: {} },
+        defaultConfig(),
+        now,
+      ),
+    ).toEqual({ since: '2026-07-31T00:00:00.000Z', until: '2026-08-01T00:00:00.000Z' });
+  });
+  it.each(['2026-08-02', '24h'])('reports reversed explicit since %s as a usage error', (since) => {
+    expect(() =>
+      resolveWindow({ since, until: '2026-08-01' }, { repoStats: {} }, defaultConfig(), now),
+    ).toThrow('Invalid --since: must not be after --until');
   });
   it('computes date keys across timezone and DST boundaries', () => {
     expect(digestDateKey('2026-10-07T02:00:00Z', 'America/New_York')).toBe('2026-10-06');
