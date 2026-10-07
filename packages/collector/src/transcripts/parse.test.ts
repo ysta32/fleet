@@ -194,7 +194,8 @@ describe('SessionParser (lead transcript)', () => {
 
     const release = events.filter((e) => e.kind === 'release');
     expect(release).toHaveLength(1);
-    expect(release[0]).toMatchObject({ label: 'Release v1.2.3', data: { tag: 'v1.2.3' } });
+    expect(release[0]).toMatchObject({ label: 'Release published' });
+    expect(release[0]?.data).toBeUndefined();
 
     for (const e of events) {
       expect(e.projectId).toBe('-tmp-demo');
@@ -347,21 +348,38 @@ describe('Bash detection privacy (only executed commands match)', () => {
     expect(JSON.stringify(events)).not.toContain(SECRET);
   });
 
-  it('matches real commands in later segments and keeps safe tags only', () => {
-    expect(bashEvents(`cd x && GH=1 gh release create v2.0.0 --notes "${SECRET}"`)).toMatchObject([
-      { kind: 'release', label: 'Release v2.0.0', data: { tag: 'v2.0.0' } },
-    ]);
-    const unsafe = bashEvents(`gh release create "${SECRET} with spaces/and:stuff"`);
-    expect(unsafe).toMatchObject([{ kind: 'release', label: 'Release created' }]);
-    expect(unsafe[0]?.data).toBeUndefined();
-    expect(JSON.stringify(unsafe)).not.toContain(SECRET);
+  it('matches real commands in later segments and never emits free args', () => {
+    const rel = bashEvents(`cd x && GH=1 gh release create v2.0.0 --notes "${SECRET}"`);
+    expect(rel).toMatchObject([{ kind: 'release', label: 'Release published' }]);
+    expect(rel[0]?.data).toBeUndefined();
     expect(bashEvents('git -C ../repo merge --no-ff feat')).toMatchObject([
       { kind: 'merge', label: 'Branch merged' },
     ]);
     expect(bashEvents('gh pr merge --squash 42')).toMatchObject([{ kind: 'merge', data: { pr: 42 } }]);
-    expect(bashEvents('cat <<EOF\nhello\nEOF\nnpm test')).toMatchObject([
-      { kind: 'test.run', data: { runner: 'npm' } },
-    ]);
+    const named = bashEvents(`gh pr merge ${SECRET}-branch`);
+    expect(named).toMatchObject([{ kind: 'merge', label: 'Branch merged' }]);
+    expect(named[0]?.data).toBeUndefined();
+    // conservative: nothing after a heredoc is trusted
+    expect(bashEvents('cat <<EOF\nhello\nEOF\nnpm test')).toEqual([]);
+  });
+
+  it.each([
+    ['notes flag', 'gh release create --notes "PRIVATE" v1', ['release']],
+    ['empty heredoc delimiter', "cat <<''\ngh release create PRIVATE\n\n", []],
+    ['command substitution', 'echo "$(printf "%s" "; gh release create PRIVATE;")"', []],
+    ['backticks', 'echo `gh release create PRIVATE`', []],
+    ['unbalanced quote', 'echo "x ; gh release create PRIVATE', []],
+    ['herestring then test', 'cat <<< "hello"\nnpm test', ['test.run']],
+    ['herestring blocks release', 'cat <<< "hello"\ngh release create PRIVATE', []],
+    ['test before substitution', 'npm test -- $(echo PRIVATE)', ['test.run']],
+  ])('%s', (_name, command, expected) => {
+    const p = new SessionParser(leadFile);
+    const events = p.ingest([assistant(T0, 'm', [tool('t', 'Bash', { command })])], T0 + 1000);
+    expect(events.map((e) => e.kind).filter((k) => k !== 'session.start' && k !== 'agent.tool')).toEqual(
+      expected,
+    );
+    const all = JSON.stringify({ events, s: p.session(T0 + 1000), a: p.agents(T0 + 1000) });
+    expect(all).not.toContain('PRIVATE');
   });
 });
 

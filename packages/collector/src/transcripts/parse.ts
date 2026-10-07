@@ -47,7 +47,6 @@ const TEST_RUNNERS = new Set([
 const MODEL_ALIASES = new Set<ModelFamily>(['opus', 'sonnet', 'haiku', 'fable']);
 const WORKTREE_RE = /\/\.orch\/wt\/([^/\\]+)/;
 const SAFE_ID_RE = /^[A-Za-z0-9._-]{1,60}$/;
-const SAFE_TAG_RE = /^v?[0-9A-Za-z._-]{1,32}$/;
 
 type Json = Record<string, unknown>;
 
@@ -445,31 +444,33 @@ export class SessionParser {
   }
 
   /**
-   * Detect test/merge/release/review from the *executed* simple commands only (quoted text,
-   * comments and heredoc bodies never match). Returns true when this is a review run.
+   * Privacy by design: only fixed labels are emitted (never a free argument), except an
+   * all-digit PR number. Merge/release/review are detected only for "plain" commands (no command
+   * substitution, heredoc/herestring or unbalanced quotes); test.run only looks at the executed
+   * simple commands that precede any such construct.
    */
   private onBash(cmd: string, ts: number, events: FleetEvent[]): boolean {
+    const { segments, complete } = commandSegments(cmd);
+    const plain = complete && !/\$\(|`|<</.test(cmd);
     let test: string | undefined;
     let merge: { pr?: number } | undefined;
-    let release: { tag?: string } | undefined;
+    let release = false;
     let review = false;
-    for (const segment of commandSegments(cmd)) {
+    for (const segment of segments) {
       const words = leadingCommand(segment);
       const head = words[0];
       if (head === undefined) continue;
       const runner = projectNameFromPath(head);
       if (!test && TEST_RUNNERS.has(runner) && words.slice(1).some((w) => /test/i.test(w))) test = runner;
+      if (!plain) continue;
       if (head === 'gh' && words[1] === 'pr' && words[2] === 'merge') {
-        const m = /^#?(\d{1,7})$/.exec(firstArg(words, 3) ?? '');
-        merge ??= m ? { pr: Number(m[1]) } : {};
+        const arg = firstArg(words, 3);
+        merge ??= arg !== undefined && /^\d{1,7}$/.test(arg) ? { pr: Number(arg) } : {};
       } else if (head === 'git') {
         const sub = words[1] === '-C' ? words[3] : words[1];
         if (sub === 'merge') merge ??= {};
       }
-      if (head === 'gh' && words[1] === 'release' && words[2] === 'create') {
-        const tag = firstArg(words, 3);
-        release ??= tag !== undefined && SAFE_TAG_RE.test(tag) ? { tag } : {};
-      }
+      if (head === 'gh' && words[1] === 'release' && words[2] === 'create') release = true;
       if (head === 'gpt' && words[1] === 'code' && words.slice(2).includes('ro')) review = true;
     }
     if (test) events.push(this.event('test.run', ts, 'info', `Tests (${test})`, { data: { runner: test } }));
@@ -481,14 +482,7 @@ export class SessionParser {
         }),
       );
     }
-    if (release) {
-      const tag = release.tag;
-      events.push(
-        this.event('release', ts, 'success', tag ? `Release ${tag}` : 'Release created', {
-          data: tag ? { tag } : undefined,
-        }),
-      );
-    }
+    if (release) events.push(this.event('release', ts, 'success', 'Release published'));
     return review;
   }
 }
@@ -511,12 +505,13 @@ function firstArg(words: string[], from: number): string | undefined {
 
 /**
  * Best-effort split of a shell command into executed simple commands (word lists).
- * Quoted text stays inside a single word; `;`, `&`, `|`, `(`, `)`, backticks and newlines
- * separate commands; `#` comments and heredoc bodies are dropped.
+ * Quoted text stays inside one word; `;`, `&`, `|`, `(`, `)` and newlines separate commands;
+ * `#` comments are dropped and `<<<` is consumed as a single redirection token.
+ * Scanning stops at the first construct it does not model (`$(`, backtick, heredoc `<<`,
+ * unterminated quote): `complete` is then false and only the words before it are returned.
  */
-export function commandSegments(cmd: string): string[][] {
+export function commandSegments(cmd: string): { segments: string[][]; complete: boolean } {
   const segments: string[][] = [];
-  const heredocs: { delim: string; strip: boolean }[] = [];
   let words: string[] = [];
   let word = '';
   let inWord = false;
@@ -530,46 +525,44 @@ export function commandSegments(cmd: string): string[][] {
     if (words.length) segments.push(words);
     words = [];
   };
+  const stop = (): { segments: string[][]; complete: boolean } => {
+    // drop the partially-read word: it may continue past the unmodelled construct
+    word = '';
+    inWord = false;
+    endSegment();
+    return { segments, complete: false };
+  };
   const n = cmd.length;
   let i = 0;
   while (i < n) {
     const c = cmd[i] as string;
-    if (c === '\n') {
-      endSegment();
-      i++;
-      for (const h of heredocs) {
-        while (i < n) {
-          const nl = cmd.indexOf('\n', i);
-          const end = nl < 0 ? n : nl;
-          const body = cmd.slice(i, end);
-          i = end + 1;
-          if ((h.strip ? body.replace(/^\t+/, '') : body) === h.delim) break;
-        }
-      }
-      heredocs.length = 0;
-      continue;
-    }
+    if (c === '`' || (c === '$' && cmd[i + 1] === '(')) return stop();
     if (c === "'") {
       const close = cmd.indexOf("'", i + 1);
-      const end = close < 0 ? n : close;
-      word += cmd.slice(i + 1, end);
+      if (close < 0) return stop();
+      word += cmd.slice(i + 1, close);
       inWord = true;
-      i = end + 1;
+      i = close + 1;
       continue;
     }
     if (c === '"') {
-      inWord = true;
-      i++;
-      while (i < n && cmd[i] !== '"') {
-        if (cmd[i] === '\\' && i + 1 < n) {
-          word += cmd[i + 1];
-          i += 2;
+      let j = i + 1;
+      let text = '';
+      while (j < n && cmd[j] !== '"') {
+        const ch = cmd[j] as string;
+        if (ch === '`' || (ch === '$' && cmd[j + 1] === '(')) return stop();
+        if (ch === '\\' && j + 1 < n) {
+          text += cmd[j + 1];
+          j += 2;
         } else {
-          word += cmd[i];
-          i++;
+          text += ch;
+          j++;
         }
       }
-      i++;
+      if (j >= n) return stop();
+      word += text;
+      inWord = true;
+      i = j + 1;
       continue;
     }
     if (c === '\\') {
@@ -585,25 +578,13 @@ export function commandSegments(cmd: string): string[][] {
       i = nl < 0 ? n : nl;
       continue;
     }
-    if (c === '<' && cmd[i + 1] === '<' && cmd[i + 2] !== '<') {
+    if (c === '<' && cmd[i + 1] === '<') {
+      if (cmd[i + 2] !== '<') return stop();
       endWord();
-      i += 2;
-      let strip = false;
-      if (cmd[i] === '-') {
-        strip = true;
-        i++;
-      }
-      while (cmd[i] === ' ' || cmd[i] === '\t') i++;
-      let delim = '';
-      while (i < n && !/[\s;&|<>()]/.test(cmd[i] as string)) {
-        const ch = cmd[i] as string;
-        if (ch !== '"' && ch !== "'" && ch !== '\\') delim += ch;
-        i++;
-      }
-      if (delim) heredocs.push({ delim, strip });
+      i += 3;
       continue;
     }
-    if (c === ';' || c === '&' || c === '|' || c === '(' || c === ')' || c === '`') {
+    if (c === ';' || c === '&' || c === '|' || c === '(' || c === ')' || c === '\n') {
       endSegment();
       i++;
       continue;
@@ -618,5 +599,5 @@ export function commandSegments(cmd: string): string[][] {
     i++;
   }
   endSegment();
-  return segments;
+  return { segments, complete: true };
 }
