@@ -23,6 +23,10 @@ const ROLES: [AgentRole, ModelFamily][] = [
   ['tester', 'sonnet'],
 ];
 const STEP_MS = 800;
+const MAX_CATCH_UP_MS = 120_000;
+const MAX_HISTORY_MS = 12 * 3_600_000;
+const MAX_FRAMES = 720;
+const MAX_EVENTS = 20_000;
 
 function mulberry32(seed: number): () => number {
   let value = seed >>> 0;
@@ -59,7 +63,11 @@ export function createDemoFleet(opts: { seed?: number; now?: number; projects?: 
   const random = mulberry32(seed);
   let nextStep = now + STEP_MS;
   let sequence = 0;
+  let alertSeq = 0;
   let turn = 0;
+  let live: DemoFleet | undefined;
+  let historyFrames: FleetSnapshot[] = [];
+  let historyEvents: FleetEvent[] = [];
   const state: FleetSnapshot = {
     version: 1,
     demo: true,
@@ -205,7 +213,7 @@ export function createDemoFleet(opts: { seed?: number; now?: number; projects?: 
     }
     function alert(kind: 'session.waiting' | 'army.blocked' | 'ci.failed'): void {
       state.alerts.push({
-        id: `alert-${now}-${sequence}`,
+        id: `alert-${now}-${alertSeq++}`,
         kind,
         projectId: project.id,
         title: kind,
@@ -377,6 +385,11 @@ export function createDemoFleet(opts: { seed?: number; now?: number; projects?: 
         const next = state.projects[(index + armies.length) % projectCount]!;
         // Uneven project counts can point at another live army; keep this lane in that case.
         const destination = armies.some((other) => other !== army && other.project === next) ? project : next;
+        if (destination !== project) {
+          state.sessions = state.sessions.filter((entry) => entry.id !== session.id);
+          state.agents = state.agents.filter((entry) => entry.sessionId !== session.id);
+          delete project.orch;
+        }
         Object.assign(army, start(destination, army.generation + 1));
         advance(army, events);
       }
@@ -384,6 +397,7 @@ export function createDemoFleet(opts: { seed?: number; now?: number; projects?: 
   }
 
   function snapshot(): FleetSnapshot {
+    if (live) return live.snapshot();
     // Explicit copies keep history frames isolated without serializing the entire fleet.
     return {
       ...state,
@@ -426,29 +440,58 @@ export function createDemoFleet(opts: { seed?: number; now?: number; projects?: 
       throw new RangeError('dtMs must be finite and nonnegative');
     }
     const end = now + dtMs;
+    if (live) {
+      const events = live.tick(dtMs);
+      now = end;
+      historyEvents = historyEvents
+        .concat(structuredClone(events))
+        .filter((event) => event.ts >= now - MAX_HISTORY_MS)
+        .slice(-MAX_EVENTS);
+      if (now - historyFrames.at(-1)!.generatedAt >= 30_000) historyFrames.push(live.snapshot());
+      historyFrames = historyFrames
+        .filter((frame) => frame.generatedAt >= now - MAX_HISTORY_MS)
+        .slice(-MAX_FRAMES);
+      return events;
+    }
     const events: FleetEvent[] = [];
-    while (nextStep <= end) {
+    const catchUpEnd = Math.min(end, now + MAX_CATCH_UP_MS);
+    while (nextStep <= catchUpEnd) {
       now = nextStep;
       advance(armies[turn++ % armies.length]!, events);
       nextStep += STEP_MS;
     }
+    if (nextStep <= end) nextStep += (Math.floor((end - nextStep) / STEP_MS) + 1) * STEP_MS;
     now = end;
     return events;
   }
 
   function history(hours: number): HistoryResponse {
     if (!Number.isFinite(hours) || hours < 0) throw new RangeError('hours must be finite and nonnegative');
-    const from = now - Math.min(hours, 24) * 3_600_000;
-    const replay = createDemoFleet({ seed, now: from, projects: projectCount });
-    const frames = [replay.snapshot()];
-    const events: FleetEvent[] = [];
-    for (let elapsed = 0; elapsed < now - from;) {
-      const dt = Math.min(30_000, now - from - elapsed);
-      events.push(...replay.tick(dt));
-      elapsed += dt;
-      if (elapsed % 30_000 === 0) frames.push(replay.snapshot());
+    const from = now - Math.min(hours, 12) * 3_600_000;
+    if (hours === 0) return { from, to: now, frames: [snapshot()], events: [] };
+    if (!live) {
+      const replay = createDemoFleet({ seed, now: from, projects: projectCount });
+      historyFrames = [replay.snapshot()];
+      const interval = Math.max(30_000, Math.ceil((now - from) / (MAX_FRAMES - 1)));
+      for (let elapsed = 0; elapsed < now - from;) {
+        const dt = Math.min(interval, now - from - elapsed);
+        historyEvents.push(...replay.tick(dt));
+        historyEvents = historyEvents.slice(-MAX_EVENTS);
+        elapsed += dt;
+        historyFrames.push(replay.snapshot());
+      }
+      live = replay;
     }
-    return { from, to: now, frames, events };
+    const frames = historyFrames.filter(
+      (frame) => frame.generatedAt >= from && frame.generatedAt <= now - 30_000,
+    );
+    frames.push(snapshot());
+    return {
+      from,
+      to: now,
+      frames: structuredClone(frames.slice(-MAX_FRAMES)),
+      events: structuredClone(historyEvents.filter((event) => event.ts >= from)),
+    };
   }
 
   return { snapshot, tick, history };
