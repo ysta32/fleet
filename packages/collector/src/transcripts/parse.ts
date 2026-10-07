@@ -44,6 +44,8 @@ const TEST_RUNNERS = new Set([
   'swift',
   'make',
 ]);
+const TEST_COMMANDS = new Set(['pytest', 'vitest', 'jest']);
+const MERGE_VALUE_OPTIONS = new Set(['--subject', '--body', '-t', '--title', '-b', '--repo', '-R']);
 /**
  * Bash labels/targets may only expose one of these executable names; anything else (free text,
  * script names, paths) yields a bare `Bash` label with no target.
@@ -502,10 +504,15 @@ export class SessionParser {
       const head = words[0];
       if (head === undefined) continue;
       const runner = projectNameFromPath(head);
-      if (!test && TEST_RUNNERS.has(runner) && words.slice(1).some((w) => /test/i.test(w))) test = runner;
+      if (
+        !test &&
+        TEST_RUNNERS.has(runner) &&
+        (TEST_COMMANDS.has(runner) || words.slice(1).some((w) => /test/i.test(w)))
+      )
+        test = runner;
       if (!plain) continue;
       if (head === 'gh' && words[1] === 'pr' && words[2] === 'merge') {
-        const arg = firstArg(words, 3);
+        const arg = firstArg(words, 3, MERGE_VALUE_OPTIONS);
         merge ??= arg !== undefined && /^\d{1,7}$/.test(arg) ? { pr: Number(arg) } : {};
       } else if (head === 'git') {
         const sub = words[1] === '-C' ? words[3] : words[1];
@@ -535,10 +542,15 @@ function leadingCommand(words: string[]): string[] {
   return words.slice(i);
 }
 
-/** First non-flag word at or after index `from`. */
-function firstArg(words: string[], from: number): string | undefined {
+/** First positional word, skipping flags and their known values. */
+function firstArg(words: string[], from: number, valueOptions: ReadonlySet<string>): string | undefined {
   for (let i = from; i < words.length; i++) {
     const w = words[i];
+    if (w === '--') return words[i + 1];
+    if (valueOptions.has(w)) {
+      i++;
+      continue;
+    }
     if (w !== undefined && !w.startsWith('-')) return w;
   }
   return undefined;

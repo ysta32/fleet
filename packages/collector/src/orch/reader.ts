@@ -253,6 +253,18 @@ function textStates(text: string): Map<string, Set<Mark>> {
     }
   };
   for (const line of clean(text).split(/\r?\n/)) {
+    if (line.trim().startsWith('|')) {
+      const cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(clean);
+      const id = taskId(cells[0]);
+      if (id) {
+        for (const cell of cells.slice(1)) {
+          const cellTokens = tokenize(cell);
+          const marker = markerAt(cellTokens, 0);
+          if (marker && marker.end === cellTokens.length) add([id], marker.mark);
+        }
+        continue;
+      }
+    }
     const tokens = tokenize(line);
     let clauseStart = 0;
     for (let index = 0; index <= tokens.length; index++) {
@@ -297,6 +309,8 @@ function textStates(text: string): Map<string, Set<Mark>> {
         const first = nextSolid(prefix, 0);
         if (prefix[first]?.kind === 'word' && /^[-*#>]+$/.test(prefix[first].text))
           prefix.splice(0, first + 1);
+        const start = nextSolid(prefix, 0);
+        if (normalWord(prefix[start]) === 'task') prefix.splice(0, start + 1);
         add(parseList(prefix, false), marker.mark);
       }
     }
@@ -337,12 +351,18 @@ async function hasWork(
   tip: string,
   base: string | undefined,
 ): Promise<boolean> {
-  const key = `${projectPath}\0${ref}\0${tip}`;
+  const key = `${projectPath}\0${ref}\0${tip}\0${base ?? ''}`;
   const cached = gitWorkCache.get(key);
   if (cached !== undefined) return cached;
-  const reflog = await git(projectPath, ['reflog', 'show', '--format=%H', ref, '--']);
-  const fork =
-    reflog?.split('\n').filter(Boolean).at(-1) ?? (base && /^[0-9a-f]{7,40}$/i.test(base) ? base : undefined);
+  let fork =
+    base && /^[0-9a-f]{7,40}$/i.test(base)
+      ? await git(projectPath, ['rev-parse', '--verify', '--quiet', `${base}^{commit}`])
+      : undefined;
+  if (!fork) {
+    const reflog = await git(projectPath, ['reflog', 'show', '--format=%H', ref, '--']);
+    const oldest = reflog?.split('\n').filter(Boolean).at(-1);
+    if (oldest !== tip) fork = oldest;
+  }
   if (!fork) return false;
   const count = await git(projectPath, ['rev-list', '--count', `${fork}..${tip}`, '--']);
   if (count === undefined) return false;
