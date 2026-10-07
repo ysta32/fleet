@@ -112,12 +112,34 @@ describe('ingestClaudeCode', () => {
     expect(r.records[0]?.id).toContain('sub');
   });
 
-  it('attributes orch worktrees to task and army', async () => {
+  it('attributes worktree cwd to task and army (run branch from HEAD)', async () => {
+    const proj = join(tmp, 'fleet-spend');
+    await mkdir(join(proj, '.git'), { recursive: true });
+    await writeFile(join(proj, '.git', 'HEAD'), 'ref: refs/heads/orch/run1\n');
     await put('a/s.jsonl', [
-      line({ cwd: '/x/fleet-spend/.orch/wt/t02/packages/spend', branch: 'orch/run1/t02' }),
+      line({ cwd: join(proj, '.orch/wt/t02/packages/spend'), branch: 'orch-task/t02' }),
     ]);
     const r = await ingestClaudeCode(ctx(join(tmp, 'p')));
     expect(r.records[0]).toMatchObject({ repo: 'fleet-spend', task: 't02', army: 'fleet-spend:orch/run1' });
+  });
+
+  it('worktree army is just the repo when HEAD is unreadable or detached', async () => {
+    const proj = join(tmp, 'nohead');
+    await mkdir(join(proj, '.git'), { recursive: true });
+    await writeFile(join(proj, '.git', 'HEAD'), 'abcdef0123\n');
+    await put('a/s.jsonl', [
+      line({ cwd: join(proj, '.orch/wt/t03'), branch: 'orch-task/t03' }),
+      line({ id: 'm2', cwd: join(tmp, 'gone', '.orch/wt/t04') }),
+    ]);
+    const r = await ingestClaudeCode(ctx(join(tmp, 'p')));
+    expect(r.records.map((x) => x.army).sort()).toEqual(['gone', 'nohead']);
+  });
+
+  it('non-worktree on an orch/ branch gets army repo:branch', async () => {
+    await put('a/s.jsonl', [line({ cwd: '/x/proj', branch: 'orch/run2' })]);
+    const r = await ingestClaudeCode(ctx(join(tmp, 'p')));
+    expect(r.records[0]).toMatchObject({ repo: 'proj', army: 'proj:orch/run2' });
+    expect(r.records[0]).not.toHaveProperty('task');
   });
 
   it('uses git root basename when .git exists, else cwd basename', async () => {
