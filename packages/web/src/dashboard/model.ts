@@ -156,3 +156,61 @@ export function dagLayout(tasks: readonly OrchTask[]): DagLayout {
     height: Math.max(100, ...nodes.map((node) => node.y + 76)),
   };
 }
+
+export interface NeedsYouItem {
+  id: string;
+  kind: 'alert' | 'blocked' | 'waiting';
+  projectId: string;
+  title: string;
+  at: number;
+  /** alert ids that resolving this item clears */
+  alertIds: string[];
+}
+
+/** Everything that is waiting on the operator, oldest first (cost of delay grows with age). */
+export function needsYou(snapshot: FleetSnapshot, dismissed: ReadonlySet<string> = new Set()): NeedsYouItem[] {
+  const items: NeedsYouItem[] = [];
+  for (const alert of snapshot.alerts) {
+    if (alert.cleared || dismissed.has(alert.id)) continue;
+    items.push({ id: `alert:${alert.id}`, kind: 'alert', projectId: alert.projectId, title: alert.title, at: alert.at, alertIds: [alert.id] });
+  }
+  for (const session of snapshot.sessions) {
+    if (session.status !== 'waiting') continue;
+    items.push({
+      id: `waiting:${session.id}`,
+      kind: 'waiting',
+      projectId: session.projectId,
+      title: `${session.title ?? 'Session'} is waiting on you`,
+      at: session.lastActivity,
+      alertIds: [],
+    });
+  }
+  for (const project of snapshot.projects) {
+    const run = project.orch;
+    if (!run) continue;
+    const blockedTasks = run.tasks.filter((task) => task.state === 'blocked');
+    if (run.phase !== 'blocked' && !run.blocked.length && !blockedTasks.length) continue;
+    // an active army.blocked alert already represents this project
+    if (items.some((item) => item.kind === 'alert' && item.projectId === project.id && snapshot.alerts.some((alert) => item.alertIds.includes(alert.id) && alert.kind === 'army.blocked'))) continue;
+    const count = run.blocked.length + blockedTasks.length;
+    items.push({
+      id: `blocked:${project.id}`,
+      kind: 'blocked',
+      projectId: project.id,
+      title: count ? `Army blocked on ${count} ${count === 1 ? 'item' : 'items'}` : 'Army blocked',
+      at: run.updatedAt,
+      alertIds: [],
+    });
+  }
+  return items.sort((a, b) => a.at - b.at);
+}
+
+export function matches(query: string, ...fields: (string | undefined)[]): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return fields.some((field) => field?.toLowerCase().includes(q));
+}
+
+export function clockTime(at: number): string {
+  return new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+}
