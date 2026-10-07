@@ -111,8 +111,8 @@ describe('terminal rendering', () => {
       '2 of 3 sources · Cursor missing, excluded from totals',
     ])
       expect(result).toContain(label);
-    expect(result.match(/Daily, Oct 1–7\s+([▁▂▃▄▅▆▇█]+)/)?.[1]).toHaveLength(7);
-    expect(result).toContain('▼ forecast $268.00');
+    expect(result.match(/Daily, Oct 1–7\s+([▁▂▃▄▅▆▇█]+)/)?.[1]).toHaveLength(14);
+    expect(result).toContain('│ forecast $268.00');
     expect(result).toContain('peak $61.20 Oct 4 · avg $30.34/day');
   });
 
@@ -246,9 +246,14 @@ describe('terminal rendering', () => {
     (unicode) => {
       const s = summary();
       const result = renderBudget(s, { ...opts, unicode });
-      const track = result.split('\n').find((line) => /^[█#░.┊:]+$/.test(line.trim()))!;
+      const track = result.split('\n').find((line) => /^[█#░.┊:│|]+$/.test(line.trim()))!;
       expect(track).toContain(unicode ? '┊' : ':');
-      expect(result).toContain(unicode ? '▼' : 'v');
+      expect(track).toContain(unicode ? '│' : '|');
+      expect(result).not.toMatch(/^\s*▼\s*$/m);
+      expect(result.split('\n').filter((line) => /^[█#░.┊:│|]+$/.test(line.trim()))).toHaveLength(1);
+      expect(renderBudget(s, { ...opts, unicode, color: true })).toContain(
+        `\x1b[38;2;245;184;61m${unicode ? '│' : '|'}`,
+      );
       expect(track.slice(track.indexOf(unicode ? '┊' : ':') + 1)).toContain(unicode ? '█' : '#');
       const colored = renderBudget(s, { ...opts, unicode, color: true });
       expect(colored).toMatch(unicode ? /\x1b\[38;2;255;89;100m█/ : /\x1b\[38;2;255;89;100m#/);
@@ -264,7 +269,7 @@ describe('terminal rendering', () => {
     s.forecastMonthEndUsd = 1000;
     const spent = unicode ? '█' : '#';
     const empty = unicode ? '░' : '.';
-    const tick = unicode ? '┊' : ':';
+    const tick = unicode ? '│' : '|';
     for (const [amount, filled] of [
       [0, 0],
       [500, 20],
@@ -273,7 +278,7 @@ describe('terminal rendering', () => {
       s.monthToDateUsd = amount;
       const track = renderBudget(s, { ...opts, unicode })
         .split('\n')
-        .find((line) => /^[█#░.┊:]+$/.test(line.trim()))!
+        .find((line) => /^[█#░.┊:│|]+$/.test(line.trim()))!
         .trim();
       expect(track).toBe(
         `${spent.repeat(Math.min(filled, 39))}${empty.repeat(Math.max(39 - filled, 0))}${tick}`,
@@ -288,11 +293,13 @@ describe('terminal rendering', () => {
     const s = summary();
     s.forecastMonthEndUsd = s.budget.monthlyUsd!;
     const lines = renderBudget(s, { ...opts, unicode }).split('\n');
-    const trackIndex = lines.findIndex((line) => /^[█#░.┊:]+$/.test(line.trim()));
+    const trackIndex = lines.findIndex((line) => /^[█#░.┊:│|]+$/.test(line.trim()));
     const track = lines[trackIndex]!;
-    expect(track).toContain(unicode ? '┊' : ':');
-    expect(lines[trackIndex - 1]!.trim()).toBe(unicode ? '▼' : 'v');
-    expect(lines[trackIndex - 1]!.indexOf(unicode ? '▼' : 'v')).toBe(track.indexOf(unicode ? '┊' : ':'));
+    expect(track).toContain(unicode ? '│' : '|');
+    expect(track.trim()[Math.round((180 / 212.4) * 40)]).toBe(unicode ? '│' : '|');
+    expect(lines[trackIndex + 1]).toContain(unicode ? 'budget ┊' : 'budget :');
+    expect(lines[trackIndex + 1]).toContain(unicode ? '│ forecast' : '| forecast');
+    expect(lines).not.toContain('▼');
   });
 
   it.each([40, 60, 80, 120])('wraps only between words and indents details at %i columns', (width) => {
@@ -348,7 +355,9 @@ describe('terminal rendering', () => {
       .split('\n')
       .find((line) => /^  By repo\s/.test(line))!;
     const spendEnd = header.indexOf('Spend') + 'Spend'.length;
-    expect(new Set(rows.map((line) => line.indexOf('/mo')))).toEqual(new Set([spendEnd]));
+    expect(rows[0]!.indexOf('/mo')).toBe(
+      Math.min(width - 3, Math.max(spendEnd, 5 + s.tips[0]!.title.length + 3 + '$1,234.50'.length)),
+    );
     expect(new Set(rows.map((line) => line.indexOf('/mo'))).size).toBe(1);
   });
 
@@ -387,12 +396,12 @@ describe('terminal rendering', () => {
     expect(over).toContain('Month to date  $212.34  of $180.00 · 118% · over by $32.34');
     expect(over).toContain('Forecast       $268.00 · over budget');
     expect(over).not.toMatch(/spent \$|^  Budget\s|^  Burn\s|\[█/m);
-    expect(over).toContain('budget ┊ crossed Oct 7 · ▼ forecast $268.00');
+    expect(over).toContain('budget ┊ crossed Oct 7 · │ forecast $268.00');
     s.monthToDateUsd = 112;
     s.daily = [bucket('2026-10-01', 112)];
     const under = renderSummary(s, opts);
     expect(under).toContain('Month to date  $112.00  of $180.00 · 62% · $68.00 left');
-    expect(under).toContain('budget ┊ $180.00 · ▼ forecast $268.00');
+    expect(under).toContain('budget ┊ $180.00 · │ forecast $268.00');
     expect(renderBudget(s, opts)).toContain('/h  warm');
   });
 
@@ -433,7 +442,48 @@ describe('terminal rendering', () => {
     const tip = stripAnsi(colored)
       .split('\n')
       .find((line) => /^  1\. /.test(line))!;
-    expect(tip.indexOf('/mo')).toBe(repo.indexOf('$148.10') + '$148.10'.length);
+    expect(tip.indexOf('/mo')).toBeGreaterThanOrEqual(repo.indexOf('$148.10') + '$148.10'.length);
+  });
+
+  it.each([false, true])(
+    'preserves full tip titles and shares table columns at 80 columns (color=%s)',
+    (color) => {
+      const s = summary();
+      s.tips[0]!.title = 'Use cheaper models for short code edits';
+      s.breakdown.repo[0]!.key = 'organization/repository-with-long-name';
+      const output = stripAnsi(renderSummary(s, { ...opts, color }));
+      for (const tip of s.tips) expect(output).toContain(tip.title);
+      const headers = output.split('\n').filter((line) => /^  By (repo|model)\s/.test(line));
+      expect(headers).toHaveLength(2);
+      for (const label of ['Spend', 'Share'])
+        expect(headers[0]!.indexOf(label)).toBe(headers[1]!.indexOf(label));
+      const rows = output.split('\n').filter((line) => /\$148.10|\$129.80/.test(line));
+      expect(rows[0]!.indexOf('$')).toBe(rows[1]!.indexOf('$'));
+      expect(rows[0]!.indexOf('%')).toBe(rows[1]!.indexOf('%'));
+    },
+  );
+
+  it('wraps long titles with a hanging indent and only truncates at the end below 60 columns', () => {
+    const s = summary();
+    s.tips = [s.tips[0]!];
+    s.tips[0]!.title =
+      'Use cheaper models for short code edits and reuse cached context for repeated requests';
+    const lines = renderSummary(s, opts).split('\n');
+    const first = lines.findIndex((line) => /^  1\. /.test(line));
+    const title = [
+      lines[first]!.slice(5).split(/ {3,}/)[0]!,
+      ...lines
+        .slice(first + 1)
+        .filter((line) => line.startsWith('     '))
+        .map((line) => line.trim()),
+    ];
+    expect(title.join(' ')).toBe(s.tips[0]!.title);
+    expect(lines[first + 1]).toMatch(/^ {5}\S/);
+    const narrow = renderSummary(s, { ...opts, width: 40 })
+      .split('\n')
+      .find((line) => /^  1\. /.test(line))!;
+    expect(narrow).toMatch(/Use cheaper.*… +\$38.20\/mo$/);
+    expect(narrow).not.toContain('requests');
   });
 
   it('produces stable TSV and neutralizes embedded delimiters and ANSI', () => {

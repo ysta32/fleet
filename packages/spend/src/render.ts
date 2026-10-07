@@ -320,17 +320,30 @@ function budgetLines(s: SpendSummary, o: RenderOpts): Line[] {
   const forecastAt = position(s.forecastMonthEndUsd);
   const filled = Math.max(0, Math.min(size, Math.round((s.monthToDateUsd / scale) * size)));
   const tick = o.unicode ? '┊' : ':';
-  const forecast = o.unicode ? '▼' : 'v';
+  const forecast = o.unicode ? '│' : '|';
   const track: Span[] = Array.from({ length: size }, (_, i) => ({
-    text: i === budgetAt ? tick : i < filled ? (o.unicode ? '█' : '#') : o.unicode ? '░' : '.',
+    text:
+      i === forecastAt
+        ? forecast
+        : i === budgetAt
+          ? tick
+          : i < filled
+            ? o.unicode
+              ? '█'
+              : '#'
+            : o.unicode
+              ? '░'
+              : '.',
     tone:
-      i === budgetAt
-        ? 'muted'
-        : i < filled
-          ? i > budgetAt && s.monthToDateUsd > budget
-            ? 'danger'
-            : 'accent'
-          : 'subtle',
+      i === forecastAt
+        ? 'warn'
+        : i === budgetAt
+          ? 'muted'
+          : i < filled
+            ? i > budgetAt && s.monthToDateUsd > budget
+              ? 'danger'
+              : 'accent'
+            : 'subtle',
   }));
   let cumulative = 0;
   const crossed = monthDays(s, o).find((day) => {
@@ -338,7 +351,6 @@ function budgetLines(s: SpendSummary, o: RenderOpts): Line[] {
     return cumulative > budget;
   });
   return [
-    { text: `${' '.repeat(forecastAt)}${forecast}`, tone: 'muted' },
     rich(track),
     {
       text: `budget ${tick} ${crossed ? `crossed ${dayLabel(crossed.key)}` : money(budget)}${o.unicode ? ' · ' : ' / '}${forecast} forecast ${money(s.forecastMonthEndUsd)}`,
@@ -371,7 +383,14 @@ function tableLabelWidth(
   );
 }
 
-function ranked(s: SpendSummary, by: SpendDimension, limit: number, o: RenderOpts, cached = false): Line[] {
+function ranked(
+  s: SpendSummary,
+  by: SpendDimension,
+  limit: number,
+  o: RenderOpts,
+  cached = false,
+  sharedLabelWidth?: number,
+): Line[] {
   const rows = [...s.breakdown[by]]
     .sort((a, b) => b.costUsd - a.costUsd)
     .slice(0, Math.max(0, Math.floor(limit)));
@@ -379,7 +398,7 @@ function ranked(s: SpendSummary, by: SpendDimension, limit: number, o: RenderOpt
     bars = width(o) >= 60;
   const cash = cashWidth(s);
   const recordsWidth = Math.max(7, ...rows.map((row) => String(row.records).length));
-  const labelWidth = tableLabelWidth(s, by, rows, o, cached);
+  const labelWidth = sharedLabelWidth ?? tableLabelWidth(s, by, rows, o, cached);
   const label = (value: string): string => {
     const text = fit(value, labelWidth, o);
     return text + ' '.repeat(Math.max(0, labelWidth - length(text)));
@@ -411,24 +430,55 @@ function ranked(s: SpendSummary, by: SpendDimension, limit: number, o: RenderOpt
   return lines;
 }
 
+function summaryLabelWidth(s: SpendSummary, o: RenderOpts): number {
+  const rows = (['repo', 'model'] as const).flatMap((by) =>
+    [...s.breakdown[by]].sort((a, b) => b.costUsd - a.costUsd).slice(0, 3),
+  );
+  return tableLabelWidth(s, 'model', rows, o);
+}
+
 function tipLines(s: SpendSummary, o: RenderOpts, details: boolean): Line[] {
   const tips = [...s.tips].sort((a, b) => b.estMonthlySavingsUsd - a.estMonthlySavingsUsd).slice(0, 3);
-  const rows = [...s.breakdown.repo].sort((a, b) => b.costUsd - a.costUsd).slice(0, 3);
-  const spendEnd = 2 + tableLabelWidth(s, 'repo', rows, o) + 2 + cashWidth(s);
+  const spendEnd = 2 + summaryLabelWidth(s, o) + 2 + cashWidth(s);
   const savingWidth = Math.max(cashWidth(s), ...tips.map((tip) => money(tip.estMonthlySavingsUsd).length));
-  const titleWidth = Math.max(1, spendEnd - 2 - 3 - 2 - savingWidth);
+  const longestTitle = Math.max(0, ...tips.map((tip) => length(clean(tip.title, o.unicode))));
+  const moneyEnd = Math.min(width(o) - 3, Math.max(spendEnd, 5 + longestTitle + 3 + savingWidth));
+  const titleWidth = Math.max(1, moneyEnd - 5 - 3 - savingWidth);
   return [
     section('Top savings'),
     ...tips.flatMap((tip, index) => {
       const saving = money(tip.estMonthlySavingsUsd);
-      const title = fit(tip.title, titleWidth, o);
-      const lines: Line[] = [
+      let remaining = clean(tip.title, o.unicode);
+      const titles: string[] = [];
+      while (length(remaining) > titleWidth) {
+        const chars = Array.from(remaining);
+        let end = 0;
+        let used = 0;
+        const narrow = width(o) < 60;
+        while (end < chars.length && used + cells(chars[end]!) <= titleWidth - (narrow ? 1 : 0)) {
+          used += cells(chars[end++]!);
+        }
+        if (narrow) {
+          titles.push(chars.slice(0, end).join('') + (o.unicode ? '…' : '~'));
+          remaining = '';
+          break;
+        }
+        let boundary = end;
+        while (boundary > 0 && chars[boundary] !== ' ') boundary--;
+        const split = boundary || Math.max(1, end);
+        titles.push(chars.slice(0, split).join(''));
+        remaining = chars.slice(split).join('').trimStart();
+      }
+      if (remaining || !titles.length) titles.push(remaining);
+      const lines: Line[] = titles.map((title, part) =>
         rich([
-          { text: `${index + 1}. `, tone: 'subtle' },
-          { text: title + ' '.repeat(Math.max(0, titleWidth - length(title))) },
-          { text: `  ${saving.padStart(savingWidth)}/mo`, tone: 'success' },
+          { text: part === 0 ? `${index + 1}. ` : '   ', tone: 'subtle' },
+          { text: title + (part === 0 ? ' '.repeat(Math.max(0, titleWidth - length(title))) : '') },
+          ...(part === 0
+            ? [{ text: `   ${saving.padStart(savingWidth)}/mo`, tone: 'success' as const }]
+            : []),
         ]),
-      ];
+      );
       if (details) lines.push({ text: `  ${tip.detail}`, tone: 'muted' });
       return lines;
     }),
@@ -460,7 +510,7 @@ export function renderSummary(s: SpendSummary, o: RenderOpts): string {
         `Daily, ${new Date(s.monthStart).toLocaleDateString('en-US', { month: 'short' })} 1${o.unicode ? '–' : '-'}${days.length}`,
       ),
       {
-        text: `${values.map((value) => (value === 0 ? (o.unicode ? '·' : '.') : glyphs[Math.max(0, Math.min(7, Math.round((value / peak) * 7)))])).join('')}`,
+        text: `${values.map((value) => (value === 0 ? (o.unicode ? '·' : '.') : glyphs[Math.max(0, Math.min(7, Math.round((value / peak) * 7)))]!).repeat(days.length <= 15 ? 2 : 1)).join('')}`,
         tone: 'muted',
       },
       {
@@ -471,9 +521,9 @@ export function renderSummary(s: SpendSummary, o: RenderOpts): string {
   }
   lines.push(
     { text: '' },
-    ...ranked(s, 'repo', 3, o),
+    ...ranked(s, 'repo', 3, o, false, summaryLabelWidth(s, o)),
     { text: '' },
-    ...ranked(s, 'model', 3, o),
+    ...ranked(s, 'model', 3, o, false, summaryLabelWidth(s, o)),
     { text: '' },
     ...tipLines(s, o, false),
     { text: '' },
