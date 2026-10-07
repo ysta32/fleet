@@ -44,6 +44,40 @@ const TEST_RUNNERS = new Set([
   'swift',
   'make',
 ]);
+/**
+ * Bash labels/targets may only expose one of these executable names; anything else (free text,
+ * script names, paths) yields a bare `Bash` label with no target.
+ */
+const BASH_TARGET_ALLOWLIST: ReadonlySet<string> = new Set([
+  'git',
+  'npm',
+  'npx',
+  'node',
+  'pnpm',
+  'yarn',
+  'bun',
+  'pytest',
+  'uv',
+  'python',
+  'python3',
+  'cargo',
+  'go',
+  'make',
+  'gh',
+  'vercel',
+  'tsc',
+  'vitest',
+  'jest',
+  'swift',
+  'xcodebuild',
+  'ls',
+  'cat',
+  'grep',
+  'rg',
+  'sed',
+  'cd',
+  'echo',
+]);
 const MODEL_ALIASES = new Set<ModelFamily>(['opus', 'sonnet', 'haiku', 'fable']);
 const WORKTREE_RE = /\/\.orch\/wt\/([^/\\]+)/;
 const SAFE_ID_RE = /^[A-Za-z0-9._-]{1,60}$/;
@@ -77,6 +111,13 @@ function safeToolName(v: unknown): string | undefined {
   if (typeof v !== 'string') return undefined;
   const name = truncate(v.replace(/[^A-Za-z0-9_.:-]/g, ''), 60);
   return name || undefined;
+}
+
+/** Tool target for labels; Bash targets are restricted to allowlisted executable names. */
+function toolTarget(name: string, input: unknown): string | undefined {
+  const target = sanitizeTarget(name, input);
+  if (name === 'Bash') return target !== undefined && BASH_TARGET_ALLOWLIST.has(target) ? target : undefined;
+  return target;
 }
 
 function maxTokens(a: TokenUsage, b: TokenUsage): TokenUsage {
@@ -412,7 +453,7 @@ export class SessionParser {
     const name = safeToolName(item.name);
     if (!name) return;
     const input = item.input;
-    const target = sanitizeTarget(name, input);
+    const target = toolTarget(name, input);
     const summary: ToolCallSummary = { name, at: ts };
     if (target) summary.target = target;
     this.lastTool = summary;

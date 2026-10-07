@@ -383,6 +383,54 @@ describe('Bash detection privacy (only executed commands match)', () => {
   });
 });
 
+describe('Bash tool label/target allowlist', () => {
+  function toolEvent(command: string) {
+    const p = new SessionParser(leadFile);
+    const events = p.ingest([assistant(T0, 'm', [tool('t', 'Bash', { command })])], T0 + 1000);
+    const ev = events.find((e) => e.kind === 'agent.tool');
+    return { p, events, ev };
+  }
+
+  it.each([
+    ['unknown executable', 'PRIVATE'],
+    ['unknown executable with args', 'PRIVATE --flag value'],
+    ['path-like executable', '/Users/x/secret.sh'],
+    ['relative script', './PRIVATE-deploy.sh arg'],
+  ])('%s yields a bare Bash label and no target', (_name, command) => {
+    const { p, events, ev } = toolEvent(command);
+    expect(ev?.label).toBe('Bash');
+    expect(ev?.data).toEqual({ tool: 'Bash' });
+    expect(p.agents(T0 + 1000)[0]?.lastTool).toEqual({ name: 'Bash', at: T0 });
+    const all = JSON.stringify({ events, s: p.session(T0 + 1000), a: p.agents(T0 + 1000) });
+    expect(all).not.toContain('PRIVATE');
+    expect(all).not.toContain('secret');
+    expect(all).not.toContain('/Users/x');
+  });
+
+  it('env-prefixed commands expose only the allowlisted executable', () => {
+    const { p, events, ev } = toolEvent('FOO=bar git push');
+    expect(ev?.label).toBe('Bash git');
+    expect(ev?.data).toEqual({ tool: 'Bash', target: 'git' });
+    const all = JSON.stringify({ events, s: p.session(T0 + 1000), a: p.agents(T0 + 1000) });
+    expect(all).not.toContain('FOO');
+    expect(all).not.toContain('bar');
+    expect(all).not.toContain('push');
+  });
+
+  it('env-prefixed unknown executable leaks nothing', () => {
+    const { ev } = toolEvent('FOO=bar PRIVATE push');
+    expect(ev?.label).toBe('Bash');
+    expect(ev?.data).toEqual({ tool: 'Bash' });
+  });
+
+  it('allowlisted executable is kept as the target', () => {
+    const { p, ev } = toolEvent('npm run build');
+    expect(ev?.label).toBe('Bash npm');
+    expect(ev?.data).toEqual({ tool: 'Bash', target: 'npm' });
+    expect(p.agents(T0 + 1000)[0]?.lastTool).toEqual({ name: 'Bash', target: 'npm', at: T0 });
+  });
+});
+
 describe('SessionParser (subagent transcript)', () => {
   const lines = [
     user(T0, `${SECRET} subagent prompt`, { isSidechain: true }),
