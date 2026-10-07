@@ -1,6 +1,6 @@
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { install, installEnv, plistXml, uninstall } from './launchd.js';
 
@@ -29,14 +29,14 @@ describe('plistXml', () => {
 describe('environment', () => {
   it('persists FLEET_* overrides and a PATH with the node dir', () => {
     const env = installEnv(
-      { FLEET_PORT: '4520', FLEET_LAN: '1', FLEET_CONFIG: '/t/c.json', FLEET_DATA: '/t/d', HOME: '/h' },
+      { FLEET_PORT: '4520', FLEET_LAN: '1', FLEET_CONFIG: 'rel/c.json', FLEET_DATA: '/t/d/../e', HOME: '/h' },
       '/nvm/bin/node',
     );
     expect(env).toMatchObject({
       FLEET_PORT: '4520',
       FLEET_LAN: '1',
-      FLEET_CONFIG: '/t/c.json',
-      FLEET_DATA: '/t/d',
+      FLEET_CONFIG: resolve('rel/c.json'),
+      FLEET_DATA: '/t/e',
     });
     expect(env.HOME).toBeUndefined();
     expect(env.PATH).toBe('/nvm/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin');

@@ -82,20 +82,13 @@ describe('config', () => {
     expect(saved.lan).toBe(false);
   });
 
-  it('first-run creation is exclusive: adopts a token written by a racing process', () => {
+  it('loser of a first-run race adopts the winner token (EEXIST branch)', () => {
     const p = join(home, 'race', 'c.json');
-    const first = loadConfig(p);
-    // simulate losing the race: file already exists with a different token
-    writeFileSync(p, JSON.stringify({ token: 'other' }));
-    expect(loadConfig(p).token).toBe('other');
-    expect(first.token).not.toBe('other');
+    const cfg = loadConfig(p, {
+      beforeLink: () => writeFileSync(p, JSON.stringify({ token: 'winner' }), { mode: 0o600 }),
+    });
+    expect(cfg.token).toBe('winner');
+    expect(JSON.parse(readFileSync(p, 'utf8')).token).toBe('winner');
     expect(readdirSync(join(home, 'race'))).toEqual(['c.json']);
-  });
-
-  it('many concurrent first loads converge on one token', async () => {
-    const p = join(home, 'conc', 'c.json');
-    const toks = await Promise.all(Array.from({ length: 8 }, async () => loadConfig(p).token));
-    expect(new Set(toks).size).toBe(1);
-    expect(JSON.parse(readFileSync(p, 'utf8')).token).toBe(toks[0]);
   });
 });

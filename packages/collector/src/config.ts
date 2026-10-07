@@ -55,11 +55,12 @@ function readJson(path: string): Record<string, unknown> {
  * Write the config via a private tmp file. With exclusive=true the final path is created with
  * link() (fails with EEXIST if another process won the race) and false is returned.
  */
-function writeConfig(path: string, cfg: FleetConfig, exclusive: boolean): boolean {
+function writeConfig(path: string, cfg: FleetConfig, exclusive: boolean, beforeLink?: () => void): boolean {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const tmp = `${path}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
   writeFileSync(tmp, JSON.stringify(cfg, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
   try {
+    beforeLink?.();
     if (exclusive) {
       linkSync(tmp, path);
     } else {
@@ -79,8 +80,13 @@ function writeConfig(path: string, cfg: FleetConfig, exclusive: boolean): boolea
   }
 }
 
+/** Test seam: runs after the tmp file is written and before the config is published. */
+export interface LoadHooks {
+  beforeLink?: () => void;
+}
+
 /** Load config (merging defaults), generating a token and persisting on first run. */
-export function loadConfig(path: string = configPath()): FleetConfig {
+export function loadConfig(path: string = configPath(), hooks: LoadHooks = {}): FleetConfig {
   const defaults = defaultConfig();
   const existed = existsSync(path);
   const user = existed ? readJson(path) : {};
@@ -96,7 +102,7 @@ export function loadConfig(path: string = configPath()): FleetConfig {
     token: hadToken ? (user.token as string) : randomBytes(32).toString('hex'),
   };
   if (!hadToken) {
-    if (!writeConfig(path, cfg, !existed)) {
+    if (!writeConfig(path, cfg, !existed, hooks.beforeLink)) {
       // another process created the file first: adopt its token
       return loadConfig(path);
     }

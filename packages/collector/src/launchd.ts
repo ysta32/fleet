@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir as osHomedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 export const LABEL = 'dev.fleet.collector';
@@ -27,7 +27,8 @@ export function installEnv(src: NodeJS.ProcessEnv, nodePath: string): Record<str
   };
   for (const k of PASS_THROUGH) {
     const v = src[k];
-    if (v !== undefined && v !== '') env[k] = v;
+    if (v === undefined || v === '') continue;
+    env[k] = k === 'FLEET_CONFIG' || k === 'FLEET_DATA' ? resolve(v) : v;
   }
   return env;
 }
