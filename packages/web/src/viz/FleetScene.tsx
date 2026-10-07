@@ -17,7 +17,14 @@ import { Bot } from './Bots';
 import { useVizDevView } from './devView';
 import { Effects } from './Effects';
 import { Hud } from './Hud';
-import { cameraFitPosition, cameraMaxDistance, damp, fitScaleForAspect, layoutRadius, needsRefit } from './layout';
+import {
+  cameraFitPosition,
+  cameraMaxDistance,
+  damp,
+  fitScaleForAspect,
+  layoutRadius,
+  needsRefit,
+} from './layout';
 import { Station, type StationData } from './Station';
 import { SceneStore, SceneStoreContext, useSceneStore } from './store';
 import { TaskSatellites } from './TaskSatellites';
