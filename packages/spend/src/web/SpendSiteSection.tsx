@@ -1,44 +1,44 @@
-import type { CSSProperties } from 'react';
 import { DEMO_SUMMARY } from './demo.js';
-import { SpendTab } from './SpendTab.js';
+import { Icon } from './icons.js';
+import { SpendStyles, SpendTab } from './SpendTab.js';
 
-const wrap: CSSProperties = {
-  maxWidth: 960,
-  margin: '0 auto',
-  padding: '48px 16px',
-  color: 'var(--fg, #e6e6e6)',
-  fontFamily: 'var(--font, system-ui, sans-serif)',
-};
-
+/**
+ * Marketing section. Copy rules (D-10): the only billing fact stated is the June 1, 2026 switch; no multipliers,
+ * no price-jump figures, no testimonials or user counts. The preview is clearly labeled as example data.
+ */
 export function SpendSiteSection() {
   return (
-    <section id="spend" style={wrap}>
-      <h2 style={{ fontSize: 32, margin: '0 0 12px' }}>
-        Copilot is going usage-based. Know your bill before it lands.
-      </h2>
-      <p style={{ fontSize: 17, lineHeight: 1.5 }}>
-        On June 1, 2026 GitHub Copilot moves to usage-based billing, with model multipliers up to 9x. A $29
-        plan can quietly become a $750 month. fleet-spend shows where every token went across Claude Code,
-        Codex, Cursor and Copilot.
-      </p>
-      <p style={{ fontSize: 17, lineHeight: 1.5 }}>
-        Private by design: everything runs locally. No prompts, responses or file paths ever leave your
-        machine.
-      </p>
-      <pre
-        style={{
-          background: 'var(--card, #16181d)',
-          border: '1px solid var(--border, #2a2d34)',
-          borderRadius: 8,
-          padding: 12,
-          overflowX: 'auto',
-        }}
-      >
-        <code>npx fleet-spend</code>
-      </pre>
-      <div style={{ marginTop: 24 }}>
-        <SpendTab summary={DEMO_SUMMARY} />
+    <section id="spend" className="fls-root fls-site" aria-labelledby="fls-site-h">
+      <SpendStyles />
+      <div className="fls-site-head">
+        <div>
+          <span className="fls-eyebrow">fleet-spend</span>
+          <h2 id="fls-site-h">
+            Know where your month is going, <em>before the bill does.</em>
+          </h2>
+        </div>
+        <div className="fls-site-copy">
+          <p>
+            <strong>GitHub Copilot moved to usage-based billing on June 1, 2026.</strong> Every agent you run
+            now has a meter.
+          </p>
+          <p>
+            fleet-spend adds up Claude Code, Codex, Cursor and Copilot in one total, splits it by repo,
+            branch, task and model, and projects the month against your budget.
+          </p>
+          <p>
+            <Icon name="lock" small /> It reads logs on your machine. No account, no upload.
+          </p>
+          <div className="fls-cmd">npx fleet-spend</div>
+        </div>
       </div>
+      <figure className="fls-frame">
+        <figcaption className="fls-frame-label">
+          <span className="fls-badge">Example data</span>
+          <span className="fls-panel-note">Synthetic usage, for illustration only</span>
+        </figcaption>
+        <SpendTab summary={DEMO_SUMMARY} />
+      </figure>
     </section>
   );
 }

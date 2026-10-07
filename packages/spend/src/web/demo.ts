@@ -1,104 +1,137 @@
 import type { SpendBucket, SpendDimension, SpendSummary, SpendTokens } from '@fleet/shared';
 
+/**
+ * Example data for previews and the marketing section. Fully synthetic and deterministic; every figure is
+ * derived from the daily series below so the totals agree with each other. Always labeled "Example data".
+ */
 const NOW = Date.UTC(2026, 9, 18, 15, 0, 0);
+const DAY = 86_400_000;
 
-function tok(costUsd: number): SpendTokens {
-  const m = Math.round(costUsd * 40_000);
+/** tokens for a cost at a given $/M blended rate (lower rate = more tokens per dollar) */
+function tok(costUsd: number, usdPerM = 2.5): SpendTokens {
+  const m = Math.round((costUsd / usdPerM) * 1_000_000);
   return {
-    input: Math.round(m * 0.1),
-    output: Math.round(m * 0.05),
-    cacheRead: Math.round(m * 0.8),
-    cacheWrite5m: Math.round(m * 0.05),
+    input: Math.round(m * 0.08),
+    output: Math.round(m * 0.04),
+    cacheRead: Math.round(m * 0.82),
+    cacheWrite5m: Math.round(m * 0.06),
     cacheWrite1h: 0,
   };
 }
 
-function bucket(key: string, costUsd: number, records: number): SpendBucket {
-  return { key, costUsd, tokens: tok(costUsd), records };
-}
+const r2 = (n: number) => Math.round(n * 100) / 100;
 
-function buckets(rows: [string, number, number][]): SpendBucket[] {
-  return rows.map(([k, c, r]) => bucket(k, c, r)).sort((a, b) => b.costUsd - a.costUsd);
-}
-
+// Weekday rhythm with a ramp mid-month as agent usage grows. 31 days ending today (Oct 18).
 const DAILY: SpendBucket[] = Array.from({ length: 31 }, (_, i) => {
-  const day = new Date(NOW - (30 - i) * 86_400_000).toISOString().slice(0, 10);
-  // deterministic ramp: flat ~$1/day, then agentic usage explodes
-  const cost = i < 12 ? 0.9 + (i % 3) * 0.2 : 4 + (i - 12) * 2.4 + (i % 4) * 3;
-  return bucket(day, Math.round(cost * 100) / 100, 20 + i * 9);
+  const ts = NOW - (30 - i) * DAY;
+  const key = new Date(ts).toISOString().slice(0, 10);
+  const dow = new Date(ts).getUTCDay();
+  const weekend = dow === 0 || dow === 6;
+  const base = i < 13 ? 9 + (i % 4) * 1.6 : 14 + (i - 13) * 1.15 + ((i * 7) % 5) * 1.4;
+  const cost = r2(weekend ? base * 0.35 : base);
+  return { key, costUsd: cost, tokens: tok(cost), records: Math.round(cost * 11) };
 });
 
-/** Fully synthetic summary: a $29 plan turning into a $750 month. */
+const MONTH_DAYS = DAILY.filter((d) => d.key.startsWith('2026-10-'));
+const MTD = r2(MONTH_DAYS.reduce((a, b) => a + b.costUsd, 0));
+const TODAY = DAILY[DAILY.length - 1]!.costUsd;
+const LAST7 = DAILY.slice(-7).reduce((a, b) => a + b.costUsd, 0) / 7;
+const FORECAST = r2(MTD + LAST7 * (31 - 18));
+
+/** Split MTD by shares (they need not sum to 1 for partial dimensions like task). */
+function split(rows: [string, number, number?][]): SpendBucket[] {
+  return rows
+    .map(([key, share, rate]) => {
+      const costUsd = r2(MTD * share);
+      return { key, costUsd, tokens: tok(costUsd, rate), records: Math.round(costUsd * 11) };
+    })
+    .sort((a, b) => b.costUsd - a.costUsd);
+}
+
 export const DEMO_SUMMARY: SpendSummary = {
   generatedAt: NOW,
   priceTableVersion: '2026-10-01',
   monthStart: Date.UTC(2026, 9, 1),
-  monthToDateUsd: 412.37,
-  todayUsd: 38.2,
-  forecastMonthEndUsd: 750.0,
-  burnUsdPerHour: 4.6,
-  budget: { monthlyUsd: 500, warnAt: [0.5, 0.8] },
+  monthToDateUsd: MTD,
+  todayUsd: TODAY,
+  forecastMonthEndUsd: FORECAST,
+  burnUsdPerHour: 3.4,
+  budget: { monthlyUsd: 400, warnAt: [0.5, 0.8] },
   breakdown: {
-    repo: buckets([
-      ['acme/api', 171.4, 2210],
-      ['acme/web', 120.15, 1654],
-      ['acme/infra', 64.9, 702],
-      ['acme/docs', 55.92, 480],
+    source: split([
+      ['claude-code', 0.73],
+      ['codex', 0.18],
+      ['copilot', 0.09],
     ]),
-    model: buckets([
-      ['claude-opus-4-1', 218.6, 1320],
-      ['claude-sonnet-4-5', 126.3, 3010],
-      ['gpt-5-codex', 49.2, 940],
-      ['copilot', 18.27, 776],
+    model: split([
+      ['claude-opus-4-1', 0.58, 9],
+      ['claude-sonnet-4-5', 0.19, 1.8],
+      ['gpt-5-codex', 0.15, 1.2],
+      ['claude-haiku-4-5', 0.05, 0.6],
+      ['copilot-credits', 0.03, 1.5],
     ]),
-    session: buckets([
-      ['sess-7f3a', 88.4, 640],
-      ['sess-19bc', 61.75, 502],
-      ['sess-e402', 47.1, 388],
+    repo: split([
+      ['acme/api', 0.38],
+      ['acme/web', 0.27],
+      ['acme/infra', 0.14],
+      ['acme/docs', 0.09],
+      ['acme/mobile', 0.06],
+      ['acme/billing', 0.03],
+      ['acme/scripts', 0.015],
+      ['acme/design', 0.01],
+      ['acme/sandbox', 0.005],
+      ['acme/legacy', 0.004],
     ]),
-    army: buckets([
-      ['refactor-army', 140.2, 1500],
-      ['docs-army', 52.8, 610],
+    branch: split([
+      ['main', 0.34],
+      ['feat/billing-v2', 0.22],
+      ['fix/flaky-tests', 0.12],
+      ['chore/deps', 0.07],
     ]),
-    task: buckets([
-      ['T-migrate-db', 76.3, 420],
-      ['T-ui-rewrite', 58.9, 380],
-      ['T-write-tests', 31.4, 290],
+    task: split([
+      ['Migrate db to Postgres 17', 0.21],
+      ['Rewrite settings UI', 0.16],
+      ['Add contract tests', 0.09],
     ]),
-    source: buckets([
-      ['claude-code', 344.9, 4330],
-      ['codex', 49.2, 940],
-      ['copilot', 18.27, 776],
+    session: split([
+      ['sess-7f3a', 0.09],
+      ['sess-19bc', 0.07],
+      ['sess-e402', 0.05],
     ]),
-    branch: buckets([
-      ['main', 150.0, 1900],
-      ['feat/billing', 120.4, 1500],
+    army: split([
+      ['refactor-army', 0.3],
+      ['docs-army', 0.11],
     ]),
-    day: DAILY.slice(-14)
-      .map((d) => ({ ...d }))
-      .sort((a, b) => b.costUsd - a.costUsd),
+    day: MONTH_DAYS.map((d) => ({ ...d })).sort((a, b) => b.costUsd - a.costUsd),
   } satisfies Record<SpendDimension, SpendBucket[]>,
   daily: DAILY,
   tips: [
     {
       id: 'opus-to-sonnet',
-      title: 'Use Sonnet for routine edits',
-      detail: '62% of Opus calls were small edits that Sonnet handles equally well.',
-      estMonthlySavingsUsd: 140,
+      title: 'Use Sonnet for short edits',
+      detail:
+        '31 Opus sessions this month were edits under 2k output tokens. Assumes the same tokens at Sonnet rates.',
+      estMonthlySavingsUsd: 38.2,
     },
     {
       id: 'cache-reuse',
       title: 'Keep sessions warm to reuse cache',
-      detail: 'Cache writes are being repeated after idle gaps over 5 minutes.',
-      estMonthlySavingsUsd: 42,
+      detail: 'Cache writes repeat after idle gaps over 5 minutes in acme/api.',
+      estMonthlySavingsUsd: 17,
+    },
+    {
+      id: 'copilot-credits',
+      title: 'Copilot credits unused',
+      detail: '$6.10 of included credits remain until Oct 31. Route small completions there first.',
+      estMonthlySavingsUsd: 6.1,
     },
   ],
   alerts: [
     {
-      id: 'budget-80',
+      id: 'forecast-over',
       level: 'warn',
-      title: 'Budget 80% used',
-      body: 'You have used $412 of your $500 monthly budget.',
+      title: 'Forecast is over budget',
+      body: `On pace for $${Math.round(FORECAST)} against a $400 budget.`,
       at: NOW - 3_600_000,
     },
   ],
