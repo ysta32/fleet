@@ -76,3 +76,24 @@ arrow keys. Focus rings use `--fl-focus`. Status is never color alone.
   eyebrow) and enlarged the headline; segmented control scrolls instead of wrapping on phones; budget tag hidden on
   narrow widths to avoid colliding with the callout; KPI grid no longer leaves an empty cell at tablet width;
   skeleton now mirrors the hero layout.
+- Round 3 (director 7/10 + code review): restored the Army dimension; meter clamps `aria-valuenow` to the budget and
+  exposes real spend via `aria-valuetext`; ticks keep full precision with labels sized to the step; empty-data month
+  read in local time. Contrast: `--fl-fg-subtle` is no longer used for body text (upstream token fixed to >= 4.5:1:
+  dark #8a8b82, light #64665c), now only for axis ticks and the footnote; eyebrows, shares, cents use `--fl-fg-muted`.
+  Hero figure uses proportional nums with a sans "." outside the cents. Removed the repeated banners (alerts and
+  partial info); the PARTIAL chip links to Sources. One severity colour (danger) for over budget across hero sentence,
+  meter and callout; KPI values in ink with tone carried by a small dot + sub-label; savings figures in ink with a
+  success dot. Model mix: accent for the top model, neutral ink ramp for the rest, total equals the hero total
+  (residual folded into Other), percents by largest remainder. Budget tag always visible (below the rule), $0
+  baseline label, ticks at text-xs. Meter tick is the expected pace for today. Breakdown shows "+N more"; segmented
+  control fades at the edge with scroll-snap and a scroll cue on narrow widths. Error state is a full layout: serif
+  headline, mono message, copyable command, and the sources that loaded (or common causes). Daily chart: more air
+  under the title, weekly ticks counted back from today, current month at a 35% accent wash, today solid and labeled.
+  Site section now runs hook, preview (clipped, starting at the hero), three annotated features with example
+  figures, and a closing command band. Skeleton fill raised and shimmer strengthened.
+  Round-3 self-check fixes: arrow-key tab changes scroll the active tab into view; scroll cue now shows under 560px
+  (rule order bug); ink ramp floor raised so the 5th model stays visible in light mode; "Today" bar tag sits on a
+  surface pill; daily chart omits the $0 label (the hero keeps it).
+- 2026-10-07, lead QA (round 3b): at 375px the weekly date labels under the daily chart collided ("Oct 11 Oct 18").
+  Under 560px every other label is now hidden, counted back from today so today keeps its label. Re-shot at 375/1280
+  (scratchpad vqa/shots/round3b); labels now read "Sep 20 · Oct 4 · Oct 18" with clear gaps. No console errors, no overflow.

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { SpendSource, SpendSummary } from '@fleet/shared';
 import { Breakdown, DailyBars, HeroChart, ModelMix, toolName } from './charts.js';
 import { money, moneyWhole, monthModel, monthName, monthShort, timeUtc } from './format.js';
@@ -30,15 +31,102 @@ export interface SpendTabProps {
 
 /* ------------------------------------------------------------------ states */
 
-function ErrorBanner({ message }: { message: string }) {
+/** A command with a copy button; the button needs JS, the command text is selectable without it. */
+export function CopyCmd({ cmd = 'npx fleet-spend' }: { cmd?: string }) {
+  const [copied, setCopied] = useState(false);
   return (
-    <div className="fls-banner fls-banner-danger" role="alert">
-      <Icon name="error" />
-      <div>
-        <strong>Could not load spend data.</strong>
-        <p>{message} Fix the cause, then run npx fleet-spend again.</p>
-      </div>
+    <div className="fls-cmd">
+      <code>{cmd}</code>
+      <button
+        type="button"
+        className="fls-copy"
+        aria-label={`Copy ${cmd}`}
+        onClick={() => {
+          const clip = typeof navigator !== 'undefined' ? navigator.clipboard : undefined;
+          clip
+            ?.writeText(cmd)
+            .then(() => {
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1600);
+            })
+            .catch(() => undefined);
+        }}
+      >
+        {copied ? 'Copied' : 'Copy'}
+      </button>
+      <span className="fls-sr" aria-live="polite">
+        {copied ? 'Copied to clipboard' : ''}
+      </span>
     </div>
+  );
+}
+
+const CAUSES: [string, string][] = [
+  ['Permission denied on a log folder', 'Grant read access to the folder, then run again.'],
+  [
+    'Unreadable settings file',
+    'Check ~/.config/fleet/spend.json is valid JSON, or remove it to use defaults.',
+  ],
+  [
+    'API ingest on without a key',
+    'Export the admin key variable named in settings, or set apiIngest to false.',
+  ],
+];
+
+function ErrorPanel({ message, sources }: { message: string; sources?: SpendSummary['sources'] }) {
+  return (
+    <section className="fls-panel fls-onboard" aria-labelledby="fls-err-h">
+      <div className="fls-onboard-intro">
+        <span className="fls-eyebrow fls-tone" data-tone="over">
+          <span>Spend, error</span>
+        </span>
+        <h2 id="fls-err-h">Spend data could not load</h2>
+        <p>fleet-spend stopped while reading usage. Fix the cause, then run it again.</p>
+        <pre className="fls-errmsg" role="alert">
+          {message}
+        </pre>
+        <CopyCmd />
+      </div>
+      {sources && sources.length > 0 ? (
+        <div>
+          <h3 className="fls-panel-title" style={{ marginBottom: 12 }}>
+            Sources that loaded
+          </h3>
+          <ul className="fls-steps" aria-label="Sources">
+            {sources.map((x) => (
+              <li key={x.source}>
+                <span
+                  className="fls-dot"
+                  data-status={x.status}
+                  aria-hidden="true"
+                  style={{ marginTop: 6 }}
+                />
+                <strong>{toolName(x.source)}</strong>
+                <p className="fls-num">
+                  {x.status === 'ok' ? 'Loaded' : x.status === 'missing' ? 'Not found' : 'Error'},{' '}
+                  {x.records.toLocaleString('en-US')} records
+                </p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <div>
+          <h3 className="fls-panel-title" style={{ marginBottom: 12 }}>
+            Common causes
+          </h3>
+          <ul className="fls-steps">
+            {CAUSES.map(([title, fix]) => (
+              <li key={title}>
+                <Icon name="alert" />
+                <strong>{title}</strong>
+                <p>{fix}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -126,7 +214,7 @@ function Onboarding() {
           fleet-spend looked in the usual places and found no usage logs. Connect at least one source below,
           then scan again.
         </p>
-        <div className="fls-cmd">npx fleet-spend</div>
+        <CopyCmd />
         <p className="fls-panel-note">
           Settings live in <code>~/.config/fleet/spend.json</code>. Logs are read on this machine and never
           uploaded.
@@ -174,7 +262,10 @@ function Dashboard({ s }: { s: SpendSummary }) {
   const budget = s.budget.monthlyUsd;
   const used = budget ? s.monthToDateUsd / budget : 0;
   const warnAt = Math.min(...(s.budget.warnAt.length ? s.budget.warnAt : [0.8]));
-  const meterState = used >= 1 ? 'over' : m.forecast > (budget ?? Infinity) || used >= warnAt ? 'warn' : 'ok';
+  // one severity for over budget (actual or forecast): danger. warn only for the early threshold.
+  const meterState =
+    used >= 1 || (budget !== null && m.forecast > budget) ? 'over' : used >= warnAt ? 'warn' : 'ok';
+  const pace = m.today / m.days;
   const left = budget !== null ? budget - s.monthToDateUsd : 0;
   const tint = burnTint(s.burnUsdPerHour);
   const missing = s.sources.filter((x) => x.status !== 'ok');
@@ -195,9 +286,13 @@ function Dashboard({ s }: { s: SpendSummary }) {
           </span>
         </span>
         {partial && (
-          <span className="fls-badge fls-badge-warn">
+          <a
+            className="fls-badge fls-badge-warn"
+            href="#fls-src-h"
+            title={`${missing.map((x) => toolName(x.source)).join(', ')} not connected; totals exclude ${missing.length === 1 ? 'it' : 'them'}.`}
+          >
             Partial, {okCount} of {s.sources.length} sources
-          </span>
+          </a>
         )}
         <span className="fls-badge">Estimated</span>
         <span className="fls-chip">
@@ -205,32 +300,6 @@ function Dashboard({ s }: { s: SpendSummary }) {
           <span className="fls-num">Updated {timeUtc(s.generatedAt)}</span>
         </span>
       </div>
-
-      {s.alerts.map((a) => (
-        <div
-          key={a.id}
-          className={`fls-banner ${a.level === 'over' ? 'fls-banner-danger' : 'fls-banner-warn'}`}
-          role="status"
-        >
-          <Icon name="alert" />
-          <div>
-            <strong>{a.title}.</strong> <p style={{ display: 'inline' }}>{a.body}</p>
-          </div>
-        </div>
-      ))}
-
-      {partial && (
-        <div className="fls-banner fls-banner-info" role="status">
-          <Icon name="info" />
-          <p>
-            Showing {okCount} of {s.sources.length} sources.{' '}
-            {missing
-              .map((x) => `${toolName(x.source)} ${x.status === 'error' ? 'failed' : 'not connected'}`)
-              .join(', ')}
-            ; totals exclude {missing.length === 1 ? 'it' : 'them'}.
-          </p>
-        </div>
-      )}
 
       <section className="fls-hero" aria-labelledby="fls-hero-h">
         <div className="fls-hero-top">
@@ -240,7 +309,12 @@ function Dashboard({ s }: { s: SpendSummary }) {
             </h2>
             <span className="fls-hero-num">
               {dollars}
-              {cents !== undefined && <span className="fls-cents">.{cents}</span>}
+              {cents !== undefined && (
+                <>
+                  <span className="fls-hero-sep">.</span>
+                  <span className="fls-cents">{cents}</span>
+                </>
+              )}
             </span>
             <p className="fls-hero-line">
               On pace for <span className="fls-num">{moneyWhole(m.forecast)}</span> by {mon} {m.days}
@@ -248,7 +322,7 @@ function Dashboard({ s }: { s: SpendSummary }) {
                 forecastOver ? (
                   <>
                     ,{' '}
-                    <span className="fls-tone-warn">
+                    <span className="fls-tone-over">
                       <span className="fls-num">{moneyWhole(m.forecast - budget)}</span> over
                     </span>{' '}
                     the <span className="fls-num">{moneyWhole(budget)}</span> budget.
@@ -295,13 +369,7 @@ function Dashboard({ s }: { s: SpendSummary }) {
         </Kpi>
         <Kpi
           label="Budget left"
-          value={
-            budget === null ? (
-              <span className="fls-subtle">No budget</span>
-            ) : (
-              <span className={left < 0 ? 'fls-tone-over' : undefined}>{money(left)}</span>
-            )
-          }
+          value={budget === null ? <span className="fls-subtle">No budget</span> : money(left)}
         >
           {budget === null ? (
             <span className="fls-kpi-sub">
@@ -319,19 +387,27 @@ function Dashboard({ s }: { s: SpendSummary }) {
                 role="meter"
                 aria-valuemin={0}
                 aria-valuemax={budget}
-                aria-valuenow={Math.round(s.monthToDateUsd * 100) / 100}
+                aria-valuenow={Math.min(budget, Math.round(s.monthToDateUsd * 100) / 100)}
+                aria-valuetext={`${money(s.monthToDateUsd)} of ${money(budget)} (${Math.round(used * 100)}%)`}
                 aria-label="Budget used"
               >
                 <span style={{ width: `${Math.min(100, used * 100)}%` }} />
-                <i style={{ left: `${Math.min(100, warnAt * 100)}%` }} />
+                <i style={{ left: `${pace * 100}%` }} />
+              </span>
+              <span className="fls-meter-cap">
+                Expected pace · {mon} {m.today}
               </span>
             </>
           )}
         </Kpi>
-        <Kpi
-          label="Forecast, month end"
-          value={<span className={forecastOver ? 'fls-tone-warn' : undefined}>{money(m.forecast)}</span>}
-        >
+        <Kpi label="Forecast, month end" value={money(m.forecast)}>
+          {forecastOver && budget !== null && (
+            <span className="fls-kpi-sub fls-tone" data-tone="over">
+              <span>
+                <span className="fls-num">{moneyWhole(m.forecast - budget)}</span> over budget
+              </span>
+            </span>
+          )}
           <span className="fls-kpi-sub">
             Range <span className="fls-num">{moneyWhole(m.lo)}</span> to{' '}
             <span className="fls-num">{moneyWhole(m.hi)}</span>, estimated
@@ -341,7 +417,7 @@ function Dashboard({ s }: { s: SpendSummary }) {
           label="Savings found"
           value={
             tips.length ? (
-              <span className="fls-tone-good">
+              <span>
                 {money(tipSum)}
                 <small className="fls-subtle" style={{ fontSize: '0.5em' }}>
                   /mo
@@ -352,15 +428,17 @@ function Dashboard({ s }: { s: SpendSummary }) {
             )
           }
         >
-          <span className="fls-kpi-sub">
-            {tips.length} {tips.length === 1 ? 'suggestion' : 'suggestions'}, estimated
+          <span className="fls-kpi-sub fls-tone" data-tone={tips.length ? 'good' : undefined}>
+            <span>
+              {tips.length} {tips.length === 1 ? 'suggestion' : 'suggestions'}, estimated
+            </span>
           </span>
         </Kpi>
       </div>
 
       <div className="fls-grid fls-grid-2">
         <Breakdown summary={s} />
-        <ModelMix buckets={s.breakdown.model ?? []} />
+        <ModelMix buckets={s.breakdown.model ?? []} total={s.monthToDateUsd} />
       </div>
 
       <section className="fls-panel" aria-labelledby="fls-daily-h">
@@ -371,9 +449,13 @@ function Dashboard({ s }: { s: SpendSummary }) {
           <ul className="fls-legend" aria-label="Legend">
             <li style={{ color: 'var(--fl-accent, #ff6a2b)' }}>
               <span className="fls-key fls-key-swatch" />
+              <span className="fls-muted">Today</span>
+            </li>
+            <li style={{ color: 'var(--fl-accent, #ff6a2b)' }}>
+              <span className="fls-key fls-key-swatch" style={{ opacity: 0.35 }} />
               <span className="fls-muted">{monthName(m.month)}</span>
             </li>
-            <li style={{ color: 'var(--fl-fg-subtle, #6f7069)' }}>
+            <li style={{ color: 'var(--fl-fg-subtle, #8a8b82)' }}>
               <span className="fls-key fls-key-swatch" />
               <span className="fls-muted">Earlier</span>
             </li>
@@ -448,12 +530,12 @@ export function SpendTab({ summary, error }: SpendTabProps) {
   if (summary) {
     body = (
       <div className="fls-stack">
-        {error && <ErrorBanner message={error} />}
+        {error && <ErrorPanel message={error} sources={summary.sources} />}
         <Dashboard s={summary} />
       </div>
     );
   } else if (error) {
-    body = <ErrorBanner message={error} />;
+    body = <ErrorPanel message={error} />;
   } else if (summary === null) {
     body = <Onboarding />;
   } else {

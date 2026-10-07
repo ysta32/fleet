@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { renderToString } from 'react-dom/server';
 import type { SpendSummary } from '@fleet/shared';
 import { burnTint, DEMO_SUMMARY, SpendSiteSection, SpendTab } from './index.js';
-import { monthModel, niceTicks, money } from './format.js';
+import { money, monthModel, niceTicks, sharePercents, tickLabel } from './format.js';
 import { SPEND_CSS } from './styles.js';
 
 const FABRICATED = [/9x/i, /\$29\b/, /\$750\b/, /testimonial/i, /\b\d[\d,]*\+? (users|developers|teams)\b/i];
@@ -151,5 +151,72 @@ describe('styles and helpers', () => {
     const oct = DEMO_SUMMARY.daily.filter((d) => d.key.startsWith('2026-10-'));
     const sum = Math.round(oct.reduce((a, b) => a + b.costUsd, 0) * 100) / 100;
     expect(sum).toBe(DEMO_SUMMARY.monthToDateUsd);
+  });
+
+  it('niceTicks keeps sub-cent precision without duplicates; labels follow the step', () => {
+    const { ticks, step } = niceTicks(0.012);
+    expect(new Set(ticks).size).toBe(ticks.length);
+    expect(step).toBeLessThan(0.01);
+    const labels = ticks.map((v) => tickLabel(v, step));
+    expect(new Set(labels).size).toBe(labels.length);
+    expect(tickLabel(200, 100)).toBe('$200');
+    expect(tickLabel(2.5, 2.5)).toBe('$2.5');
+  });
+
+  it('sharePercents sums to 100', () => {
+    expect(sharePercents([1, 1, 1]).reduce((a, b) => a + b, 0)).toBe(100);
+    expect(sharePercents([0, 0])).toEqual([0, 0]);
+  });
+
+  it('monthModel reads monthStart in local time when daily is empty', () => {
+    const start = new Date(2026, 9, 1).getTime(); // local midnight Oct 1
+    const m = monthModel({ ...DEMO_SUMMARY, daily: [], monthStart: start });
+    expect(m.month).toBe(10);
+    expect(m.year).toBe(2026);
+  });
+});
+
+describe('round-3 contract details', () => {
+  const html = renderToString(<SpendTab summary={DEMO_SUMMARY} />).replace(/<!-- -->/g, '');
+
+  it('offers the army dimension', () => {
+    expect(html).toMatch(/role="tab"[^>]*>Army</);
+  });
+
+  it('meter never reports a value above its max and exposes the real spend', () => {
+    const over: SpendSummary = { ...DEMO_SUMMARY, budget: { monthlyUsd: 100, warnAt: [0.5, 0.8] } };
+    const h = renderToString(<SpendTab summary={over} />);
+    const now = Number(/aria-valuenow="([\d.]+)"/.exec(h)![1]);
+    const max = Number(/aria-valuemax="([\d.]+)"/.exec(h)![1]);
+    expect(now).toBeLessThanOrEqual(max);
+    expect(h).toContain(`aria-valuetext="${money(DEMO_SUMMARY.monthToDateUsd)} of $100.00`);
+    expect(h).toContain('Expected pace');
+  });
+
+  it('model mix total matches the month-to-date figure', () => {
+    const mix = html.slice(html.indexOf('Model mix'));
+    expect(mix).toContain(money(DEMO_SUMMARY.monthToDateUsd));
+  });
+
+  it('does not repeat warnings as banners; partial chip links to sources', () => {
+    expect(html).not.toContain('class="fls-banner');
+    expect(html).toMatch(/<a class="fls-badge fls-badge-warn" href="#fls-src-h"/);
+  });
+
+  it('error state shows the message, a copyable command and loaded sources', () => {
+    const h = renderToString(<SpendTab summary={DEMO_SUMMARY} error="EACCES reading sessions" />).replace(
+      /<!-- -->/g,
+      '',
+    );
+    expect(h).toContain('class="fls-errmsg" role="alert"');
+    expect(h).toContain('Copy npx fleet-spend');
+    expect(h).toContain('Sources that loaded');
+  });
+
+  it('site section follows the narrative and stays claim-free', () => {
+    const h = renderToString(<SpendSiteSection />).replace(/<!-- -->/g, '');
+    for (const k of ['01 Forecast', '02 Split', '03 Savings', 'Run it on your own month.', 'Example data'])
+      expect(h).toContain(k);
+    noClaims(h);
   });
 });

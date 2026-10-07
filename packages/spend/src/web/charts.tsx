@@ -1,9 +1,20 @@
 import { useId, useState } from 'react';
 import type { KeyboardEvent, ReactNode } from 'react';
 import type { SpendBucket, SpendDimension, SpendSummary } from '@fleet/shared';
-import { compact, dayLabel, money, moneyWhole, monthShort, niceTicks, pct, totalTokens } from './format.js';
+import {
+  compact,
+  dayLabel,
+  money,
+  moneyWhole,
+  monthShort,
+  niceTicks,
+  pct,
+  sharePercents,
+  tickLabel,
+  totalTokens,
+} from './format.js';
 import type { MonthModel } from './format.js';
-import { modelColor } from './styles.js';
+import { mixColor } from './styles.js';
 
 const NS = 'non-scaling-stroke';
 
@@ -103,7 +114,17 @@ function HoverChart({ label, count, start, tip, children, className }: HoverChar
   );
 }
 
-function YTicks({ ticks, max }: { ticks: number[]; max: number }) {
+function YTicks({
+  ticks,
+  max,
+  step,
+  zeroLabel = true,
+}: {
+  ticks: number[];
+  max: number;
+  step: number;
+  zeroLabel?: boolean;
+}) {
   return (
     <>
       <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
@@ -119,14 +140,14 @@ function YTicks({ ticks, max }: { ticks: number[]; max: number }) {
           />
         ))}
       </svg>
-      {ticks.slice(1).map((v) => (
+      {(zeroLabel ? ticks : ticks.slice(1)).map((v) => (
         <span
           key={v}
           className="fls-ytick fls-num"
           aria-hidden="true"
           style={{ top: `${100 - (v / max) * 100}%` }}
         >
-          {moneyWhole(v)}
+          {tickLabel(v, step)}
         </span>
       ))}
     </>
@@ -137,7 +158,7 @@ function YTicks({ ticks, max }: { ticks: number[]; max: number }) {
 
 export function HeroChart({ m }: { m: MonthModel }) {
   const top = Math.max(m.hi, m.budget ?? 0, m.forecast, 1) * 1.04;
-  const { max, ticks } = niceTicks(top);
+  const { max, ticks, step } = niceTicks(top);
   const span = Math.max(1, m.days - 1);
   const X = (d: number) => ((Math.min(Math.max(d, 1), m.days) - 1) / span) * 100;
   const Y = (v: number) => 100 - (Math.max(0, v) / max) * 100;
@@ -183,7 +204,7 @@ export function HeroChart({ m }: { m: MonthModel }) {
       >
         {(active) => (
           <>
-            <YTicks ticks={ticks} max={max} />
+            <YTicks ticks={ticks} max={max} step={step} />
             <svg className="fls-draw" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
               {hasFuture && <polygon points={band} className="fls-band" />}
               <polygon points={area} className="fls-area" />
@@ -297,11 +318,14 @@ export function HeroChart({ m }: { m: MonthModel }) {
 
 export function DailyBars({ daily, monthPrefix }: { daily: SpendBucket[]; monthPrefix: string }) {
   const peak = Math.max(0, ...daily.map((d) => d.costUsd));
-  const { max, ticks } = niceTicks(peak * 1.05, 3);
+  const { max, ticks, step } = niceTicks(peak * 1.05, 3);
   const n = daily.length;
   if (n === 0) return <p className="fls-empty">No daily usage in the last 31 days.</p>;
   const lastKey = daily[n - 1]!.key;
-  const xIdx = [0, Math.floor((n - 1) / 2), n - 1].filter((v, i, a) => a.indexOf(v) === i);
+  // weekly ticks counted back from today, so today always has a label
+  const xIdx: number[] = [];
+  for (let i = n - 1; i >= 0; i -= 7) xIdx.unshift(i);
+  const todayCost = daily[n - 1]!.costUsd;
   return (
     <figure className="fls-chart">
       <HoverChart
@@ -324,7 +348,7 @@ export function DailyBars({ daily, monthPrefix }: { daily: SpendBucket[]; monthP
       >
         {(active) => (
           <>
-            <YTicks ticks={ticks} max={max} />
+            <YTicks ticks={ticks} max={max} step={step} zeroLabel={false} />
             <div className="fls-bars" aria-hidden="true">
               {daily.map((b, i) => (
                 <div key={b.key} data-active={i === active}>
@@ -337,12 +361,23 @@ export function DailyBars({ daily, monthPrefix }: { daily: SpendBucket[]; monthP
                 </div>
               ))}
             </div>
+            <span
+              className="fls-tag fls-tag-today fls-num"
+              aria-hidden="true"
+              style={{ top: `${100 - (todayCost / max) * 100}%` }}
+            >
+              Today {money(todayCost)}
+            </span>
           </>
         )}
       </HoverChart>
       <div className="fls-xaxis fls-num" aria-hidden="true">
-        {xIdx.map((i) => (
-          <span key={i} style={{ left: `${(i / Math.max(1, n - 1)) * 100}%` }}>
+        {xIdx.map((i, k) => (
+          <span
+            key={i}
+            data-alt={(xIdx.length - 1 - k) % 2 === 1 || undefined}
+            style={{ left: `${((i + 0.5) / n) * 100}%` }}
+          >
             {dayLabel(daily[i]!.key)}
           </span>
         ))}
@@ -372,6 +407,7 @@ const DIMS: { id: SpendDimension; label: string }[] = [
   { id: 'task', label: 'Task' },
   { id: 'session', label: 'Session' },
   { id: 'day', label: 'Day' },
+  { id: 'army', label: 'Army' },
 ];
 
 const TOOL_NAMES: Record<string, string> = {
@@ -405,6 +441,7 @@ export function Breakdown({ summary }: { summary: SpendSummary }) {
     setDim(DIMS[n]!.id);
     const btn = (e.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('[role=tab]')[n];
     btn?.focus();
+    btn?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   };
 
   return (
@@ -413,21 +450,26 @@ export function Breakdown({ summary }: { summary: SpendSummary }) {
         <h3 id={`${id}-h`} className="fls-panel-title">
           Where the money went
         </h3>
-        <div className="fls-seg" role="tablist" aria-label="Group spend by" onKeyDown={onKey}>
-          {DIMS.map((d) => (
-            <button
-              key={d.id}
-              type="button"
-              role="tab"
-              id={`${id}-t-${d.id}`}
-              aria-selected={d.id === dim}
-              aria-controls={`${id}-p`}
-              tabIndex={d.id === dim ? 0 : -1}
-              onClick={() => setDim(d.id)}
-            >
-              {d.label}
-            </button>
-          ))}
+        <div style={{ minWidth: 0, maxWidth: '100%' }}>
+          <div className="fls-seg" role="tablist" aria-label="Group spend by" onKeyDown={onKey}>
+            {DIMS.map((d) => (
+              <button
+                key={d.id}
+                type="button"
+                role="tab"
+                id={`${id}-t-${d.id}`}
+                aria-selected={d.id === dim}
+                aria-controls={`${id}-p`}
+                tabIndex={d.id === dim ? 0 : -1}
+                onClick={() => setDim(d.id)}
+              >
+                {d.label}
+              </button>
+            ))}
+          </div>
+          <p className="fls-seg-cue" aria-hidden="true">
+            Scroll sideways for more groupings
+          </p>
         </div>
       </div>
       <div role="tabpanel" id={`${id}-p`} aria-labelledby={`${id}-t-${dim}`}>
@@ -454,7 +496,7 @@ export function Breakdown({ summary }: { summary: SpendSummary }) {
         )}
         {rest.length > 0 && (
           <p className="fls-rank-more">
-            {rest.length} more, <span className="fls-num">{money(restCost)}</span> combined
+            +{rest.length} more, <span className="fls-num">{money(restCost)}</span> combined
           </p>
         )}
       </div>
@@ -464,21 +506,31 @@ export function Breakdown({ summary }: { summary: SpendSummary }) {
 
 /* ------------------------------------------------------------------ model mix: cost vs tokens */
 
-export function ModelMix({ buckets }: { buckets: SpendBucket[] }) {
+export function ModelMix({ buckets, total }: { buckets: SpendBucket[]; total: number }) {
   const id = useId();
   const sorted = [...buckets].sort((a, b) => b.costUsd - a.costUsd);
   const head = sorted.slice(0, 5);
   const tail = sorted.slice(5);
   const items = head.map((b) => ({ key: b.key, cost: b.costUsd, tokens: totalTokens(b) }));
-  if (tail.length)
+  let otherCost = tail.reduce((a, b) => a + b.costUsd, 0);
+  const otherTokens = tail.reduce((a, b) => a + totalTokens(b), 0);
+  // one source total: whatever the per-model rows do not cover (capped lists, rounding) folds into Other
+  const listed = items.reduce((a, b) => a + b.cost, 0) + otherCost;
+  if (total - listed >= 0.01) otherCost += total - listed;
+  if (otherCost >= 0.005 || otherTokens > 0)
     items.push({
-      key: `Other (${tail.length})`,
-      cost: tail.reduce((a, b) => a + b.costUsd, 0),
-      tokens: tail.reduce((a, b) => a + totalTokens(b), 0),
+      key: tail.length ? `Other (${tail.length})` : 'Other',
+      cost: otherCost,
+      tokens: otherTokens,
     });
-  const costSum = items.reduce((a, b) => a + b.cost, 0);
+  const costSum = Math.max(
+    total,
+    items.reduce((a, b) => a + b.cost, 0),
+  );
   const tokSum = items.reduce((a, b) => a + b.tokens, 0);
-  const color = (k: string) => (k.startsWith('Other (') ? modelColor('other') : modelColor(k));
+  const costPct = sharePercents(items.map((it) => it.cost));
+  const tokPct = sharePercents(items.map((it) => it.tokens));
+  const color = (i: number) => mixColor(i);
 
   if (items.length === 0 || costSum <= 0) {
     return (
@@ -497,13 +549,13 @@ export function ModelMix({ buckets }: { buckets: SpendBucket[] }) {
       <div
         className="fls-mix-bar"
         role="img"
-        aria-label={`Share of ${by}: ${items.map((it) => `${it.key} ${pct(it[by] / Math.max(1e-9, sum))}`).join(', ')}`}
+        aria-label={`Share of ${by}: ${items.map((it, i) => `${it.key} ${(by === 'cost' ? costPct : tokPct)[i]}%`).join(', ')}`}
       >
-        {items
-          .filter((it) => it[by] > 0)
-          .map((it) => (
-            <span key={it.key} style={{ flexGrow: it[by] / sum, flexBasis: 0, color: color(it.key) }} />
-          ))}
+        {items.map((it, i) =>
+          it[by] > 0 ? (
+            <span key={it.key} style={{ flexGrow: it[by] / sum, flexBasis: 0, color: color(i) }} />
+          ) : null,
+        )}
       </div>
     );
   };
@@ -514,15 +566,15 @@ export function ModelMix({ buckets }: { buckets: SpendBucket[] }) {
           Model mix
         </h3>
         <p className="fls-panel-note">
-          {top.key} is <span className="fls-num">{pct(top.cost / costSum)}</span> of cost and{' '}
-          <span className="fls-num">{pct(top.tokens / Math.max(1, tokSum))}</span> of tokens
+          {top.key} is <span className="fls-num">{costPct[0]}%</span> of cost and{' '}
+          <span className="fls-num">{tokPct[0]}%</span> of tokens
         </p>
       </div>
       <div className="fls-mix">
         <div className="fls-mix-row">
           <div className="fls-mix-head">
             <span>By cost</span>
-            <span className="fls-num">{money(costSum)}</span>
+            <span className="fls-num">{money(total > 0 ? total : costSum)}</span>
           </div>
           {bar('cost')}
         </div>
@@ -542,18 +594,14 @@ export function ModelMix({ buckets }: { buckets: SpendBucket[] }) {
             </tr>
           </thead>
           <tbody>
-            {items.map((it) => (
+            {items.map((it, i) => (
               <tr key={it.key}>
                 <td title={it.key}>
-                  <span
-                    className="fls-key fls-key-swatch"
-                    style={{ color: color(it.key) }}
-                    aria-hidden="true"
-                  />
+                  <span className="fls-key fls-key-swatch" style={{ color: color(i) }} aria-hidden="true" />
                   {it.key}
                 </td>
-                <td className="fls-num">{pct(it.cost / costSum)}</td>
-                <td className="fls-num">{pct(it.tokens / Math.max(1, tokSum))}</td>
+                <td className="fls-num">{costPct[i]}%</td>
+                <td className="fls-num">{tokPct[i]}%</td>
               </tr>
             ))}
           </tbody>

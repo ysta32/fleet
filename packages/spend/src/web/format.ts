@@ -80,15 +80,40 @@ export function totalTokens(b: SpendBucket): number {
 }
 
 /** Round up to a 1/2/2.5/5 x 10^k step so ~4 gridlines fit. */
-export function niceTicks(max: number, target = 4): { max: number; ticks: number[] } {
+export function niceTicks(max: number, target = 4): { max: number; ticks: number[]; step: number } {
   const m = max > 0 ? max : 1;
   const raw = m / target;
   const mag = 10 ** Math.floor(Math.log10(raw));
   const step = [1, 2, 2.5, 5, 10].map((s) => s * mag).find((s) => s >= raw) ?? 10 * mag;
-  const top = Math.ceil(m / step) * step;
-  const ticks: number[] = [];
-  for (let v = 0; v <= top + step / 2; v += step) ticks.push(Math.round(v * 100) / 100);
-  return { max: top, ticks };
+  const n = Math.ceil(m / step - 1e-9);
+  // integer multiples keep full precision (no cent rounding, so sub-cent steps never collapse)
+  const ticks = Array.from({ length: n + 1 }, (_, i) => Number((i * step).toPrecision(12)));
+  return { max: ticks[n]!, ticks, step };
+}
+
+/** Axis label sized to the step: whole dollars for steps >= $1, otherwise enough decimals to tell ticks apart. */
+export function tickLabel(v: number, step: number): string {
+  let decimals = 0;
+  while (decimals < 6 && Math.abs(step * 10 ** decimals - Math.round(step * 10 ** decimals)) > 1e-9)
+    decimals++;
+  if (decimals === 0) return moneyWhole(v);
+  return `$${v.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
+}
+
+/** Largest-remainder rounding: integer percents that sum to exactly 100 (or 0 when the total is 0). */
+export function sharePercents(values: number[]): number[] {
+  const total = values.reduce((a, b) => a + Math.max(0, b), 0);
+  if (total <= 0) return values.map(() => 0);
+  const raw = values.map((v) => (Math.max(0, v) / total) * 100);
+  const out = raw.map(Math.floor);
+  let left = 100 - out.reduce((a, b) => a + b, 0);
+  const order = raw.map((r, i) => [r - Math.floor(r), i] as const).sort((a, b) => b[0] - a[0]);
+  for (const [, i] of order) {
+    if (left <= 0) break;
+    out[i]! += 1;
+    left -= 1;
+  }
+  return out;
 }
 
 export interface MonthModel {
@@ -118,8 +143,9 @@ export interface MonthModel {
 export function monthModel(s: SpendSummary): MonthModel {
   const last = s.daily.length ? parseDay(s.daily[s.daily.length - 1]!.key) : null;
   const ms = new Date(s.monthStart);
-  const year = last?.y ?? ms.getUTCFullYear();
-  const month = last?.m ?? ms.getUTCMonth() + 1;
+  // monthStart is local midnight on the 1st: read it in local time, or UTC+ zones land in the previous month.
+  const year = last?.y ?? ms.getFullYear();
+  const month = last?.m ?? ms.getMonth() + 1;
   const prefix = `${year}-${String(month).padStart(2, '0')}-`;
   const days = daysInMonth(year, month);
   const today = Math.max(1, last && last.y === year && last.m === month ? last.d : 1);
