@@ -435,7 +435,14 @@ export function fromDemoFleet(demo: DemoFleet, tickMs = 250): DevFleet {
       if (!ps.length) return;
       const p = ps[Math.abs(projectIndex) % ps.length]!;
       const ts = Date.now();
-      push({ id: `${ts}-dev`, ts, kind, projectId: p.id, severity: kind === 'failure' ? 'error' : 'success', label: `synthetic ${kind}` });
+      push({
+        id: `${ts}-dev`,
+        ts,
+        kind,
+        projectId: p.id,
+        severity: kind === 'failure' ? 'error' : 'success',
+        label: `synthetic ${kind}`,
+      });
     },
   };
 }
@@ -450,7 +457,9 @@ export function createVizDevFleet(opts: { seed?: number; projects?: number } = {
 }
 
 /** True when the page was opened with `?vizdev=1` (dev/screenshot harness for the visualizer). */
-export function isVizDevRequested(search: string = typeof window === 'undefined' ? '' : window.location.search): boolean {
+export function isVizDevRequested(
+  search: string = typeof window === 'undefined' ? '' : window.location.search,
+): boolean {
   const v = new URLSearchParams(search).get('vizdev');
   return v !== null && v !== '0' && v !== 'false';
 }

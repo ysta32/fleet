@@ -101,7 +101,10 @@ const shared = {
   gateInner: new THREE.TorusGeometry(0.3, 0.005, 4, 48),
   bracket: new THREE.TorusGeometry(1, 0.012, 4, 24, Math.PI / 4),
   /** the halyard: a hairline mast that raises a signal pennant when a station needs you */
-  mast: new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, 1, 0], 3)),
+  mast: new THREE.BufferGeometry().setAttribute(
+    'position',
+    new THREE.Float32BufferAttribute([0, 0, 0, 0, 1, 0], 3),
+  ),
   pennant: (() => {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0.62, -0.17, 0, 0, -0.34, 0], 3));
@@ -245,7 +248,13 @@ function StationImpl({
     if (sel.current) sel.current.visible = selected;
     if (mast.current && raisedAt.current !== null) {
       // raise the flag once (land), then hold still; a fresh alert re-runs the overshoot on the pennant
-      const ru = store.reduced ? 1 : clamp((t - Math.max(raisedAt.current, INTRO_DELAY + d.index * INTRO_STAGGER + INTRO_DUR * 0.6)) / RAISE, 0, 1);
+      const ru = store.reduced
+        ? 1
+        : clamp(
+            (t - Math.max(raisedAt.current, INTRO_DELAY + d.index * INTRO_STAGGER + INTRO_DUR * 0.6)) / RAISE,
+            0,
+            1,
+          );
       const re = ease(easing.land, ru);
       mast.current.scale.set(1, Math.max(0.001, re), 1);
       if (pennant.current) {
@@ -254,7 +263,8 @@ function StationImpl({
       }
     }
     if (gateRef.current && d.review > 0) gateRef.current.rotation.y += dt * 0.35;
-    if (orbMat.current) orbMat.current.color.copy(colors.ci).multiplyScalar(vt.gain(d.ci === 'none' ? 0.8 : 1.5));
+    if (orbMat.current)
+      orbMat.current.color.copy(colors.ci).multiplyScalar(vt.gain(d.ci === 'none' ? 0.8 : 1.5));
   });
 
   const click = (e: ThreeEvent<MouseEvent>) => {
@@ -270,7 +280,13 @@ function StationImpl({
         : 'idle';
   const lineOp = vt.dark ? 1 : 1.8;
   const hairline = (opacity: number) => (
-    <meshBasicMaterial color={colors.line} transparent opacity={Math.min(1, opacity * lineOp)} depthWrite={false} toneMapped={false} />
+    <meshBasicMaterial
+      color={colors.line}
+      transparent
+      opacity={Math.min(1, opacity * lineOp)}
+      depthWrite={false}
+      toneMapped={false}
+    />
   );
 
   return (
@@ -302,16 +318,33 @@ function StationImpl({
             />
           </mesh>
           <mesh geometry={shared.pip}>
-            <meshStandardMaterial ref={coreMat} color="#000000" emissive={base} emissiveIntensity={1} toneMapped={false} />
+            <meshStandardMaterial
+              ref={coreMat}
+              color="#000000"
+              emissive={base}
+              emissiveIntensity={1}
+              toneMapped={false}
+            />
           </mesh>
           <mesh geometry={d.orch ? shared.ico : shared.oct} scale={1.9}>
-            <meshBasicMaterial ref={wire} color={colors.line} wireframe transparent opacity={0.35} depthWrite={false} toneMapped={false} />
+            <meshBasicMaterial
+              ref={wire}
+              color={colors.line}
+              wireframe
+              transparent
+              opacity={0.35}
+              depthWrite={false}
+              toneMapped={false}
+            />
           </mesh>
         </group>
 
         {/* hairline gimbal + dial bezel */}
         <group ref={r1}>
-          <mesh geometry={geos.ring1} rotation={[Math.PI / 2 + Math.sin(phase) * 0.2, 0, Math.cos(phase) * 0.15]}>
+          <mesh
+            geometry={geos.ring1}
+            rotation={[Math.PI / 2 + Math.sin(phase) * 0.2, 0, Math.cos(phase) * 0.15]}
+          >
             {hairline(0.45)}
           </mesh>
         </group>
@@ -325,7 +358,12 @@ function StationImpl({
         {/* selection: four focus brackets */}
         <group ref={sel} visible={selected}>
           {[0, 1, 2, 3].map((i) => (
-            <mesh key={i} geometry={shared.bracket} scale={2.15 * s} rotation={[Math.PI / 2, 0, i * (Math.PI / 2) + Math.PI / 8]}>
+            <mesh
+              key={i}
+              geometry={shared.bracket}
+              scale={2.15 * s}
+              rotation={[Math.PI / 2, 0, i * (Math.PI / 2) + Math.PI / 8]}
+            >
               <meshBasicMaterial color={colors.focus} toneMapped={false} />
             </mesh>
           ))}
@@ -372,7 +410,12 @@ function StationImpl({
           </mesh>
         </group>
 
-        <Html position={[0, 1.45 * s + 0.75, 0]} center zIndexRange={[20, 0]} style={{ pointerEvents: 'none', userSelect: 'none' }}>
+        <Html
+          position={[0, 1.45 * s + 0.75, 0]}
+          center
+          zIndexRange={[20, 0]}
+          style={{ pointerEvents: 'none', userSelect: 'none' }}
+        >
           <div ref={label} style={{ textAlign: 'center', whiteSpace: 'nowrap', opacity: 0 }}>
             <div
               className="fl-viz-name"

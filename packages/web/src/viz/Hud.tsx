@@ -93,9 +93,7 @@ function Header({
     >
       <div>
         <div style={{ ...caps(H), color }}>{kicker}</div>
-        <div style={{ fontFamily: H.fontDisplay, fontSize: 22, lineHeight: 1.1, color: H.fg }}>
-          {title}
-        </div>
+        <div style={{ fontFamily: H.fontDisplay, fontSize: 22, lineHeight: 1.1, color: H.fg }}>{title}</div>
       </div>
       <button
         onClick={(e) => {

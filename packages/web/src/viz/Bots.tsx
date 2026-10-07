@@ -108,7 +108,9 @@ function BotImpl({
     return {
       key: fresh ? '' : locationKey(loc.kind, loc.projectId, loc.ref),
       from,
-      start: intro ? INTRO_DELAY + (l?.index ?? 0) * INTRO_STAGGER + 0.35 + Math.min(order, 8) * 0.024 : store.t,
+      start: intro
+        ? INTRO_DELAY + (l?.index ?? 0) * INTRO_STAGGER + 0.35 + Math.min(order, 8) * 0.024
+        : store.t,
       dur: INTRO_LAND,
       flying: intro,
       landing: intro,

@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ElementRef } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ElementRef,
+} from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Grid, OrbitControls, PerformanceMonitor, Stars } from '@react-three/drei';
 import { Bloom, EffectComposer, Vignette } from '@react-three/postprocessing';
@@ -29,7 +37,9 @@ const GRAIN =
 function useNarrow(): boolean {
   const q = '(max-width: 560px)';
   const [narrow, setNarrow] = useState(() =>
-    typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? window.matchMedia(q).matches : false,
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia(q).matches
+      : false,
   );
   useEffect(() => {
     if (typeof window.matchMedia !== 'function') return;
@@ -81,7 +91,32 @@ function Floor({ radius, vt }: { radius: number; vt: VizTheme }) {
     const r = radius * 1.6;
     // centre compass: the operator's mark the fleet circles
     const c = 0.9;
-    pts.push(-c * 1.6, 0, 0, -c * 0.4, 0, 0, c * 0.4, 0, 0, c * 1.6, 0, 0, 0, 0, -c * 1.6, 0, 0, -c * 0.4, 0, 0, c * 0.4, 0, 0, c * 1.6);
+    pts.push(
+      -c * 1.6,
+      0,
+      0,
+      -c * 0.4,
+      0,
+      0,
+      c * 0.4,
+      0,
+      0,
+      c * 1.6,
+      0,
+      0,
+      0,
+      0,
+      -c * 1.6,
+      0,
+      0,
+      -c * 0.4,
+      0,
+      0,
+      c * 0.4,
+      0,
+      0,
+      c * 1.6,
+    );
     for (let i = 0; i < 180; i++) {
       const a = (i / 180) * Math.PI * 2;
       const l = i % 15 === 0 ? 1.2 : i % 5 === 0 ? 0.6 : 0.3;
@@ -117,7 +152,12 @@ function Floor({ radius, vt }: { radius: number; vt: VizTheme }) {
       />
       {rings.map((g, i) => (
         <mesh key={i} geometry={g} position={[0, 0.005, 0]}>
-          <meshBasicMaterial color={vt.fg} transparent opacity={(i === 0 ? 0.2 : i === 2 ? 0.09 : 0.05) * k} depthWrite={false} />
+          <meshBasicMaterial
+            color={vt.fg}
+            transparent
+            opacity={(i === 0 ? 0.2 : i === 2 ? 0.09 : 0.05) * k}
+            depthWrite={false}
+          />
         </mesh>
       ))}
       <lineSegments geometry={ticks} position={[0, 0.005, 0]}>
@@ -267,7 +307,9 @@ function buildStations(snap: FleetSnapshot, store: SceneStore): StationData[] {
       running: tasks.filter((t) => t.state === 'running').length,
       ci: pr?.ci ?? 'none',
       index: l.index,
-      needs: tasks.filter((t) => t.state === 'blocked').length + agents.filter((a) => a.status === 'waiting').length,
+      needs:
+        tasks.filter((t) => t.state === 'blocked').length +
+        agents.filter((a) => a.status === 'waiting').length,
     });
   }
   return out;
@@ -307,13 +349,30 @@ function SceneContents({ view, selection, onSelect }: FleetSceneProps) {
       <color attach="background" args={[vt.bg]} />
       <fog attach="fog" args={[vt.bg, radius * 1.1, radius * 4.2]} />
       <ambientLight intensity={vt.dark ? 0.25 : 0.9} color={vt.dark ? vt.fg : '#ffffff'} />
-      <directionalLight position={[8, 14, 6]} intensity={vt.dark ? 0.6 : 1.2} color={vt.dark ? vt.fg : '#ffffff'} />
+      <directionalLight
+        position={[8, 14, 6]}
+        intensity={vt.dark ? 0.6 : 1.2}
+        color={vt.dark ? vt.fg : '#ffffff'}
+      />
       {vt.dark && (
-        <Stars radius={160} depth={70} count={1200} factor={2} saturation={0} fade speed={store.reduced ? 0 : 0.2} />
+        <Stars
+          radius={160}
+          depth={70}
+          count={1200}
+          factor={2}
+          saturation={0}
+          fade
+          speed={store.reduced ? 0 : 0.2}
+        />
       )}
       <Floor radius={radius} vt={vt} />
       {stations.map((d) => (
-        <Station key={d.id} d={d} selected={selection?.kind === 'project' && selection.id === d.id} onSelect={selectProject} />
+        <Station
+          key={d.id}
+          d={d}
+          selected={selection?.kind === 'project' && selection.id === d.id}
+          onSelect={selectProject}
+        />
       ))}
       {snap && <TaskSatellites snapshot={snap} onSelectProject={selectProject} />}
       {agents.map(({ a, order }) => (
@@ -321,7 +380,11 @@ function SceneContents({ view, selection, onSelect }: FleetSceneProps) {
           key={a.id}
           agent={a}
           order={order}
-          selected={!!selection && (selection.kind === 'agent' || selection.kind === 'session') && selection.id === a.id}
+          selected={
+            !!selection &&
+            (selection.kind === 'agent' || selection.kind === 'session') &&
+            selection.id === a.id
+          }
           onSelect={selectAgent}
         />
       ))}
@@ -348,9 +411,15 @@ function Legend({ vt }: { vt: VizTheme }) {
   const narrow = useNarrow();
   if (narrow)
     return (
-      <div style={{ ...overlayText(vt), left: 12, bottom: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div
+        style={{ ...overlayText(vt), left: 12, bottom: 10, display: 'flex', alignItems: 'center', gap: 10 }}
+      >
         {models.map((m) => (
-          <span key={m} title={m} style={{ width: 6, height: 6, borderRadius: 6, background: vt.model[m], display: 'inline-block' }} />
+          <span
+            key={m}
+            title={m}
+            style={{ width: 6, height: 6, borderRadius: 6, background: vt.model[m], display: 'inline-block' }}
+          />
         ))}
         <span style={{ color: vt.accent, marginLeft: 4 }}>● needs you</span>
       </div>
@@ -371,7 +440,15 @@ function Legend({ vt }: { vt: VizTheme }) {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
         {models.map((m) => (
           <span key={m} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ width: 6, height: 6, borderRadius: 6, background: vt.model[m], display: 'inline-block' }} />
+            <span
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: 6,
+                background: vt.model[m],
+                display: 'inline-block',
+              }}
+            />
             {m}
           </span>
         ))}
@@ -434,7 +511,13 @@ export default function FleetScene({ view: viewProp, selection, onSelect }: Flee
             >
               <SceneContents view={view} selection={selection} onSelect={onSelect} />
               <EffectComposer multisampling={4} enableNormalPass={false}>
-                <Bloom mipmapBlur luminanceThreshold={1} luminanceSmoothing={0.2} intensity={vt.bloom} radius={0.6} />
+                <Bloom
+                  mipmapBlur
+                  luminanceThreshold={1}
+                  luminanceSmoothing={0.2}
+                  intensity={vt.bloom}
+                  radius={0.6}
+                />
                 <Vignette darkness={vt.dark ? 0.5 : 0.12} offset={0.3} />
               </EffectComposer>
             </PerformanceMonitor>
@@ -443,7 +526,10 @@ export default function FleetScene({ view: viewProp, selection, onSelect }: Flee
       </Canvas>
       <style>{`@media (max-width: 560px) { .fl-viz-name { font-size: 14px !important; } .fl-viz-sub[data-needs='0'] { display: none; } }`}</style>
       {/* depth: Halyard vignette + film grain (DOM, composited by the browser; no per-frame GPU cost) */}
-      <div aria-hidden style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: vt.vignette }} />
+      <div
+        aria-hidden
+        style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: vt.vignette }}
+      />
       <div
         aria-hidden
         style={{

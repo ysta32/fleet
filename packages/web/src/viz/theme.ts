@@ -139,7 +139,8 @@ export function useThemeName(): ThemeName {
     const update = () => setName(resolveThemeName());
     const mo = new MutationObserver(update);
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-    const mq = typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-color-scheme: light)') : null;
+    const mq =
+      typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-color-scheme: light)') : null;
     mq?.addEventListener('change', update);
     update();
     return () => {

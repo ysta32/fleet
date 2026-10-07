@@ -39,7 +39,10 @@ export function TaskSatellites({
   const stateColors = useMemo(
     () =>
       Object.fromEntries(
-        (Object.keys(vt.task) as OrchTaskState[]).map((k) => [k, new THREE.Color(vt.task[k]).multiplyScalar(vt.taskGain[k])]),
+        (Object.keys(vt.task) as OrchTaskState[]).map((k) => [
+          k,
+          new THREE.Color(vt.task[k]).multiplyScalar(vt.taskGain[k]),
+        ]),
       ) as Record<OrchTaskState, THREE.Color>,
     [vt],
   );
@@ -130,7 +133,9 @@ export function TaskSatellites({
       const l = store.layouts.get(s.projectId);
       if (!l) continue;
       const t = l.orbitT;
-      const iu = store.reduced ? 1 : clamp((store.t - INTRO_DELAY - l.index * INTRO_STAGGER - 0.15 - s.index * 0.024) / INTRO_DUR, 0, 1);
+      const iu = store.reduced
+        ? 1
+        : clamp((store.t - INTRO_DELAY - l.index * INTRO_STAGGER - 0.15 - s.index * 0.024) / INTRO_DUR, 0, 1);
       const ie = ease(easing.land, iu);
       taskOrbitOffset(s.index, s.count, t, l.scale, off);
       s.pos.set(l.pos.x + off.x, l.pos.y + off.y, l.pos.z + off.z);
