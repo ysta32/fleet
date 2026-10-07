@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.orch/
+.env
+.env.*
+*.log
+coverage/
+.vercel/
+.DS_Store
+# privacy: never commit real transcript data or captures
+*.jsonl
+!packages/shared/fixtures/**/*.jsonl
+captures/
