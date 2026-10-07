@@ -3,7 +3,7 @@ import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { makeFixtureHome, NOW } from '../test/fixture-home.js';
-import { main, type CliIo } from './cli.js';
+import { errorText, main, type CliIo } from './cli.js';
 import type { SpendBrief, SpendSummary } from './contracts.js';
 
 let home: string;
@@ -71,6 +71,29 @@ describe('fleet-spend cli', () => {
     expect(tty.stdout).toContain('gamma');
     const json = JSON.parse((await run(['where', '--by', 'source', '--json'])).stdout) as { key: string }[];
     expect(json.map((b) => b.key).sort()).toEqual(['claude-code', 'codex', 'copilot']);
+  });
+
+  it('check exits 3 on failure and errors never print the home path', async () => {
+    const { writeFileSync, mkdirSync } = await import('node:fs');
+    mkdirSync(join(home, '.config/fleet'), { recursive: true });
+    writeFileSync(join(home, '.config/fleet/spend.json'), '{ not json');
+    const r = await run(['check']);
+    expect(r.code).toBe(3);
+    expect(r.stderr.trim().split('\n')).toHaveLength(1);
+    expect(r.stderr).not.toContain(home);
+    const other = await run(['json']);
+    expect(other.code).toBe(1);
+    expect(other.stderr).not.toContain(home);
+  });
+
+  it('errorText maps errno errors to fixed text and redacts home', () => {
+    const e = Object.assign(new Error(`EACCES: permission denied, open '${home}/.config/fleet/spend.json'`), {
+      code: 'EACCES',
+      syscall: 'open',
+    });
+    expect(errorText(e, false, home)).toBe('open failed (EACCES); rerun with --debug for details');
+    expect(errorText(new Error(`bad path ${home}/x`), false, home)).toBe('bad path ~/x');
+    expect(errorText(e, true, home)).toContain('EACCES');
   });
 
   it('rejects bad flags with a one-line error and exit 1', async () => {

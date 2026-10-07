@@ -60,7 +60,7 @@ Usage:
   fleet-spend budget                budget status
   fleet-spend budget set <usd>      set the monthly budget
   fleet-spend budget clear          remove the monthly budget
-  fleet-spend check                 exit 0 ok, 1 warning threshold reached, 2 over budget
+  fleet-spend check                 exit 0 ok, 1 warning threshold reached, 2 over budget, 3 error
   fleet-spend json                  full SpendSummary JSON
   fleet-spend brief                 compact SpendBrief JSON
   fleet-spend watch [--interval S]  re-collect every S seconds (default 60) and send budget alerts
@@ -76,6 +76,20 @@ Options:
 `;
 
 class UsageError extends Error {}
+
+/** One-line, path-free error text. Raw messages (which can carry absolute paths) only under --debug. */
+export function errorText(error: unknown, debug: boolean, home: string = homedir()): string {
+  if (error instanceof UsageError) return error.message;
+  if (debug) return error instanceof Error ? error.message : String(error);
+  const code = (error as { code?: unknown } | null)?.code;
+  const syscall = (error as { syscall?: unknown } | null)?.syscall;
+  if (typeof code === 'string' && /^E[A-Z]+$/.test(code)) {
+    return `${typeof syscall === 'string' ? `${syscall} failed` : 'file access failed'} (${code}); rerun with --debug for details`;
+  }
+  if (error instanceof SyntaxError) return 'config file is not valid JSON; rerun with --debug for details';
+  const message = (error instanceof Error ? error.message : String(error)).split('\n')[0]!;
+  return home.length > 1 ? message.split(home).join('~') : message;
+}
 
 function version(): string {
   const pkg: unknown = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
@@ -118,6 +132,7 @@ function statusLine(s: SpendSummary): string {
 
 export async function main(argv: string[], io: CliIo): Promise<number> {
   let debug = argv.includes('--debug');
+  let failCode = 1;
   const out = (text: string) => io.stdout.write(text.endsWith('\n') ? text : `${text}\n`);
   try {
     const { values, positionals } = (() => {
@@ -247,6 +262,7 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
       }
       case 'check': {
         noExtra();
+        failCode = 3;
         const { summary } = await load();
         const over = summary.alerts.some((a) => a.level === 'over');
         const warn = summary.alerts.some((a) => a.level === 'warn');
@@ -287,7 +303,9 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
                   (sent.length ? `  alerts sent: ${sent.length}` : ''),
               );
             } catch (error) {
-              io.stderr.write(`fleet-spend: watch cycle failed: ${(error as Error).message}\n`);
+              io.stderr.write(
+                `fleet-spend: watch cycle failed: ${errorText(error, debug, io.home ?? homedir())}\n`,
+              );
               if (debug && error instanceof Error && error.stack) io.stderr.write(`${error.stack}\n`);
             }
             if (stopped) break;
@@ -338,10 +356,9 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
         throw new UsageError(`unknown command: ${command} (see fleet-spend --help)`);
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    io.stderr.write(`fleet-spend: ${message}\n`);
+    io.stderr.write(`fleet-spend: ${errorText(error, debug, io.home ?? homedir())}\n`);
     if (debug && error instanceof Error && error.stack) io.stderr.write(`${error.stack}\n`);
-    return 1;
+    return error instanceof UsageError ? 1 : failCode;
   }
 }
 

@@ -154,6 +154,10 @@ export async function startServer(opts: ServeOptions): Promise<RunningServer> {
     server.once('error', onError);
     server.listen(opts.port, HOST, () => {
       server.off('error', onError);
+      // keep a handler after listen so a late socket/server error cannot crash the process
+      server.on('error', (error: NodeJS.ErrnoException) => {
+        process.stderr.write(`fleet-spend serve: server error (${error.code ?? 'unknown'})\n`);
+      });
       resolve();
     });
   });
