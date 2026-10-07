@@ -8,6 +8,7 @@ import {
   fitScaleForAspect,
   cameraFitDistance,
   cameraMaxDistance,
+  fogRange,
   layoutRadius,
   arcHeight,
   arcPoint,
@@ -221,6 +222,20 @@ describe('cameraMaxDistance', () => {
         const max = cameraMaxDistance(framed);
         expect(max).toBeGreaterThanOrEqual(fit * 1.45);
         expect(max).toBeGreaterThanOrEqual(40);
+      }
+    }
+  });
+});
+
+describe('fogRange', () => {
+  it('keeps the whole layout inside the fog far plane at the fitted pose, across aspects', () => {
+    for (const n of [1, 3, 5, 8, 12, 40]) {
+      const r = layoutRadius(n);
+      for (const aspect of [21 / 9, 16 / 9, 1, 375 / 812, 0.3]) {
+        const { near, far } = fogRange(r, aspect);
+        expect(far).toBeGreaterThan(cameraFitDistance(r * fitScaleForAspect(aspect)) + r);
+        expect(near).toBeGreaterThanOrEqual(0);
+        expect(near).toBeLessThan(far);
       }
     }
   });

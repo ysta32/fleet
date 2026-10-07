@@ -22,6 +22,7 @@ import {
   cameraMaxDistance,
   damp,
   fitScaleForAspect,
+  fogRange,
   layoutRadius,
   needsRefit,
 } from './layout';
@@ -332,6 +333,8 @@ function SceneContents({ view, selection, onSelect }: FleetSceneProps) {
   store.setSnapshot(snap);
   const stations = useMemo(() => (snap ? buildStations(snap, store) : []), [snap, store]);
   const radius = layoutRadius(store.projectCount);
+  const aspect = useThree((s) => s.size.width / Math.max(1, s.size.height));
+  const fog = fogRange(radius, aspect);
 
   useEffect(() => {
     const scratch = new THREE.Vector3();
@@ -354,7 +357,7 @@ function SceneContents({ view, selection, onSelect }: FleetSceneProps) {
     <>
       <SceneClock />
       <color attach="background" args={[vt.bg]} />
-      <fog attach="fog" args={[vt.bg, radius * 1.1, radius * 4.2]} />
+      <fog attach="fog" args={[vt.bg, fog.near, fog.far]} />
       <ambientLight intensity={vt.dark ? 0.25 : 0.9} color={vt.dark ? vt.fg : '#ffffff'} />
       <directionalLight
         position={[8, 14, 6]}

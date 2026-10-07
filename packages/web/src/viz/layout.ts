@@ -118,6 +118,16 @@ export function cameraMaxDistance(framed: number): number {
 }
 
 /**
+ * Fog near/far for a layout radius at a viewport aspect: measured from the fitted camera distance so
+ * portrait framings (camera much further out) do not fog the stations away. Landscape stays at the
+ * original ~1.1r / ~4.2r look.
+ */
+export function fogRange(radius: number, aspect: number): { near: number; far: number } {
+  const d = cameraFitDistance(radius * fitScaleForAspect(aspect));
+  return { near: Math.max(0, d - radius * 0.95), far: d + radius * 2.1 };
+}
+
+/**
  * Distance multiplier so a ring layout framed for a landscape viewport still fits portrait screens
  * (the horizontal field of view shrinks with the aspect ratio).
  */
