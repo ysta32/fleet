@@ -1,0 +1,943 @@
+{
+  "schema": "overnight.digest/v1",
+  "id": "2026-10-07",
+  "generatedAt": "2026-10-07T06:00:00.000Z",
+  "window": {
+    "since": "2026-10-06T06:00:00.000Z",
+    "until": "2026-10-07T06:00:00.000Z"
+  },
+  "owner": "acme-dev",
+  "headline": "12 pull requests merged and 23 commits pushed across 9 projects, with 19 contributions from agents. tidepool-web needs attention.",
+  "summarizer": {
+    "kind": "llm",
+    "model": "claude-sonnet-5-5"
+  },
+  "totals": {
+    "projectsActive": 9,
+    "mergedPRs": 12,
+    "commits": 23,
+    "releases": 0,
+    "ciFailures": 3,
+    "openPRsNeedingAttention": 2,
+    "issuesOpened": 2,
+    "issuesClosed": 1,
+    "deployments": 7,
+    "deploymentsFailed": 1,
+    "starsDelta": 26,
+    "agentContributions": 19
+  },
+  "projects": [
+    {
+      "id": "acme-dev/tidepool-web",
+      "name": "tidepool-web",
+      "url": "https://github.com/acme-dev/tidepool-web",
+      "description": "Customer dashboard for Tidepool",
+      "defaultBranch": "main",
+      "vercelProject": "tidepool-web",
+      "siteUrl": "https://tidepool-web.example.app",
+      "mergedPRs": [
+        {
+          "number": 977,
+          "title": "fix: resolve chart tooltips edge case",
+          "url": "https://github.com/acme-dev/tidepool-web/pull/977",
+          "author": {
+            "login": "acme-dev",
+            "isBot": false
+          },
+          "at": "2026-10-06T12:45:00.000Z",
+          "additions": 212,
+          "deletions": 9,
+          "labels": [
+            "bug"
+          ]
+        }
+      ],
+      "openPRs": [],
+      "commits": [
+        {
+          "sha": "1795139fdc0420364f0c30bd035d6deb6f5004e3",
+          "message": "resolve onboarding flow",
+          "url": "https://github.com/acme-dev/tidepool-web/commit/1795139fdc0420364f0c30bd035d6deb6f5004e3",
+          "author": {
+            "login": "acme-dev",
+            "isBot": false
+          },
+          "at": "2026-10-06T18:06:00.000Z",
+          "branch": "main"
+        },
+        {
+          "sha": "d6c3b249ac8dff14e59b29749a36e2c83e296d9b",
+          "message": "refactor chart tooltips",
+          "url": "https://github.com/acme-dev/tidepool-web/commit/d6c3b249ac8dff14e59b29749a36e2c83e296d9b",
+          "author": {
+            "login": "acme-dev",
+            "isBot": false
+          },
+          "at": "2026-10-07T04:35:00.000Z",
+          "branch": "main"
+        },
+        {
+          "sha": "c3e2bc61bdedf6e3f2b654ecf6ddd805ec6fee6b",
+          "message": "correct chart tooltips",
+          "url": "https://github.com/acme-dev/tidepool-web/commit/c3e2bc61bdedf6e3f2b654ecf6ddd805ec6fee6b",
+          "author": {
+            "login": "acme-dev",
+            "isBot": false
+          },
+          "at": "2026-10-07T05:34:00.000Z",
+          "branch": "main"
+        }
+      ],
+      "releases": [],
+      "ciFailures": [
+        {
+          "workflow": "lint",
+          "runId": 9847954850,
+          "url": "https://github.com/acme-dev/tidepool-web/actions/runs/9847954850",
+          "branch": "main",
+          "at": "2026-10-07T01:32:00.000Z",
+          "conclusion": "failure",
+          "commitMessage": "resolve onboarding flow"
+        }
+      ],
+      "issues": [
+        {
+          "number": 878,
+          "title": "chart tooltips crashes on empty input",
+          "url": "https://github.com/acme-dev/tidepool-web/issues/878",
+          "author": {
+            "login": "acme-dev",
+            "isBot": false
+          },
+          "at": "2026-10-06T10:58:00.000Z",
+          "state": "opened",
+          "labels": [
+            "triage"
+          ]
+        }
+      ],
+      "deployments": [
+        {
+          "id": "dpl_2857c5aff",
+          "project": "tidepool-web",
+          "url": "https://tidepool-web.example.app",
+          "target": "production",
+          "state": "ERROR",
+          "at": "2026-10-06T16:12:00.000Z",
+          "commitMessage": "fix: resolve chart tooltips edge case",
+          "branch": "main"
+        }
+      ],
+      "stats": {
+        "stars": 357,
+        "forks": 17,
+        "starsDelta": 1,
+        "forksDelta": 0,
+        "openIssues": 16
+      },
+      "health": "red",
+      "summary": "1 pull request merged, led by \"fix: resolve chart tooltips edge case\". The production deploy failed and needs a look.",
+      "highlights": [
+        "Merged #977: fix: resolve chart tooltips edge case",
+        "Production deploy failed",
+        "CI failing on main: lint",
+        "3 commits on main"
+      ]
+    },
+    {
+      "id": "acme-dev/orbit-docs",
+      "name": "orbit-docs",
+      "url": "https://github.com/acme-dev/orbit-docs",
+      "description": "Documentation site for Orbit",
+      "defaultBranch": "main",
+      "vercelProject": "orbit-docs",
+      "siteUrl": "https://orbit-docs.example.app",
+      "mergedPRs": [
+        {
+          "number": 1138,
+          "title": "feat: implement search index",
+          "url": "https://github.com/acme-dev/orbit-docs/pull/1138",
+          "author": {
+            "login": "claude[bot]",
+            "isBot": true
+          },
+          "at": "2026-10-06T20:23:00.000Z",
+          "additions": 386,
+          "deletions": 109,
+          "labels": [
+            "enhancement"
+          ]
+        },
+        {
+          "number": 1139,
+          "title": "feat: add search index",
+          "url": "https://github.com/acme-dev/orbit-docs/pull/1139",
+          "author": {
+            "login": "acme-dev",
+            "isBot": false
+          },
+          "at": "2026-10-06T22:14:00.000Z",
+          "additions": 284,
+          "deletions": 60,
+          "labels": [
+            "enhancement"
+          ]
+        },
+        {
+          "number": 1137,
+          "title": "fix: fix sidebar edge case",
+          "url": "https://github.com/acme-dev/orbit-docs/pull/1137",
+          "author": {
+            "login": "acme-dev",
+            "isBot": false
+          },
+          "at": "2026-10-07T04:04:00.000Z",
+          "additions": 133,
+          "deletions": 118,
+          "labels": [
+            "bug"
+          ]
+        }
+      ],
+      "openPRs": [],
+      "commits": [
+        {
+          "sha": "16119877c043bc438262972297da302868083a9f",
+          "message": "refactor quickstart",
+          "url": "https://github.com/acme-dev/orbit-docs/commit/16119877c043bc438262972297da302868083a9f",
+          "author": {
+            "login": "renovate[bot]",
+            "isBot": true
+          },
+          "at": "2026-10-06T08:36:00.000Z",
+          "branch": "main"
+        },
+        {
+          "sha": "2936633911d2fc63e6755f2c823c5582cc8e178e",
+          "message": "correct API reference",
+          "url": "https://github.com/acme-dev/orbit-docs/commit/2936633911d2fc63e6755f2c823c5582cc8e178e",
+          "author": {
+            "login": "renovate[bot]",
+            "isBot": true
+          },
+          "at": "2026-10-06T13:32:00.000Z",
+          "branch": "main"
+        },
+        {
+          "sha": "2db654fd01be4522d2c26b930014ad03e7e8d773",
+          "message": "handle API reference",
+          "url": "https://github.com/acme-dev/orbit-docs/commit/2db654fd01be4522d2c26b930014ad03e7e8d773",
+          "author": {
+            "login": "acme-dev",
+            "isBot": false
+          },
+          "at": "2026-10-06T22:51:00.000Z",
+          "branch": "main"
+        },
+        {
+          "sha": "b1ce10ade950ec351a7c4ef1ddef38c524bc7747",
+          "message": "fix sidebar",
+          "url": "https://github.com/acme-dev/orbit-docs/commit/b1ce10ade950ec351a7c4ef1ddef38c524bc7747",
+          "author": {
+            "login": "acme-dev",
+            "isBot": false
+          },
+          "at": "2026-10-07T05:39:00.000Z",
+          "branch": "main"
+        }
+      ],
+      "releases": [],
+      "ciFailures": [
+        {
+          "workflow": "build",
+          "runId": 9039649907,
+          "url": "https://github.com/acme-dev/orbit-docs/actions/runs/9039649907",
+          "branch": "feature/search-index",
+          "at": "2026-10-06T07:59:00.000Z",
+          "conclusion": "failure"
+        }
+      ],
+      "issues": [],
+      "deployments": [
+        {
+          "id": "dpl_69fb9ef22",
+          "project": "orbit-docs",
+          "url": "https://orbit-docs.example.app",
+          "target": "production",
+          "state": "READY",
+          "at": "2026-10-06T15:10:00.000Z",
+          "commitMessage": "fix: fix sidebar edge case",
+          "branch": "main"
+        },
+        {
+          "id": "dpl_5a2fc12e5",
+          "project": "orbit-docs",
+          "url": "https://orbit-docs.example.app",
+          "target": "preview",
+          "state": "READY",
+          "at": "2026-10-06T13:23:00.000Z",
+          "commitMessage": "fix: fix sidebar edge case",
+          "branch": "feature/quickstart"
+        },
+        {
+          "id": "dpl_04e40b4ef",
+          "project": "orbit-docs",
+          "url": "https://orbit-docs.example.app",
+          "target": "preview",
+          "state": "READY",
+          "at": "2026-10-06T20:25:00.000Z",
+          "commitMessage": "fix: fix sidebar edge case",
+          "branch": "feature/quickstart"
+        }
+      ],
+      "stats": {
+        "stars": 506,
+        "forks": 21,
+        "starsDelta": 2,
+        "forksDelta": 0,
+        "openIssues": 12
+      },
+      "health": "yellow",
+      "summary": "3 pull requests merged, 1 by agents, led by \"feat: implement search index\". A CI run failed on a feature branch.",
+      "highlights": [
+        "Merged #1138: feat: implement search index",
+        "Merged #1139: feat: add search index",
+        "4 commits on main"
+      ]
+    },
+    {
+      "id": "acme-dev/ember-ui",
+      "name": "ember-ui",
+      "url": "https://github.com/acme-dev/ember-ui",
+      "description": "Shared React component library",
+      "defaultBranch": "main",
+      "vercelProject": "ember-ui",
+      "siteUrl": "https://ember-ui.example.app",
+      "mergedPRs": [
+        {
+          "number": 1178,
+          "title": "chore: bump dependencies",
+          "url": "https://github.com/acme-dev/ember-ui/pull/1178",
+          "author": {
+            "login": "renovate[bot]",
+            "isBot": true
+          },
+          "at": "2026-10-06T21:20:00.000Z",
+          "additions": 418,
+          "deletions": 29,
+          "labels": [
+            "dependencies"
+          ]
+        },
+        {
+          "number": 1177,
+          "title": "chore: bump dependencies",
+          "url": "https://github.com/acme-dev/ember-ui/pull/1177",
+          "author": {
+            "login": "renovate[bot]",
+            "isBot": true
+          },
+          "at": "2026-10-07T03:50:00.000Z",
+          "additions": 23,
+          "deletions": 88,
+          "labels": [
+            "dependencies"
+          ]
+        },
+        {
+          "number": 1179,
+          "title": "chore: refresh CI cache",
+          "url": "https://github.com/acme-dev/ember-ui/pull/1179",
+          "author": {
+            "login": "renovate[bot]",
+            "isBot": true
+          },
+          "at": "2026-10-07T04:43:00.000Z",
+          "additions": 338,
+          "deletions": 23,
+          "labels": [
+            "dependencies"
+          ]
+        }
+      ],
+      "openPRs": [
+        {
+          "number": 839,
+          "title": "feat: support modal focus trap",
+          "url": "https://github.com/acme-dev/ember-ui/pull/839",
+          "author": {
+            "login": "claude[bot]",
+            "isBot": true
+          },
+          "at": "2026-10-06T09:46:00.000Z",
+          "labels": [
+            "dependencies"
+          ],
+          "draft": false,
+          "attention": [
+            "conflicts"
+          ]
+        }
+      ],
+      "commits": [
+        {
+          "sha": "cdd76ddbdc0733294d6072148b552f04593fecbe",
+          "message": "fix tokens",
+          "url": "https://github.com/acme-dev/ember-ui/commit/cdd76ddbdc0733294d6072148b552f04593fecbe",
+          "author": {
+            "login": "codex-agent[bot]",
+            "isBot": true
+          },
+          "at": "2026-10-06T13:36:00.000Z",
+          "branch": "main"
+        },
+        {
+          "sha": "cf6450e94bef5d460fee4adfa632934782c02b97",
+          "message": "refactor tooltip",
+          "url": "https://github.com/acme-dev/ember-ui/commit/cf6450e94bef5d460fee4adfa632934782c02b97",
+          "author": {
+            "login": "renovate[bot]",
+            "isBot": true
+          },
+          "at": "2026-10-06T16:42:00.000Z",
+          "branch": "main"
+        },
+        {
+          "sha": "ffaf87ccd5147c930d9def1f7d8c57493c51e572",
+          "message": "resolve date picker",
+          "url": "https://github.com/acme-dev/ember-ui/commit/ffaf87ccd5147c930d9def1f7d8c57493c51e572",
+          "author": {
+            "login": "claude[bot]",
+            "isBot": true
+          },
+          "at": "2026-10-06T18:59:00.000Z",
+          "branch": "main"
+        },
+        {
+          "sha": "f88e82390bb8f74fd559813d56a14114dc897211",
+          "message": "refactor button variants",
+          "url": "https://github.com/acme-dev/ember-ui/commit/f88e82390bb8f74fd559813d56a14114dc897211",
+          "author": {
+            "login": "codex-agent[bot]",
+            "isBot": true
+          },
+          "at": "2026-10-07T00:12:00.000Z",
+          "branch": "main"
+        },
+        {
+          "sha": "7674d1036950f60673afd785156651bc826c40e5",
+          "message": "fix tooltip",
+          "url": "https://github.com/acme-dev/ember-ui/commit/7674d1036950f60673afd785156651bc826c40e5",
+          "author": {
+            "login": "acme-dev",
+            "isBot": false
+          },
+          "at": "2026-10-07T03:23:00.000Z",
+          "branch": "main"
+        }
+      ],
+      "releases": [],
+      "ciFailures": [],
+      "issues": [],
+      "deployments": [
+        {
+          "id": "dpl_2637e508e",
+          "project": "ember-ui",
+          "url": "https://ember-ui.example.app",
+          "target": "production",
+          "state": "READY",
+          "at": "2026-10-06T14:16:00.000Z",
+          "commitMessage": "chore: bump dependencies",
+          "branch": "main"
+        }
+      ],
+      "stats": {
+        "stars": 544,
+        "forks": 22,
+        "starsDelta": 3,
+        "forksDelta": 0,
+        "openIssues": 17
+      },
+      "health": "yellow",
+      "summary": "3 pull requests merged, 3 by agents, led by \"chore: bump dependencies\". 1 open pull request waiting on attention.",
+      "highlights": [
+        "Merged #1178: chore: bump dependencies",
+        "Merged #1177: chore: bump dependencies",
+        "Needs attention: #839 (conflicts)",
+        "5 commits on main"
+      ]
+    },
+    {
+      "id": "acme-dev/harbor-infra",
+      "name": "harbor-infra",
+      "url": "https://github.com/acme-dev/harbor-infra",
+      "description": "Terraform and deployment tooling",
+      "defaultBranch": "main",
+      "mergedPRs": [],
+      "openPRs": [
+        {
+          "number": 809,
+          "title": "feat: introduce staging cluster",
+          "url": "https://github.com/acme-dev/harbor-infra/pull/809",
+          "author": {
+            "login": "claude[bot]",
+            "isBot": true
+          },
+          "at": "2026-10-06T17:49:00.000Z",
+          "labels": [
+            "enhancement"
+          ],
+          "draft": false,
+          "attention": [
+            "conflicts"
+          ]
+        }
+      ],
+      "commits": [
+        {
+          "sha": "2af68f9229fad86858a6c964bbeb0fafbe460a86",
+          "message": "refactor staging cluster",
+          "url": "https://github.com/acme-dev/harbor-infra/commit/2af68f9229fad86858a6c964bbeb0fafbe460a86",
+          "author": {
+            "login": "codex-agent[bot]",
+            "isBot": true
+          },
+          "at": "2026-10-06T18:57:00.000Z",
+          "branch": "main"
+        },
+        {
+          "sha": "43dcb09a689d69bd667eea9b567dac0ae4cf8928",
+          "message": "correct staging cluster",
+          "url": "https://github.com/acme-dev/harbor-infra/commit/43dcb09a689d69bd667eea9b567dac0ae4cf8928",
+          "author": {
+            "login": "renovate[bot]",
+            "isBot": true
+          },
+          "at": "2026-10-07T00:44:00.000Z",
+          "branch": "main"
+        },
+        {
+          "sha": "8dca11db8788621acdb0dde15e43069341535059",
+          "message": "resolve staging cluster",
+          "url": "https://github.com/acme-dev/harbor-infra/commit/8dca11db8788621acdb0dde15e43069341535059",
+          "author": {
+            "login": "codex-agent[bot]",
+            "isBot": true
+          },
+          "at": "2026-10-07T04:06:00.000Z",
+          "branch": "main"
+        }
+      ],
+      "releases": [],
+      "ciFailures": [],
+      "issues": [],
+      "deployments": [],
+      "stats": {
+        "stars": 436,
+        "forks": 19,
+        "starsDelta": 6,
+        "forksDelta": 0,
+        "openIssues": 4
+      },
+      "health": "yellow",
+      "summary": "3 commits landed directly on main. 1 open pull request waiting on attention.",
+      "highlights": [
+        "Needs attention: #809 (conflicts)",
+        "3 commits on main"
+      ]
+    },
+    {
+      "id": "acme-dev/lantern-api",
+      "name": "lantern-api",
+      "url": "https://github.com/acme-dev/lantern-api",
+      "description": "REST and event API for the Lantern platform",
+      "defaultBranch": "main",
+      "vercelProject": "lantern-api",
+      "siteUrl": "https://lantern-api.example.app",
+      "mergedPRs": [],
+      "openPRs": [],
+      "commits": [
+        {
+          "sha": "99f884240a373c085b534ff7c495bc9217bc4e63",
+          "message": "refactor auth",
+          "url": "https://github.com/acme-dev/lantern-api/commit/99f884240a373c085b534ff7c495bc9217bc4e63",
+          "author": {
+            "login": "acme-dev",
+            "isBot": false
+          },
+          "at": "2026-10-06T21:11:00.000Z",
+          "branch": "main"
+        }
+      ],
+      "releases": [],
+      "ciFailures": [
+        {
+          "workflow": "build",
+          "runId": 9272994016,
+          "url": "https://github.com/acme-dev/lantern-api/actions/runs/9272994016",
+          "branch": "feature/rate-limiter",
+          "at": "2026-10-06T15:59:00.000Z",
+          "conclusion": "failure"
+        }
+      ],
+      "issues": [],
+      "deployments": [
+        {
+          "id": "dpl_da6062fc8",
+          "project": "lantern-api",
+          "url": "https://lantern-api.example.app",
+          "target": "preview",
+          "state": "READY",
+          "at": "2026-10-07T04:10:00.000Z",
+          "commitMessage": "refactor auth",
+          "branch": "feature/webhooks"
+        }
+      ],
+      "stats": {
+        "stars": 325,
+        "forks": 16,
+        "starsDelta": 6,
+        "forksDelta": 0,
+        "openIssues": 10
+      },
+      "health": "yellow",
+      "summary": "1 commit landed directly on main. A CI run failed on a feature branch.",
+      "highlights": [
+        "1 commit on main"
+      ]
+    },
+    {
+      "id": "acme-dev/meadow-site",
+      "name": "meadow-site",
+      "url": "https://github.com/acme-dev/meadow-site",
+      "description": "Marketing site for Meadow",
+      "defaultBranch": "main",
+      "vercelProject": "meadow-site",
+      "siteUrl": "https://meadow-site.example.app",
+      "mergedPRs": [
+        {
+          "number": 1257,
+          "title": "feat: add hero section",
+          "url": "https://github.com/acme-dev/meadow-site/pull/1257",
+          "author": {
+            "login": "codex-agent[bot]",
+            "isBot": true
+          },
+          "at": "2026-10-07T05:33:00.000Z",
+          "additions": 402,
+          "deletions": 66,
+          "labels": [
+            "enhancement"
+          ]
+        }
+      ],
+      "openPRs": [],
+      "commits": [
+        {
+          "sha": "9583240806f8dbbe6ec52c032776527704e7de69",
+          "message": "refactor contact form",
+          "url": "https://github.com/acme-dev/meadow-site/commit/9583240806f8dbbe6ec52c032776527704e7de69",
+          "author": {
+            "login": "codex-agent[bot]",
+            "isBot": true
+          },
+          "at": "2026-10-06T13:18:00.000Z",
+          "branch": "main"
+        },
+        {
+          "sha": "af3531af34a25be8e924b402a8b0b7b19cfb468a",
+          "message": "correct blog feed",
+          "url": "https://github.com/acme-dev/meadow-site/commit/af3531af34a25be8e924b402a8b0b7b19cfb468a",
+          "author": {
+            "login": "acme-dev",
+            "isBot": false
+          },
+          "at": "2026-10-06T16:57:00.000Z",
+          "branch": "main"
+        },
+        {
+          "sha": "c682c34d7d942a8bca1b316afbabe46d89845a21",
+          "message": "handle sitemap",
+          "url": "https://github.com/acme-dev/meadow-site/commit/c682c34d7d942a8bca1b316afbabe46d89845a21",
+          "author": {
+            "login": "renovate[bot]",
+            "isBot": true
+          },
+          "at": "2026-10-07T03:06:00.000Z",
+          "branch": "main"
+        }
+      ],
+      "releases": [],
+      "ciFailures": [],
+      "issues": [],
+      "deployments": [
+        {
+          "id": "dpl_3f4e787a7",
+          "project": "meadow-site",
+          "url": "https://meadow-site.example.app",
+          "target": "production",
+          "state": "READY",
+          "at": "2026-10-06T16:14:00.000Z",
+          "commitMessage": "feat: add hero section",
+          "branch": "main"
+        }
+      ],
+      "stats": {
+        "stars": 616,
+        "forks": 24,
+        "starsDelta": 1,
+        "forksDelta": 0,
+        "openIssues": 8
+      },
+      "health": "green",
+      "summary": "1 pull request merged, 1 by agents, led by \"feat: add hero section\".",
+      "highlights": [
+        "Merged #1257: feat: add hero section",
+        "3 commits on main"
+      ]
+    },
+    {
+      "id": "acme-dev/compass-sdk",
+      "name": "compass-sdk",
+      "url": "https://github.com/acme-dev/compass-sdk",
+      "description": "Client SDK for the Compass API",
+      "defaultBranch": "main",
+      "mergedPRs": [
+        {
+          "number": 1298,
+          "title": "fix: resolve auth refresh edge case",
+          "url": "https://github.com/acme-dev/compass-sdk/pull/1298",
+          "author": {
+            "login": "acme-dev",
+            "isBot": false
+          },
+          "at": "2026-10-06T17:56:00.000Z",
+          "additions": 392,
+          "deletions": 64,
+          "labels": [
+            "bug"
+          ]
+        },
+        {
+          "number": 1297,
+          "title": "feat: introduce browser build",
+          "url": "https://github.com/acme-dev/compass-sdk/pull/1297",
+          "author": {
+            "login": "acme-dev",
+            "isBot": false
+          },
+          "at": "2026-10-06T18:02:00.000Z",
+          "additions": 265,
+          "deletions": 9,
+          "labels": [
+            "enhancement"
+          ]
+        },
+        {
+          "number": 1299,
+          "title": "feat: implement pagination helper",
+          "url": "https://github.com/acme-dev/compass-sdk/pull/1299",
+          "author": {
+            "login": "claude[bot]",
+            "isBot": true
+          },
+          "at": "2026-10-06T21:11:00.000Z",
+          "additions": 192,
+          "deletions": 96,
+          "labels": [
+            "enhancement"
+          ]
+        }
+      ],
+      "openPRs": [],
+      "commits": [
+        {
+          "sha": "9521c306018930effba7c62ea85ce2a5d8c0a4ff",
+          "message": "refactor typed errors",
+          "url": "https://github.com/acme-dev/compass-sdk/commit/9521c306018930effba7c62ea85ce2a5d8c0a4ff",
+          "author": {
+            "login": "codex-agent[bot]",
+            "isBot": true
+          },
+          "at": "2026-10-06T16:15:00.000Z",
+          "branch": "main"
+        }
+      ],
+      "releases": [],
+      "ciFailures": [],
+      "issues": [],
+      "deployments": [],
+      "stats": {
+        "stars": 654,
+        "forks": 25,
+        "starsDelta": 2,
+        "forksDelta": 1,
+        "openIssues": 11
+      },
+      "health": "green",
+      "summary": "3 pull requests merged, 1 by agents, led by \"fix: resolve auth refresh edge case\".",
+      "highlights": [
+        "Merged #1298: fix: resolve auth refresh edge case",
+        "Merged #1297: feat: introduce browser build",
+        "1 commit on main"
+      ]
+    },
+    {
+      "id": "acme-dev/kiln-workers",
+      "name": "kiln-workers",
+      "url": "https://github.com/acme-dev/kiln-workers",
+      "description": "Background job workers",
+      "defaultBranch": "main",
+      "mergedPRs": [],
+      "openPRs": [],
+      "commits": [
+        {
+          "sha": "95415ceedc3c55cb42836f185fdd51b2afecf793",
+          "message": "refactor retry policy",
+          "url": "https://github.com/acme-dev/kiln-workers/commit/95415ceedc3c55cb42836f185fdd51b2afecf793",
+          "author": {
+            "login": "acme-dev",
+            "isBot": false
+          },
+          "at": "2026-10-06T07:02:00.000Z",
+          "branch": "main"
+        },
+        {
+          "sha": "bd474679e326560b90950eb7901b4655ed3e8b5e",
+          "message": "refactor retry policy",
+          "url": "https://github.com/acme-dev/kiln-workers/commit/bd474679e326560b90950eb7901b4655ed3e8b5e",
+          "author": {
+            "login": "acme-dev",
+            "isBot": false
+          },
+          "at": "2026-10-06T14:36:00.000Z",
+          "branch": "main"
+        },
+        {
+          "sha": "249a0cad91b19910a8117cef401cd951f3bd946c",
+          "message": "refactor cron scheduler",
+          "url": "https://github.com/acme-dev/kiln-workers/commit/249a0cad91b19910a8117cef401cd951f3bd946c",
+          "author": {
+            "login": "acme-dev",
+            "isBot": false
+          },
+          "at": "2026-10-06T23:54:00.000Z",
+          "branch": "main"
+        }
+      ],
+      "releases": [],
+      "ciFailures": [],
+      "issues": [
+        {
+          "number": 998,
+          "title": "batch import is slow",
+          "url": "https://github.com/acme-dev/kiln-workers/issues/998",
+          "author": {
+            "login": "acme-dev",
+            "isBot": false
+          },
+          "at": "2026-10-06T07:11:00.000Z",
+          "state": "closed",
+          "labels": [
+            "resolved"
+          ]
+        }
+      ],
+      "deployments": [],
+      "stats": {
+        "stars": 582,
+        "forks": 23,
+        "starsDelta": 4,
+        "forksDelta": 0,
+        "openIssues": 17
+      },
+      "health": "green",
+      "summary": "3 commits landed directly on main.",
+      "highlights": [
+        "3 commits on main"
+      ]
+    },
+    {
+      "id": "acme-dev/sparrow-ios",
+      "name": "sparrow-ios",
+      "url": "https://github.com/acme-dev/sparrow-ios",
+      "description": "iOS app for Sparrow messaging",
+      "defaultBranch": "main",
+      "mergedPRs": [
+        {
+          "number": 1097,
+          "title": "feat: add widget",
+          "url": "https://github.com/acme-dev/sparrow-ios/pull/1097",
+          "author": {
+            "login": "claude[bot]",
+            "isBot": true
+          },
+          "at": "2026-10-06T06:07:00.000Z",
+          "additions": 90,
+          "deletions": 127,
+          "labels": [
+            "enhancement"
+          ]
+        }
+      ],
+      "openPRs": [],
+      "commits": [],
+      "releases": [],
+      "ciFailures": [],
+      "issues": [
+        {
+          "number": 938,
+          "title": "onboarding needs docs",
+          "url": "https://github.com/acme-dev/sparrow-ios/issues/938",
+          "author": {
+            "login": "acme-dev",
+            "isBot": false
+          },
+          "at": "2026-10-06T18:44:00.000Z",
+          "state": "opened",
+          "labels": [
+            "triage"
+          ]
+        }
+      ],
+      "deployments": [],
+      "stats": {
+        "stars": 468,
+        "forks": 20,
+        "starsDelta": 1,
+        "forksDelta": 0,
+        "openIssues": 13
+      },
+      "health": "green",
+      "summary": "1 pull request merged, 1 by agents, led by \"feat: add widget\".",
+      "highlights": [
+        "Merged #1097: feat: add widget"
+      ]
+    },
+    {
+      "id": "acme-dev/quill-cli",
+      "name": "quill-cli",
+      "url": "https://github.com/acme-dev/quill-cli",
+      "description": "Command line client for Quill notes",
+      "defaultBranch": "main",
+      "mergedPRs": [],
+      "openPRs": [],
+      "commits": [],
+      "releases": [],
+      "ciFailures": [],
+      "issues": [],
+      "deployments": [],
+      "stats": {
+        "stars": 393,
+        "forks": 18,
+        "starsDelta": 0,
+        "forksDelta": 0,
+        "openIssues": 17
+      },
+      "health": "quiet",
+      "summary": "quill-cli had a quiet night with no new activity.",
+      "highlights": []
+    }
+  ],
+  "warnings": []
+}
