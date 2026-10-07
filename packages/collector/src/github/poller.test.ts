@@ -127,10 +127,45 @@ describe('GithubPoller', () => {
     [[{ status: 'QUEUED' }], 'pending'],
     [[{ state: 'ERROR' }, { status: 'QUEUED' }], 'failure'],
     [[{ conclusion: 'FAILURE' }, { conclusion: 'SUCCESS' }], 'failure'],
+    [[{ conclusion: 'TIMED_OUT' }], 'failure'],
+    [[{ conclusion: 'STARTUP_FAILURE' }], 'failure'],
+    [[{ conclusion: 'ACTION_REQUIRED' }, { conclusion: 'SUCCESS' }], 'pending'],
+    [[{ conclusion: 'ACTION_REQUIRED' }, { conclusion: 'FAILURE' }], 'failure'],
   ])('rolls up checks %j as %s', async (checks, expected) => {
     const { poller, data } = fixture();
     data.prs[0].statusCheckRollup = checks;
     expect((await poller.poll(projects)).prs[0].ci).toBe(expected);
+  });
+
+  it.each(['CANCELLED', 'STALE', 'SKIPPED', 'NEUTRAL'])(
+    'ignores %s checks when rolling up CI and emitting events',
+    async (conclusion) => {
+      const { poller, data } = fixture();
+      await poller.poll(projects);
+      for (const [checks, expected] of [
+        [[{ conclusion, status: 'COMPLETED' }], 'none'],
+        [[{ conclusion }, { conclusion: 'SUCCESS' }], 'success'],
+        [[{ conclusion }, { status: 'IN_PROGRESS' }], 'pending'],
+      ] as const) {
+        data.prs[0].statusCheckRollup = [...checks];
+        const result = await poller.poll(projects);
+        expect(result.prs[0].ci).toBe(expected);
+        expect(result.events).toEqual([]);
+      }
+      data.prs[0].statusCheckRollup = [{ conclusion }, { conclusion: 'FAILURE' }];
+      const failed = await poller.poll(projects);
+      expect(failed.prs[0].ci).toBe('failure');
+      expect(failed.events).toEqual([expect.objectContaining({ kind: 'ci', severity: 'error' })]);
+    },
+  );
+
+  it('treats action required as pending without emitting a CI error', async () => {
+    const { poller, data } = fixture();
+    await poller.poll(projects);
+    data.prs[0].statusCheckRollup = [{ conclusion: 'ACTION_REQUIRED', status: 'COMPLETED' }];
+    const result = await poller.poll(projects);
+    expect(result.prs[0].ci).toBe('pending');
+    expect(result.events).toEqual([]);
   });
 
   it('emits only changed merge, CI, release and deployment events', async () => {

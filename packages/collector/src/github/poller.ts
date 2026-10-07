@@ -61,27 +61,24 @@ function number(value: unknown): number {
 function ciState(value: unknown): CiState {
   if (value == null) return 'none';
   if (!Array.isArray(value)) throw new Error('Invalid GitHub checks');
-  const states = value.map((check: unknown) => {
-    if (!check || typeof check !== 'object') throw new Error('Invalid GitHub check');
-    const item = check as Record<string, unknown>;
-    return String(item.conclusion || item.state || item.status || '').toUpperCase();
-  });
+  const states = value
+    .map((check: unknown) => {
+      if (!check || typeof check !== 'object') throw new Error('Invalid GitHub check');
+      const item = check as Record<string, unknown>;
+      return String(item.conclusion || item.state || item.status || '').toUpperCase();
+    })
+    .filter((state) => !['CANCELLED', 'STALE', 'SKIPPED', 'NEUTRAL'].includes(state));
+  if (states.some((state) => ['FAILURE', 'ERROR', 'TIMED_OUT', 'STARTUP_FAILURE'].includes(state)))
+    return 'failure';
   if (
     states.some((state) =>
-      ['FAILURE', 'ERROR', 'TIMED_OUT', 'CANCELLED', 'ACTION_REQUIRED', 'STARTUP_FAILURE', 'STALE'].includes(
+      ['PENDING', 'IN_PROGRESS', 'QUEUED', 'WAITING', 'REQUESTED', 'EXPECTED', 'ACTION_REQUIRED'].includes(
         state,
       ),
     )
   )
-    return 'failure';
-  if (
-    states.some((state) =>
-      ['PENDING', 'IN_PROGRESS', 'QUEUED', 'WAITING', 'REQUESTED', 'EXPECTED'].includes(state),
-    )
-  )
     return 'pending';
-  if (states.length && states.every((state) => ['SUCCESS', 'NEUTRAL', 'SKIPPED'].includes(state)))
-    return 'success';
+  if (states.length && states.every((state) => state === 'SUCCESS')) return 'success';
   return 'none';
 }
 
