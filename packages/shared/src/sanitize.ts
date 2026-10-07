@@ -4,6 +4,11 @@ export function truncate(s: string, n: number): string {
   return s.slice(0, Math.max(0, n));
 }
 
+function sanitizeLabel(label: unknown): string | undefined {
+  if (typeof label !== 'string' || label.length < 1 || label.length > 60) return undefined;
+  return /[^A-Za-z0-9_.:-]/.test(label) ? undefined : label;
+}
+
 function commandName(command: string): string | undefined {
   let remaining = command.trimStart();
   while (remaining) {
@@ -48,7 +53,7 @@ export function sanitizeTarget(toolName: string, input: unknown): string | undef
       break;
     case 'Agent':
     case 'Task':
-      if (typeof fields.subagent_type === 'string') target = fields.subagent_type;
+      target = sanitizeLabel(fields.subagent_type);
       break;
     case 'WebFetch':
       if (typeof fields.url === 'string') {
@@ -61,7 +66,7 @@ export function sanitizeTarget(toolName: string, input: unknown): string | undef
       }
       break;
     case 'Skill':
-      if (typeof fields.skill === 'string') target = fields.skill;
+      target = sanitizeLabel(fields.skill);
       break;
   }
   return target ? truncate(target, 60) : undefined;

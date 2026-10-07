@@ -64,13 +64,48 @@ describe('sanitizeTarget', () => {
     );
   });
 
-  it('bounds every label to 60 characters', () => {
+  describe.each([
+    ['Agent', 'subagent_type'],
+    ['Task', 'subagent_type'],
+    ['Skill', 'skill'],
+  ])('%s label validation', (tool, field) => {
+    it.each(['a', 'AZaz09_.:-', 'a'.repeat(60)])('preserves valid label %j', (label) => {
+      expect(sanitizeTarget(tool, { [field]: label })).toBe(label);
+    });
+
+    it.each([
+      '',
+      'a'.repeat(61),
+      'a'.repeat(100),
+      'synthetic label',
+      ' label',
+      'label ',
+      'label\n',
+      'label\r',
+      'label\t',
+      'label\u0000',
+      'label\u2028',
+      'label\u2029',
+      'synthetic/label',
+      'synthetic\\label',
+      'label@synthetic',
+      'label+synthetic',
+      'caf\u00e9',
+      null,
+      undefined,
+      42,
+      [],
+      {},
+    ])('rejects invalid label %j', (label) => {
+      expect(sanitizeTarget(tool, { [field]: label })).toBeUndefined();
+    });
+  });
+
+  it('truncates file, command and hostname labels to 60 characters', () => {
     const long = 'a'.repeat(100);
     for (const [tool, input] of [
       ['Read', { file_path: `/tmp/${long}` }],
       ['Bash', { command: `${long} secret` }],
-      ['Agent', { subagent_type: long }],
-      ['Skill', { skill: long }],
       ['WebFetch', { url: `https://${'a'.repeat(50)}.${'b'.repeat(50)}.test` }],
     ] as const) {
       expect(sanitizeTarget(tool, input)).toHaveLength(60);
