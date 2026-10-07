@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import type { Dirent } from 'node:fs';
 import path from 'node:path';
@@ -40,11 +41,11 @@ function clean(value: string): string {
 }
 
 function taskId(value: string): string | undefined {
-  return clean(value).match(/^(t?\d+)(?:-[\w-]+)?(?:\.md)?$/i)?.[1];
+  return clean(value).match(/^([a-z]?\d+[a-z]?)(?:-[\w-]+)?(?:\.md)?$/i)?.[1];
 }
 
 function canonical(id: string): string {
-  return id.toLowerCase().replace(/^t/, '');
+  return id.toLowerCase().replace(/^t(?=\d)/, '');
 }
 
 function parseInflight(text: string): InflightEntry[] {
@@ -89,47 +90,283 @@ function metadata(text: string, key: string): string | undefined {
   return value && value !== '-' ? value : undefined;
 }
 
-function listedIds(text: string): string[] {
+type Mark = 'landed' | 'blocked' | 'running' | 'queued' | 'none';
+
+const MARKERS: Record<string, Mark> = {
+  landed: 'landed',
+  merged: 'landed',
+  done: 'landed',
+  blocked: 'blocked',
+  inflight: 'running',
+  'in-flight': 'running',
+  running: 'running',
+  queued: 'queued',
+  next: 'none',
+  pending: 'none',
+};
+const TWO_WORD_MARKERS: Record<string, Mark> = { flight: 'running', review: 'running' };
+const UNIT =
+  /^(?:tasks?|files?|tests?|mins?|minutes?|s|secs?|seconds?|h|hrs?|hours?|ms|%|commits?|lines?|prs?|agents?|rounds?|times|days?|of)$/i;
+const ID_PATTERN = /^([a-z]?)(\d{1,3})([a-z]?)$/i;
+const RANGE_PATTERN = /^([a-z]?)(\d{1,3})-([a-z]?)(\d{1,3})$/i;
+const MAX_RANGE = 50;
+
+interface Token {
+  kind: 'space' | 'sep' | 'paren' | 'word';
+  text: string;
+}
+
+function tokenize(line: string): Token[] {
+  const tokens: Token[] = [];
+  for (const match of line.matchAll(/(\s+)|([,;+&])|\(([^()]*)\)|([^\s,;+&()]+)|([()])/g)) {
+    if (match[1] !== undefined) tokens.push({ kind: 'space', text: match[1] });
+    else if (match[2] !== undefined) tokens.push({ kind: 'sep', text: match[2] });
+    else if (match[3] !== undefined) tokens.push({ kind: 'paren', text: match[3] });
+    else tokens.push({ kind: 'word', text: match[4] ?? match[5] });
+  }
+  return tokens;
+}
+
+function normalWord(token: Token | undefined): string {
+  return token?.kind === 'word' ? token.text.toLowerCase().replace(/[:.]+$/, '') : '';
+}
+
+function nextSolid(tokens: Token[], index: number): number {
+  let cursor = index;
+  while (tokens[cursor]?.kind === 'space') cursor++;
+  return cursor;
+}
+
+/** Returns the marker state and the index just past the marker, if a marker starts at `index`. */
+function markerAt(tokens: Token[], index: number): { mark: Mark; end: number } | undefined {
+  const word = normalWord(tokens[index]);
+  if (!word) return undefined;
+  if (word in MARKERS) return { mark: MARKERS[word], end: index + 1 };
+  if (word !== 'in' || /[:.]$/.test(tokens[index].text)) return undefined;
+  const following = nextSolid(tokens, index + 1);
+  const second = normalWord(tokens[following]);
+  return second in TWO_WORD_MARKERS ? { mark: TWO_WORD_MARKERS[second], end: following + 1 } : undefined;
+}
+
+/** Parses one list item; undefined when the word is not ID-shaped, 'reject' when it looks like a count/range misuse. */
+function parseItem(word: string, following: string): string[] | 'reject' | undefined {
+  const text = word.replace(/^orch-task\//i, '').replace(/^([a-z]?\d{1,3}[a-z]?):$/i, '$1');
+  const single = text.match(ID_PATTERN);
+  if (single) {
+    if (UNIT.test(following)) return 'reject';
+    if (!single[1] && !single[3] && /^0+$/.test(single[2])) return 'reject';
+    return [text];
+  }
+  const range = text.match(RANGE_PATTERN);
+  if (!range) return undefined;
+  const [, prefix, from, otherPrefix, to] = range;
+  if (otherPrefix && otherPrefix.toLowerCase() !== prefix.toLowerCase()) return 'reject';
+  const start = Number(from);
+  const stop = Number(to);
+  if (stop <= start || stop - start > MAX_RANGE || UNIT.test(following)) return 'reject';
+  return Array.from(
+    { length: stop - start + 1 },
+    (_, offset) => `${prefix}${String(start + offset).padStart(from.length, '0')}`,
+  );
+}
+
+/**
+ * Consumes a list of task IDs. Items are separated by `,`, `+`, `&` or whitespace; an item is an ID
+ * or numeric range optionally followed by descriptive words up to the next separator. The list ends
+ * at a non-ID where an item is expected, a rejected number (time, count, version, sha), or a sentence end.
+ */
+function parseList(tokens: Token[], header: boolean): string[] {
   const ids: string[] = [];
-  for (const item of text.split(',')) {
-    let remaining = item.trim();
-    while (remaining) {
-      const match = remaining.match(/^(?:orch-task\/)?(t?\d+)(?![\w:.#-])/i);
-      if (!match) break;
-      const rest = remaining.slice(match[0].length);
-      if (/^\s+tasks?\b/i.test(rest)) break;
-      ids.push(canonical(match[1]));
-      if (!/^\s/.test(rest)) break;
-      remaining = rest.trimStart();
+  let index = nextSolid(tokens, 0);
+  if (header) {
+    let cursor = index;
+    let words = 0;
+    let found = -1;
+    while (cursor < tokens.length) {
+      const token = tokens[cursor];
+      if (token.kind === 'space') {
+        cursor++;
+        continue;
+      }
+      if (token.kind === 'word' && (token.text === ':' || /^[a-z][a-z-]*:$/i.test(token.text))) {
+        found = cursor;
+        break;
+      }
+      if (
+        words < 4 &&
+        (token.kind === 'paren' || (token.kind === 'word' && /^[a-z][a-z-]*$/i.test(token.text)))
+      ) {
+        words++;
+        cursor++;
+        continue;
+      }
+      break;
     }
+    if (found >= 0) {
+      index = found + 1;
+    } else if (tokens[index]?.kind === 'paren') {
+      ids.push(...parseList(tokenize(tokens[index].text), false));
+      index = nextSolid(tokens, index + 1);
+      if (tokens[index]?.kind === 'word' && tokens[index].text === ':') index++;
+    }
+  }
+  let mode: 'expect' | 'after' | 'describe' = 'expect';
+  for (; index < tokens.length; index++) {
+    const token = tokens[index];
+    if (token.kind === 'space') continue;
+    if (token.kind === 'sep') {
+      if (token.text === ';') break;
+      mode = 'expect';
+      continue;
+    }
+    if (token.kind === 'paren') {
+      mode = 'describe';
+      continue;
+    }
+    const sentenceEnd = /[^.]\.+$/.test(token.text) || token.text === '.';
+    const word = sentenceEnd ? token.text.replace(/\.+$/, '') : token.text;
+    if (mode !== 'describe') {
+      const item = parseItem(word, normalWord(tokens[nextSolid(tokens, index + 1)]));
+      if (Array.isArray(item)) {
+        ids.push(...item);
+        mode = 'after';
+      } else if (mode === 'expect') {
+        break;
+      } else {
+        mode = 'describe';
+      }
+    }
+    if (sentenceEnd) break;
   }
   return ids;
 }
 
-function mentions(text: string, id: string, state: 'landed' | 'blocked' | 'running'): boolean {
-  for (const clause of clean(text).split(/[;\r\n]/)) {
-    const markers = [
-      ...clause.matchAll(/\b(landed|merged|blocked|in flight|inflight|queued|running|next|pending)\b/gi),
-    ];
-    for (const [index, marker] of markers.entries()) {
-      const name = marker[1].toLowerCase();
-      if (
-        name !== state &&
-        !(state === 'landed' && name === 'merged') &&
-        !(state === 'running' && (name === 'in flight' || name === 'inflight'))
-      )
-        continue;
-      const after = clause
-        .slice(marker.index + marker[0].length, markers[index + 1]?.index)
-        .replace(/^\s*:?\s*/, '');
-      if (listedIds(after).includes(canonical(id))) return true;
-      if (index === 0) {
-        const before = clause.slice(0, marker.index).replace(/^\s*[-+]\s+/, '');
-        if (listedIds(before).includes(canonical(id))) return true;
+/** Collects text-declared states per canonical task ID from STATUS/HANDOFF text. */
+function textStates(text: string): Map<string, Set<Mark>> {
+  const states = new Map<string, Set<Mark>>();
+  const add = (ids: string[], mark: Mark): void => {
+    if (mark === 'none') return;
+    for (const id of ids) {
+      const key = canonical(id);
+      states.set(key, (states.get(key) ?? new Set<Mark>()).add(mark));
+    }
+  };
+  for (const line of clean(text).split(/\r?\n/)) {
+    const tokens = tokenize(line);
+    let clauseStart = 0;
+    for (let index = 0; index <= tokens.length; index++) {
+      const token = tokens[index];
+      if (token && !(token.kind === 'sep' && token.text === ';')) continue;
+      const clause = tokens.slice(clauseStart, index);
+      clauseStart = index + 1;
+      const markers: { mark: Mark; start: number; end: number }[] = [];
+      for (let cursor = 0; cursor < clause.length; cursor++) {
+        const marker = markerAt(clause, cursor);
+        if (!marker) continue;
+        markers.push({ mark: marker.mark, start: cursor, end: marker.end });
+        cursor = marker.end - 1;
+      }
+      for (const [position, marker] of markers.entries()) {
+        add(parseList(clause.slice(marker.end, markers[position + 1]?.start), true), marker.mark);
+        if (position > 0) continue;
+        const prefix = clause.slice(0, marker.start);
+        const first = nextSolid(prefix, 0);
+        if (prefix[first]?.kind === 'word' && /^[-*#>]+$/.test(prefix[first].text))
+          prefix.splice(0, first + 1);
+        add(parseList(prefix, false), marker.mark);
       }
     }
   }
-  return false;
+  return states;
+}
+
+const GIT_TIMEOUT_MS = 3000;
+const gitWorkCache = new Map<string, boolean>();
+
+function git(projectPath: string, args: string[]): Promise<string | undefined> {
+  const env: NodeJS.ProcessEnv = { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0' };
+  for (const name of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY'])
+    delete env[name];
+  return new Promise((resolve) => {
+    execFile(
+      'git',
+      ['-C', projectPath, ...args],
+      { env, timeout: GIT_TIMEOUT_MS, maxBuffer: 1 << 20, windowsHide: true },
+      (error, stdout) => resolve(error ? undefined : stdout.trim()),
+    );
+  });
+}
+
+async function runBranch(projectPath: string, stateText: string): Promise<string | undefined> {
+  const named = stateText.match(/\bbranch\s+(orch\/[\w./-]+)/i)?.[1].replace(/[./-]+$/, '');
+  if (named && (await git(projectPath, ['rev-parse', '--verify', '--quiet', `refs/heads/${named}^{commit}`])))
+    return `refs/heads/${named}`;
+  const head = await git(projectPath, ['symbolic-ref', '--quiet', 'HEAD']);
+  if (head?.startsWith('refs/heads/')) return head;
+  return (await git(projectPath, ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}'])) ? 'HEAD' : undefined;
+}
+
+/** True when the task branch has at least one commit beyond the commit it was created from. */
+async function hasWork(
+  projectPath: string,
+  ref: string,
+  tip: string,
+  base: string | undefined,
+): Promise<boolean> {
+  const key = `${projectPath}\0${ref}\0${tip}`;
+  const cached = gitWorkCache.get(key);
+  if (cached !== undefined) return cached;
+  const reflog = await git(projectPath, ['reflog', 'show', '--format=%H', ref, '--']);
+  const fork =
+    reflog?.split('\n').filter(Boolean).at(-1) ?? (base && /^[0-9a-f]{7,40}$/i.test(base) ? base : undefined);
+  if (!fork) return false;
+  const count = await git(projectPath, ['rev-list', '--count', `${fork}..${tip}`, '--']);
+  if (count === undefined) return false;
+  const result = Number(count) > 0;
+  if (gitWorkCache.size > 5000) gitWorkCache.clear();
+  gitWorkCache.set(key, result);
+  return result;
+}
+
+/** Maps a branch suffix (tNN, NN, D2...) to a task ID: exact canonical match first, then numeric without leading zeros. */
+function branchTask(suffix: string, ids: string[]): string | undefined {
+  const wanted = canonical(suffix);
+  const exact = ids.find((id) => canonical(id) === wanted);
+  if (exact) return exact;
+  const loose = (id: string): string => canonical(id).replace(/^([a-z]?)0+(?=\d)/, '$1');
+  const matches = ids.filter((id) => loose(id) === loose(suffix));
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+/** Read-only git signal: task branches merged into the run branch with real work on them. */
+async function gitLanded(
+  projectPath: string,
+  stateText: string,
+  ids: string[],
+  inflight: InflightEntry[],
+): Promise<Set<string>> {
+  const landed = new Set<string>();
+  if (!ids.length) return landed;
+  const run = await runBranch(projectPath, stateText);
+  if (!run) return landed;
+  const merged = await git(projectPath, [
+    'for-each-ref',
+    `--merged=${run}`,
+    '--format=%(refname)%09%(objectname)',
+    'refs/heads/orch-task/',
+  ]);
+  if (!merged) return landed;
+  await Promise.all(
+    merged.split('\n').map(async (line) => {
+      const [ref, tip] = line.split('\t');
+      if (!ref || !tip) return;
+      const id = branchTask(ref.slice('refs/heads/orch-task/'.length), ids);
+      if (!id) return;
+      const base = inflight.find((entry) => canonical(entry.task) === canonical(id))?.baseSha;
+      if (await hasWork(projectPath, ref, tip, base)) landed.add(canonical(id));
+    }),
+  );
+  return landed;
 }
 
 export async function readOrchRun(projectPath: string, projectId: string): Promise<OrchRun | undefined> {
@@ -145,15 +382,30 @@ export async function readOrchRun(projectPath: string, projectId: string): Promi
     exists(path.join(root, 'REPORT.md')),
   ]);
   const stateText = `${status}\n${handoff}`;
-  const inflight = parseInflight(inflightText).filter((entry) => !mentions(stateText, entry.task, 'landed'));
-  const tasks: OrchTask[] = [];
+  const files: { id: string; slug: string; text: string }[] = [];
   for (const file of taskFiles.sort((a, b) => a.name.localeCompare(b.name))) {
-    const match = file.name.match(/^(t?\d+)-(.+)\.md$/i);
+    const match = file.name.match(/^([a-z]?\d{1,4}[a-z]?)-(.+)\.md$/i);
     if (!file.isFile() || !match) continue;
-    const [, id, slug] = match;
-    const text = await optionalText(path.join(root, 'TASKS', file.name));
+    files.push({
+      id: match[1],
+      slug: match[2],
+      text: await optionalText(path.join(root, 'TASKS', file.name)),
+    });
+  }
+  const declared = textStates(stateText);
+  const parsedInflight = parseInflight(inflightText);
+  const merged = await gitLanded(
+    projectPath,
+    stateText,
+    files.map((file) => file.id),
+    parsedInflight,
+  );
+  const has = (id: string, mark: Mark): boolean => declared.get(canonical(id))?.has(mark) ?? false;
+  const landed = (id: string): boolean => merged.has(canonical(id)) || has(id, 'landed');
+  const inflight = parsedInflight.filter((entry) => !landed(entry.task));
+  const tasks: OrchTask[] = files.map(({ id, slug, text }) => {
     const risk = metadata(text, 'RISK')?.toLowerCase();
-    tasks.push({
+    return {
       id,
       slug,
       depends: (metadata(text, 'DEPENDS') ?? '')
@@ -162,16 +414,15 @@ export async function readOrchRun(projectPath: string, projectId: string): Promi
         .filter((value): value is string => value !== undefined),
       route: metadata(text, 'ROUTE'),
       risk: risk === 'low' || risk === 'normal' || risk === 'high' ? risk : undefined,
-      state: mentions(stateText, id, 'landed')
+      state: landed(id)
         ? 'landed'
-        : mentions(stateText, id, 'blocked')
+        : has(id, 'blocked')
           ? 'blocked'
-          : inflight.some((entry) => canonical(entry.task) === canonical(id)) ||
-              mentions(stateText, id, 'running')
+          : inflight.some((entry) => canonical(entry.task) === canonical(id)) || has(id, 'running')
             ? 'running'
             : 'queued',
-    });
-  }
+    };
+  });
   const blocked = tasks.filter((task) => task.state === 'blocked').map((task) => task.id);
   return {
     projectId,

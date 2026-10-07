@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -180,6 +181,86 @@ describe('readOrchRun', () => {
     ]);
   });
 
+  async function states(files: Record<string, string>, ids: string[]): Promise<Record<string, string[]>> {
+    await fixture({ ...files, ...Object.fromEntries(ids.map((id) => [`TASKS/${id}-synthetic.md`, ''])) });
+    const grouped: Record<string, string[]> = {};
+    for (const task of (await readOrchRun(project, 'p'))!.tasks) (grouped[task.state] ??= []).push(task.id);
+    return grouped;
+  }
+
+  const numbered = (from: number, to: number): string[] =>
+    Array.from({ length: to - from + 1 }, (_, offset) => String(from + offset).padStart(2, '0'));
+
+  it('reads a landed list after a version parenthetical and a colon', async () => {
+    const landedIds = [...numbered(1, 8), ...numbered(10, 18), '20', '21'];
+    expect(
+      await states(
+        {
+          'STATUS.md': [
+            '# STATUS run synthetic - tip abc1234 - PR #5 open (v1.1.0)',
+            `Landed (v1.1.0): ${landedIds.join(' ')} + prettier pass + eslint ignore`,
+            'In flight: 22 changelog (re-review), 23 about/terms (land after 22), 24 item states (re-review), 30 tokens (opus)',
+            'Release v1.1.0: local npm run ci rerunning; then merge PR #5',
+          ].join('\n'),
+        },
+        [...landedIds, '09', '19', '22', '23', '24', '30', '31'],
+      ),
+    ).toEqual({ landed: landedIds, queued: ['09', '19', '31'], running: ['22', '23', '24', '30'] });
+  });
+
+  it('expands ranges and plus-joined items after a worded header', async () => {
+    expect(
+      await states(
+        {
+          'HANDOFF.md': [
+            'SHIPPED: v1.1.0 (PR #3 merged, tag, GitHub release)',
+            'LANDED ON BRANCH (unreleased, = v1.2.0 content): 09-14,16-21,23-27,30 (persist wiring, tx filters, EIP-55) + 32 Ledger 2 tokens + DESIGN.md in repo.',
+            'IN FLIGHT: 28 e2e features (fix round), 33-35 polish (Opus x6, worktrees .orch/wt/t33..t35, shots).',
+            'NEXT: land 28/29 -> land 33-35 -> 40 baseline',
+          ].join('\n'),
+          'STATUS.md': 'cycle4 polish in flight (29, 36-37), 28/39 finishing 17:45',
+        },
+        numbered(1, 40),
+      ),
+    ).toEqual({
+      queued: [...numbered(1, 8), '15', '22', '31', '38', '39', '40'],
+      landed: [...numbered(9, 14), ...numbered(16, 21), ...numbered(23, 27), '30', '32'],
+      running: ['28', '29', '33', '34', '35', '36', '37'],
+    });
+  });
+
+  it('accepts suffixed and prefixed task ids without counting times or counts', async () => {
+    expect(
+      await states(
+        {
+          'STATUS.md': 'wave1: 8 tasks dispatched 17:19; 0 landed',
+          'HANDOFF.md': [
+            '# HANDOFF (orch/synthetic): EXECUTING',
+            'LANDED: t01 CI/community, t06+t06b bank validate in build, t07 keyboard answers.',
+            'IN REVIEW: t05 (perf/ErrorBoundary; rereview2), V0 visual tool',
+            'IN FLIGHT: t13 bank audit (opus) + t19t spec tests (separate wt).',
+            'QUEUED: see PLAN.md; waits on t31,t19 reviews',
+          ].join('\n'),
+        },
+        ['t01', '05', '06', 't06b', 't07', '08', '0', '13', '17', '19', '31', 'V0', 'D1'],
+      ),
+    ).toEqual({
+      queued: ['0', '08', '17', '19', '31', 'D1'],
+      running: ['05', '13', 'V0'],
+      landed: ['06', 't01', 't06b', 't07'],
+    });
+  });
+
+  it.each([
+    'v1.6.0 merged (#10, 6e30574) + tagged',
+    'landed 05-90',
+    'landed 10-08',
+    'landed 05-07 tasks',
+    'merged 10 files, 12 tests in 14 min',
+  ])('ignores non-task numbers in %s', async (status) => {
+    expect(await states({ 'STATUS.md': status }, numbered(1, 14))).toEqual({ queued: numbered(1, 14) });
+  });
+
   it('prioritizes blocked over inflight rows and running segments', async () => {
     await fixture({
       'STATUS.md': 'blocked 01,02; running 01,02,03',
@@ -258,6 +339,73 @@ describe('readOrchRun', () => {
       risk: 'normal',
       depends: [],
     });
+  });
+});
+
+describe('readOrchRun git signal', () => {
+  const sh = (...args: string[]): string =>
+    execFileSync(
+      'git',
+      ['-C', project, '-c', 'user.name=Synthetic', '-c', 'user.email=synthetic@example.invalid', ...args],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, GIT_DIR: undefined, GIT_WORK_TREE: undefined, GIT_INDEX_FILE: undefined },
+      },
+    ).trim();
+  const commit = async (name: string): Promise<void> => {
+    await writeFile(path.join(project, name), name);
+    sh('add', name);
+    sh('commit', '-q', '-m', name);
+  };
+
+  it('marks merged task branches with work as landed, read-only', async () => {
+    sh('init', '-q', '-b', 'main');
+    await commit('base.txt');
+    sh('checkout', '-q', '-b', 'orch/synthetic-run');
+    for (const branch of ['orch-task/t05', 'orch-task/6', 'orch-task/t07', 'orch-task/08'])
+      sh('branch', branch);
+    sh('checkout', '-q', 'orch-task/t05');
+    await commit('five.txt');
+    sh('checkout', '-q', 'orch-task/t07');
+    await commit('seven.txt');
+    sh('checkout', '-q', 'orch-task/08');
+    await commit('eight.txt');
+    sh('checkout', '-q', 'orch/synthetic-run');
+    sh('merge', '-q', '--ff-only', 'orch-task/08');
+    sh('merge', '-q', '--no-ff', '-m', 'land 05', 'orch-task/t05');
+    sh('checkout', '-q', 'main');
+    await fixture({
+      'HANDOFF.md': 'Branch orch/synthetic-run.\nIn flight: 05, 07',
+      'INFLIGHT.md': '05 | coder | a | wt/t05 | abc1234 | 12:00\n07 | coder | a | wt/t07 | abc1234 | 12:00',
+      ...Object.fromEntries(['05', '06', '07', '08', '09'].map((id) => [`TASKS/${id}-synthetic.md`, ''])),
+    });
+    const before = sh('for-each-ref', '--format=%(refname) %(objectname)');
+    const result = (await readOrchRun(project, 'p'))!;
+    expect(result.tasks.map(({ id, state }) => [id, state])).toEqual([
+      ['05', 'landed'],
+      ['06', 'queued'],
+      ['07', 'running'],
+      ['08', 'landed'],
+      ['09', 'queued'],
+    ]);
+    expect(result.inflight.map((entry) => entry.task)).toEqual(['07']);
+    expect(sh('for-each-ref', '--format=%(refname) %(objectname)')).toBe(before);
+    expect(sh('symbolic-ref', 'HEAD')).toBe('refs/heads/main');
+  });
+
+  it('falls back to the current branch when the text names no run branch', async () => {
+    sh('init', '-q', '-b', 'orch/current');
+    await commit('base.txt');
+    sh('checkout', '-q', '-b', 'orch-task/t02');
+    await commit('two.txt');
+    sh('checkout', '-q', 'orch/current');
+    sh('merge', '-q', '--ff-only', 'orch-task/t02');
+    await fixture({
+      'STATUS.md': 'Branch orch/missing',
+      'TASKS/02-synthetic.md': '',
+      'TASKS/03-synthetic.md': '',
+    });
+    expect((await readOrchRun(project, 'p'))!.tasks.map((task) => task.state)).toEqual(['landed', 'queued']);
   });
 });
 
