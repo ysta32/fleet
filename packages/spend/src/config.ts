@@ -36,7 +36,17 @@ function validBudget(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }
 
-export function loadConfig(path = join(homedir(), '.config/fleet/spend.json')): SpendConfig {
+/** Expand a leading `~` or `~/` (not `~user`) against `home`; other values are returned unchanged. */
+export function expandHome(value: string, home: string): string {
+  if (value === '~') return home;
+  if (value.startsWith('~/')) return join(home, value.slice(2));
+  return value;
+}
+
+export function loadConfig(
+  path = join(homedir(), '.config/fleet/spend.json'),
+  home: string = homedir(),
+): SpendConfig {
   const raw = readConfig(path);
   const config = structuredClone(DEFAULT_CONFIG);
   const budget = object(raw.budget);
@@ -61,7 +71,8 @@ export function loadConfig(path = join(homedir(), '.config/fleet/spend.json')): 
     'cursorExportPath',
     'copilotExportPath',
   ] as const) {
-    if (typeof paths[key] === 'string') config.paths[key] = paths[key];
+    const value = paths[key];
+    if (typeof value === 'string') config.paths[key] = expandHome(value, home);
   }
   const notify = object(raw.notify);
   for (const key of ['macos', 'fleet'] as const) {

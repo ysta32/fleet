@@ -99,4 +99,27 @@ describe('spend config', () => {
     expect(() => saveBudget(100, path)).toThrow();
     expect(readFileSync(path, 'utf8')).toBe('{broken');
   });
+
+  it('expands a leading ~ in paths against the given home only', () => {
+    const home = join(dir, 'home');
+    writeFileSync(
+      path,
+      JSON.stringify({
+        paths: {
+          claudeProjectsDir: '~/.claude/projects',
+          codexSessionsDir: '~',
+          cursorExportPath: '~other/usage.csv',
+          copilotExportPath: '/abs/~/usage.csv',
+          cursorDbPath: 'rel/~/db',
+        },
+      }),
+    );
+    expect(loadConfig(path, home).paths).toEqual({
+      claudeProjectsDir: join(home, '.claude/projects'),
+      codexSessionsDir: home,
+      cursorExportPath: '~other/usage.csv',
+      copilotExportPath: '/abs/~/usage.csv',
+      cursorDbPath: 'rel/~/db',
+    });
+  });
 });
