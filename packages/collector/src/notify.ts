@@ -25,6 +25,7 @@ const LABELS: Record<AlertKind, { title: string; tags: string; high: boolean }> 
   'ci.failed': { title: 'CI failed', tags: 'x', high: true },
   'session.waiting': { title: 'Session waiting', tags: 'hourglass', high: false },
   'deploy.failed': { title: 'Deploy failed', tags: 'rotating_light', high: false },
+  'spend.budget': { title: 'Spend budget', tags: 'money_with_wings', high: true },
 };
 
 const defaultExec: NotifyExec = (cmd, args) =>
