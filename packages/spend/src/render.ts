@@ -465,7 +465,15 @@ function tipLines(s: SpendSummary, o: RenderOpts, details: boolean): Line[] {
         }
         let boundary = end;
         while (boundary > 0 && chars[boundary] !== ' ') boundary--;
-        const split = boundary || Math.max(1, end);
+        if (!boundary) {
+          const marker = o.unicode ? '…' : '...';
+          while (end > 0 && used + marker.length > titleWidth) used -= cells(chars[--end]!);
+          titles.push(chars.slice(0, end).join('') + marker.slice(0, titleWidth));
+          const nextWord = chars.indexOf(' ');
+          remaining = nextWord < 0 ? '' : chars.slice(nextWord).join('').trimStart();
+          continue;
+        }
+        const split = boundary;
         titles.push(chars.slice(0, split).join(''));
         remaining = chars.slice(split).join('').trimStart();
       }

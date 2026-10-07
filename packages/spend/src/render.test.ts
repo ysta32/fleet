@@ -81,6 +81,19 @@ const renderers = [
 ];
 
 describe('terminal rendering', () => {
+  it.each([true, false])('truncates oversized tip words at 60 columns (unicode: %s)', (unicode) => {
+    const s = summary();
+    const word = 'organization/repository-with-long-name-for-code';
+    s.tips[0]!.title = `Use ${word} for edits`;
+    const marker = unicode ? '…' : '...';
+    for (const render of [renderSummary, renderTips]) {
+      const result = render(s, { ...opts, width: 60, unicode });
+      expect(result).toContain(`     ${word.slice(0, 42 - marker.length)}${marker}\n     for edits`);
+      expect(result).not.toContain('for-code');
+      for (const line of result.split('\n')) expect(Array.from(line).length).toBeLessThanOrEqual(60);
+    }
+  });
+
   it.each([40, 80, 120])('respects %i columns, with and without color', (width) => {
     const s = summary();
     s.breakdown.repo.push(bucket('a/very/long/repository/name/'.repeat(8), 1234.56));
