@@ -6,6 +6,9 @@ import {
   cameraFitPosition,
   needsRefit,
   fitScaleForAspect,
+  cameraFitDistance,
+  cameraMaxDistance,
+  layoutRadius,
   arcHeight,
   arcPoint,
   easeInOutCubic,
@@ -206,5 +209,19 @@ describe('fitScaleForAspect', () => {
     expect(fitScaleForAspect(375 / 812)).toBeGreaterThan(3);
     expect(fitScaleForAspect(1)).toBeCloseTo(1.6);
     expect(fitScaleForAspect(0)).toBe(1);
+  });
+});
+
+describe('cameraMaxDistance', () => {
+  it('never clamps the fitted (or intro) pose, even on portrait screens', () => {
+    for (const n of [1, 3, 5, 8, 12, 40]) {
+      for (const aspect of [16 / 9, 1, 375 / 812, 0.3]) {
+        const framed = layoutRadius(n) * fitScaleForAspect(aspect);
+        const fit = cameraFitDistance(framed);
+        const max = cameraMaxDistance(framed);
+        expect(max).toBeGreaterThanOrEqual(fit * 1.45);
+        expect(max).toBeGreaterThanOrEqual(40);
+      }
+    }
   });
 });

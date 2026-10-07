@@ -17,7 +17,7 @@ import { Bot } from './Bots';
 import { useVizDevView } from './devView';
 import { Effects } from './Effects';
 import { Hud } from './Hud';
-import { cameraFitPosition, damp, fitScaleForAspect, layoutRadius, needsRefit } from './layout';
+import { cameraFitPosition, cameraMaxDistance, damp, fitScaleForAspect, layoutRadius, needsRefit } from './layout';
 import { Station, type StationData } from './Station';
 import { SceneStore, SceneStoreContext, useSceneStore } from './store';
 import { TaskSatellites } from './TaskSatellites';
@@ -260,7 +260,7 @@ function CameraRig({
       enableDamping
       dampingFactor={0.08}
       minDistance={2.5}
-      maxDistance={Math.max(40, radius * 4)}
+      maxDistance={cameraMaxDistance(framed)}
       minPolarAngle={0.12}
       maxPolarAngle={Math.PI * 0.47}
       enablePan={!selection}

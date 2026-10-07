@@ -104,6 +104,19 @@ export function cameraFitPosition(r: number, out: Vec3 = vec3()): Vec3 {
   return out;
 }
 
+/** Camera-to-target distance of the fitted framing for a layout radius `r`. */
+export function cameraFitDistance(r: number): number {
+  return r * Math.hypot(0.1, 0.95, 1.85);
+}
+
+/**
+ * OrbitControls max distance for a fitted (aspect-scaled) radius: leaves room for the 1.45x intro
+ * dolly plus some user zoom-out, so the fitted pose is never clamped (which would crop portrait).
+ */
+export function cameraMaxDistance(framed: number): number {
+  return Math.max(40, cameraFitDistance(framed) * 1.45 * 1.2);
+}
+
 /**
  * Distance multiplier so a ring layout framed for a landscape viewport still fits portrait screens
  * (the horizontal field of view shrinks with the aspect ratio).

@@ -468,18 +468,30 @@ export function isVizDevRequested(
  * When `?vizdev=1` is present, returns a synthetic FleetView (and exposes `window.__vizdev.fire`
  * for screenshot choreography); otherwise null and does nothing.
  */
-export function useVizDevView(): FleetView | null {
-  const [fleet] = useState<DevFleet | null>(() => (isVizDevRequested() ? createVizDevFleet() : null));
-  useEffect(() => {
-    if (!fleet) return;
+let sharedFleet: DevFleet | null = null;
+let sharedUsers = 0;
+
+/** One synthetic fleet per page: every useVizDevView caller (harness + nested scene) shares it. */
+function sharedVizDevFleet(): DevFleet {
+  return (sharedFleet ??= createVizDevFleet());
+}
+
+function acquireSharedFleet(fleet: DevFleet): () => void {
+  if (sharedUsers++ === 0) {
     fleet.start();
     const w = window as unknown as { __vizdev?: { fire: DevFleet['fire'] } };
     w.__vizdev = { fire: fleet.fire };
-    return () => {
-      fleet.stop();
-      delete w.__vizdev;
-    };
-  }, [fleet]);
+  }
+  return () => {
+    if (--sharedUsers > 0) return;
+    fleet.stop();
+    delete (window as unknown as { __vizdev?: unknown }).__vizdev;
+  };
+}
+
+export function useVizDevView(): FleetView | null {
+  const [fleet] = useState<DevFleet | null>(() => (isVizDevRequested() ? sharedVizDevFleet() : null));
+  useEffect(() => (fleet ? acquireSharedFleet(fleet) : undefined), [fleet]);
   const sub = useCallback((cb: () => void) => (fleet ? fleet.subscribe(cb) : () => undefined), [fleet]);
   const get = useCallback(() => (fleet ? fleet.view() : null), [fleet]);
   return useSyncExternalStore(sub, get);
