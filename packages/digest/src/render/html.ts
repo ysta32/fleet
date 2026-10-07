@@ -108,7 +108,9 @@ function makeTimeCtx(d: Digest, timezone: string | undefined): TimeCtx {
   return warning ? { tz, dayKey: d.id, warning } : { tz, dayKey: d.id };
 }
 
-function parseDate(iso: string): Date | undefined {
+function parseDate(iso: unknown): Date | undefined {
+  // Only ISO-8601 timestamps: Date.parse is lenient and turns arbitrary text into bogus dates.
+  if (typeof iso !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(iso)) return undefined;
   const t = Date.parse(iso);
   return Number.isNaN(t) ? undefined : new Date(t);
 }
@@ -206,6 +208,23 @@ function signed(n: number): string {
   return n > 0 ? `+${n}` : String(n);
 }
 
+/** Digest JSON is untrusted (embedders render it): coerce numbers before any interpolation. */
+function finiteNum(x: unknown): number | undefined {
+  return typeof x === 'number' && Number.isFinite(x) ? x : undefined;
+}
+
+/** Untrusted string field → string (non-strings become ""), so string methods never throw. */
+function str(x: unknown): string {
+  return typeof x === 'string' ? x : '';
+}
+
+const HEALTHS: ReadonlyArray<ProjectActivity['health']> = ['green', 'yellow', 'red', 'quiet'];
+
+/** Untrusted health → known enum value; anything else is treated as 'quiet'. */
+function healthOf(p: ProjectActivity): ProjectActivity['health'] {
+  return HEALTHS.includes(p.health) ? p.health : 'quiet';
+}
+
 function pill(
   text: string,
   variant: 'neutral' | 'red' | 'yellow' | 'green' | 'blue' | 'agent' = 'neutral',
@@ -291,7 +310,7 @@ function needsItems(d: Digest, t: TimeCtx): NeedItem[] {
       items.push({
         level: 'red',
         at: f.at,
-        html: `${proj}${link(f.url, `${f.workflow} ${f.conclusion.replace(/_/g, ' ')} on ${f.branch}`, 'ovn-need-title')}${pill('CI', 'red')}${msg}${timeTag(f.at, t)}`,
+        html: `${proj}${link(f.url, `${f.workflow} ${str(f.conclusion).replace(/_/g, ' ')} on ${f.branch}`, 'ovn-need-title')}${pill('CI', 'red')}${msg}${timeTag(f.at, t)}`,
       });
     }
     for (const dep of p.deployments) {
@@ -306,9 +325,14 @@ function needsItems(d: Digest, t: TimeCtx): NeedItem[] {
       });
     }
     for (const pr of p.openPRs) {
-      const reasons = pr.attention ?? [];
-      const pills = reasons.map((r) => pill(ATTENTION_LABEL[r].text, ATTENTION_LABEL[r].variant)).join('');
-      const red = reasons.some((r) => ATTENTION_LABEL[r].variant === 'red');
+      const reasons = (Array.isArray(pr.attention) ? pr.attention : [])
+        .filter(
+          (r): r is keyof typeof ATTENTION_LABEL =>
+            typeof r === 'string' && Object.hasOwn(ATTENTION_LABEL, r),
+        )
+        .map((r) => ATTENTION_LABEL[r]);
+      const pills = reasons.map((r) => pill(r.text, r.variant)).join('');
+      const red = reasons.some((r) => r.variant === 'red');
       items.push({
         level: red ? 'red' : 'yellow',
         at: pr.at,
@@ -362,9 +386,11 @@ function detailGroup(title: string, count: number, rows: string): string {
 }
 
 function prRow(pr: PullRequestItem, t: TimeCtx): string {
+  const additions = finiteNum(pr.additions);
+  const deletions = finiteNum(pr.deletions);
   const size =
-    pr.additions !== undefined || pr.deletions !== undefined
-      ? `<span class="ovn-diff"><span class="ovn-add">+${pr.additions ?? 0}</span> <span class="ovn-del">−${pr.deletions ?? 0}</span></span>`
+    additions !== undefined || deletions !== undefined
+      ? `<span class="ovn-diff"><span class="ovn-add">${escapeHtml(`+${additions ?? 0}`)}</span> <span class="ovn-del">${escapeHtml(`−${deletions ?? 0}`)}</span></span>`
       : '';
   return `<li class="ovn-row">${link(pr.url, `#${pr.number} ${pr.title}`, 'ovn-row-title')}<span class="ovn-row-meta">${authorTag(pr.author)}${size}${timeTag(pr.at, t)}</span></li>`;
 }
@@ -384,11 +410,11 @@ function deployRow(dep: DeploymentItem, t: TimeCtx): string {
           ? 'neutral'
           : 'yellow';
   const label = dep.commitMessage || dep.branch || dep.id;
-  return `<li class="ovn-row">${link(dep.url, label, 'ovn-row-title')}<span class="ovn-row-meta">${pill(dep.target)}${pill(dep.state.toLowerCase(), variant)}${timeTag(dep.at, t)}</span></li>`;
+  return `<li class="ovn-row">${link(dep.url, label, 'ovn-row-title')}<span class="ovn-row-meta">${pill(str(dep.target))}${pill(str(dep.state).toLowerCase(), variant)}${timeTag(dep.at, t)}</span></li>`;
 }
 
 function ciRow(f: CIFailureItem, t: TimeCtx): string {
-  return `<li class="ovn-row">${link(f.url, `${f.workflow} on ${f.branch}`, 'ovn-row-title')}<span class="ovn-row-meta">${pill(f.conclusion.replace(/_/g, ' '), 'red')}${timeTag(f.at, t)}</span></li>`;
+  return `<li class="ovn-row">${link(f.url, `${f.workflow} on ${f.branch}`, 'ovn-row-title')}<span class="ovn-row-meta">${pill(str(f.conclusion).replace(/_/g, ' '), 'red')}${timeTag(f.at, t)}</span></li>`;
 }
 
 function issueRow(i: IssueItem, t: TimeCtx): string {
@@ -396,7 +422,7 @@ function issueRow(i: IssueItem, t: TimeCtx): string {
 }
 
 function commitRow(c: CommitItem, t: TimeCtx): string {
-  return `<li class="ovn-row"><a class="ovn-sha" href="${safeUrl(c.url)}" rel="noopener noreferrer">${escapeHtml(c.sha.slice(0, 7))}</a><span class="ovn-row-title">${escapeHtml(c.message)}</span><span class="ovn-row-meta">${authorTag(c.author)}${timeTag(c.at, t)}</span></li>`;
+  return `<li class="ovn-row"><a class="ovn-sha" href="${safeUrl(c.url)}" rel="noopener noreferrer">${escapeHtml(str(c.sha).slice(0, 7))}</a><span class="ovn-row-title">${escapeHtml(c.message)}</span><span class="ovn-row-meta">${authorTag(c.author)}${timeTag(c.at, t)}</span></li>`;
 }
 
 function projectCounts(p: ProjectActivity): string {
@@ -459,7 +485,9 @@ function renderProject(p: ProjectActivity, t: TimeCtx): string {
   const details = groups
     ? `<details class="ovn-details"><summary class="ovn-summary-toggle">${escapeHtml(counts || 'Details')}</summary><div class="ovn-details-body">${groups}</div></details>`
     : '';
-  return `<article class="ovn-card ovn-card-${p.health}"><header class="ovn-card-head"><span class="ovn-dot ovn-dot-${p.health}" role="img" aria-label="${escapeHtml(HEALTH_LABEL[p.health])}" title="${escapeHtml(HEALTH_LABEL[p.health])}"></span><h3 class="ovn-h3">${link(p.url, p.name, 'ovn-project-link')}</h3><span class="ovn-card-aside">${stars}${site}</span></header>${desc}${summary}${highlights}${details}</article>`;
+  const health = escapeHtml(healthOf(p));
+  const healthLabel = escapeHtml(HEALTH_LABEL[healthOf(p)]);
+  return `<article class="ovn-card ovn-card-${health}"><header class="ovn-card-head"><span class="ovn-dot ovn-dot-${health}" role="img" aria-label="${healthLabel}" title="${healthLabel}"></span><h3 class="ovn-h3">${link(p.url, p.name, 'ovn-project-link')}</h3><span class="ovn-card-aside">${stars}${site}</span></header>${desc}${summary}${highlights}${details}</article>`;
 }
 
 function renderQuiet(quiet: ProjectActivity[]): string {
@@ -493,8 +521,8 @@ function renderNav(nav: DigestNav | undefined): string {
 
 function renderDigestInner(d: Digest, timezone: string | undefined, nav?: DigestNav): string {
   const t = makeTimeCtx(d, timezone);
-  const active = d.projects.filter((p) => p.health !== 'quiet');
-  const quiet = d.projects.filter((p) => p.health === 'quiet');
+  const active = d.projects.filter((p) => healthOf(p) !== 'quiet');
+  const quiet = d.projects.filter((p) => healthOf(p) === 'quiet');
   const win = windowLabel(d, t);
   const hero = `<header class="ovn-hero"><p class="ovn-eyebrow">${escapeHtml(d.owner)} · ${escapeHtml(plural(d.totals.projectsActive, 'active project'))}</p><h1 class="ovn-h1">${escapeHtml(longDate(d.id))}</h1><p class="ovn-headline">${escapeHtml(d.headline)}</p>${win ? `<p class="ovn-window">${escapeHtml(win)}</p>` : ''}${statTiles(d.totals)}</header>`;
   const projects = active.length

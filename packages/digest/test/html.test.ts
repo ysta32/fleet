@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtemp, readFile, writeFile, rm, mkdir } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join } from 'node:path';
 import {
   DIGEST_CSS,
   renderDigestFragment,
@@ -325,6 +325,74 @@ describe('escaping and URL safety', () => {
   });
 });
 
+describe('untrusted digest JSON', () => {
+  const payload = '"><img src=x onerror=1>';
+  /** Replace every string and number leaf (including enums, ids, dates, totals, stats) with the payload. */
+  function poison(x: unknown): unknown {
+    if (typeof x === 'string' || typeof x === 'number') return payload;
+    if (Array.isArray(x)) return x.map(poison);
+    if (x && typeof x === 'object') {
+      return Object.fromEntries(Object.entries(x).map(([k, v]) => [k, poison(v)]));
+    }
+    return x;
+  }
+
+  it('never emits markup from any string/number field', () => {
+    const d = poison(makeDigest()) as Digest;
+    const index = poison({
+      schema: 'overnight.index/v1',
+      owner: 'o',
+      updatedAt: 'u',
+      digests: [{ id: 'i', headline: 'h', window: { since: 's', until: 'u' }, totals: totals(), path: 'p' }],
+    }) as DigestIndex;
+    const outputs = [
+      renderDigestFragment(d),
+      renderDigestFragment(d, { timezone: payload }),
+      renderDigestHtml(d, {
+        siteTitle: payload,
+        baseHref: payload,
+        timezone: payload,
+        nav: { prev: payload, next: payload, index: payload },
+      }),
+      renderIndexHtml(index, { siteTitle: payload, latest: d, timezone: payload }),
+      renderIndexHtml(index, { siteTitle: payload }),
+    ];
+    for (const html of outputs) {
+      expect(html).not.toContain('<img');
+      // The payload may survive only as inert escaped text; no real tag may carry an onerror attribute.
+      const tags = html.match(/<[a-z][^>]*>/gi) ?? [];
+      expect(tags.length).toBeGreaterThan(10);
+      for (const tag of tags) {
+        // well-formed tag: name followed only by name or name="value" attributes (no quote breakout)
+        expect(tag).toMatch(/^<[a-z][a-z0-9]*(\s+[a-z-]+(="[^"<>]*")?)*\s*>$/i);
+        const attrNames = [...tag.replace(/="[^"]*"/g, '').matchAll(/\s([a-z-]+)(?=\s|>)/gi)].map((m) =>
+          (m[1] ?? '').toLowerCase(),
+        );
+        for (const name of attrNames) expect(name.startsWith('on')).toBe(false);
+      }
+      expect(html.replace(/&quot;&gt;&lt;img src=x onerror=1&gt;/g, '')).not.toContain('onerror=');
+    }
+    // unparseable dates render no clock time rather than a bogus one
+    expect(outputs[0]).not.toMatch(/<time/);
+    // poisoned health falls back to the quiet bucket instead of leaking into class attributes
+    expect(outputs[0]).toContain('Quiet overnight');
+    expect(outputs[0]).not.toContain('ovn-card ovn-card-');
+  });
+
+  it('does not render non-numeric diff sizes or unknown attention reasons', () => {
+    const d = makeDigest();
+    const lumen = d.projects[0]!;
+    const pr = lumen.mergedPRs[0]!;
+    (pr as unknown as Record<string, unknown>).additions = '<img src=x onerror=2>';
+    (pr as unknown as Record<string, unknown>).deletions = Infinity;
+    (lumen.openPRs[0] as unknown as Record<string, unknown>).attention = ['constructor', 'stale', '<b>'];
+    const html = renderDigestFragment(d);
+    expect(html).not.toContain('ovn-diff"><span class="ovn-add">+&lt;');
+    expect(html).not.toMatch(/onerror|<b>|Infinity|undefined/);
+    expect(html).toContain('<span class="ovn-pill ovn-pill-yellow">stale</span>');
+  });
+});
+
 describe('DIGEST_CSS', () => {
   it('scopes every class selector under ovn- and defines light/dark variables on .ovn-root', () => {
     const classSelectors = [...DIGEST_CSS.matchAll(/\.([a-zA-Z_][\w-]*)/g)].map((m) => m[1]);
@@ -462,21 +530,5 @@ describe('writeArchive', () => {
     } finally {
       await rm(out, { recursive: true, force: true });
     }
-  });
-});
-
-describe('sample output', () => {
-  it.runIf(process.env.OVN_SAMPLE === '1')('writes a sample page for screenshots', async () => {
-    const target = process.env.OVN_SAMPLE_PATH ?? join(tmpdir(), 'ovn-sample.html');
-    await mkdir(dirname(target), { recursive: true });
-    await writeFile(
-      target,
-      renderDigestHtml(makeDigest(), {
-        siteTitle: 'Overnight',
-        timezone: 'America/Los_Angeles',
-        nav: { prev: '2026-10-06.html', index: '../index.html' },
-      }),
-    );
-    expect((await readFile(target, 'utf8')).length).toBeGreaterThan(1000);
   });
 });
