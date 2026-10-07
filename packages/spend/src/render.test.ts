@@ -102,23 +102,18 @@ describe('terminal rendering', () => {
       'Month to date',
       'Today',
       'Forecast',
-      'Budget',
-      'Burn',
-      '/h  warm',
-      'over $32.40',
-      '31-day',
+      'over by $32.40',
+      'Daily, Oct 1–7',
       'By repo',
       'By model',
       'Top savings',
       '$38.20/mo',
-      '✓ Claude Code',
-      '✗ Cursor (missing)',
-      'Partial:',
+      '2 of 3 sources · Cursor missing, excluded from totals',
     ])
       expect(result).toContain(label);
-    expect(result.match(/31-day\s+([▁▂▃▄▅▆▇█]+)/)?.[1]).toHaveLength(31);
+    expect(result.match(/Daily, Oct 1–7\s+([▁▂▃▄▅▆▇█]+)/)?.[1]).toHaveLength(7);
     expect(result).toContain('▼ forecast $268.00');
-    expect(result).toContain('peak $61.20 Oct 4 · avg $6.85/day');
+    expect(result).toContain('peak $61.20 Oct 4 · avg $30.34/day');
   });
 
   it('uses ASCII fallback for every renderer, including user labels', () => {
@@ -128,15 +123,15 @@ describe('terminal rendering', () => {
     for (const render of renderers)
       expect(render(s, { ...opts, unicode: false })).toMatch(/^[\x20-\x7e\n]*$/);
     const result = renderSummary(s, { ...opts, unicode: false });
-    expect(result).toContain('ok Claude Code');
-    expect(result).toContain('x Cursor (missing)');
+    expect(result).toContain('2 of 3 sources | Cursor missing');
+    expect(result).toContain('excluded from totals');
     expect(result).toContain('#');
   });
 
   it('drops bars and trends below 60 and tokens below 100 columns', () => {
     const small = renderSummary(summary(), { ...opts, width: 40 });
     expect(small).not.toMatch(/[█░▁▂▃▄▅▆▇]/);
-    expect(small).not.toContain('Last 31 days');
+    expect(small).not.toContain('Daily,');
     expect(renderWhere(summary(), 'model', 3, opts)).not.toContain('12.3M');
     expect(renderWhere(summary(), 'model', 3, { ...opts, width: 120 })).toContain('12.3M');
     const s = summary();
@@ -164,8 +159,8 @@ describe('terminal rendering', () => {
     expect(result).toContain('acme/web');
     expect(result).not.toContain('acme/api');
     const tips = renderTips(s, opts);
-    expect(tips.indexOf('Largest saving')).toBeLessThan(tips.indexOf('Use Sonnet'));
-    expect(tips).not.toContain('Batch small requests');
+    expect(tips.indexOf('$100.00/mo')).toBeLessThan(tips.indexOf('$38.20/mo'));
+    expect(tips).not.toContain('$8.80/mo');
     expect(tips).toContain('Synthetic assumption');
     expect(s).toEqual(before);
     expect(renderSummary(s, opts)).toBe(renderSummary(s, opts));
@@ -188,10 +183,10 @@ describe('terminal rendering', () => {
     s.budget.monthlyUsd = null;
     expect(renderBudget(s, opts)).toContain('fleet-spend budget set <usd>');
     s.budget.monthlyUsd = 0;
-    expect(renderBudget(s, opts)).toContain('over $212.40');
+    expect(renderBudget(s, opts)).toContain('over by $212.40');
     expect(renderBudget(s, opts)).not.toMatch(/NaN|Infinity/);
     s.budget.monthlyUsd = 250;
-    expect(renderBudget(s, opts)).toContain('forecast over');
+    expect(renderBudget(s, opts)).toContain('over budget');
     s.budget.monthlyUsd = 1000;
     expect(renderBudget(s, opts)).toContain('$787.60');
     expect(renderBudget(s, opts)).not.toContain('over budget');
@@ -251,18 +246,15 @@ describe('terminal rendering', () => {
     (unicode) => {
       const s = summary();
       const result = renderBudget(s, { ...opts, unicode });
-      const track = result.split('\n').find((line) => line.trimStart().startsWith('['))!;
+      const track = result.split('\n').find((line) => /^[█#░.┊:]+$/.test(line.trim()))!;
       expect(track).toContain(unicode ? '┊' : ':');
-      expect(track).toContain(unicode ? '▼' : 'v');
-      expect(track).toContain(unicode ? '▓' : '!');
-      expect(track.indexOf(unicode ? '▓' : '!')).toBeGreaterThan(track.indexOf(unicode ? '┊' : ':'));
+      expect(result).toContain(unicode ? '▼' : 'v');
+      expect(track.slice(track.indexOf(unicode ? '┊' : ':') + 1)).toContain(unicode ? '█' : '#');
       const colored = renderBudget(s, { ...opts, unicode, color: true });
-      expect(colored).toMatch(unicode ? /\x1b\[38;2;255;89;100m▓/ : /\x1b\[38;2;255;89;100m!/);
+      expect(colored).toMatch(unicode ? /\x1b\[38;2;255;89;100m█/ : /\x1b\[38;2;255;89;100m#/);
       s.budget.monthlyUsd = 1000;
-      const under = renderBudget(s, { ...opts, unicode });
-      expect(under.split('\n').find((line) => line.trimStart().startsWith('['))).not.toContain(
-        unicode ? '▓' : '!',
-      );
+      const under = renderBudget(s, { ...opts, unicode, color: true });
+      expect(under).not.toContain('\x1b[38;2;255;89;100m');
     },
   );
 
@@ -281,12 +273,12 @@ describe('terminal rendering', () => {
       s.monthToDateUsd = amount;
       const track = renderBudget(s, { ...opts, unicode })
         .split('\n')
-        .find((line) => line.trimStart().startsWith('['))!
+        .find((line) => /^[█#░.┊:]+$/.test(line.trim()))!
         .trim();
       expect(track).toBe(
-        `[${spent.repeat(Math.min(filled, 39))}${empty.repeat(Math.max(39 - filled, 0))}${tick}]`,
+        `${spent.repeat(Math.min(filled, 39))}${empty.repeat(Math.max(39 - filled, 0))}${tick}`,
       );
-      const cells = Array.from(track.slice(1, -1));
+      const cells = Array.from(track);
       expect(cells).toHaveLength(40);
       expect(cells.filter((cell) => cell === spent).length + (filled === 40 ? 1 : 0)).toBe(filled);
     }
@@ -296,7 +288,7 @@ describe('terminal rendering', () => {
     const s = summary();
     s.forecastMonthEndUsd = s.budget.monthlyUsd!;
     const lines = renderBudget(s, { ...opts, unicode }).split('\n');
-    const trackIndex = lines.findIndex((line) => line.trimStart().startsWith('['));
+    const trackIndex = lines.findIndex((line) => /^[█#░.┊:]+$/.test(line.trim()));
     const track = lines[trackIndex]!;
     expect(track).toContain(unicode ? '┊' : ':');
     expect(lines[trackIndex - 1]!.trim()).toBe(unicode ? '▼' : 'v');
@@ -338,7 +330,7 @@ describe('terminal rendering', () => {
     const rows = result
       .split('\n')
       .filter((line) => /^  (Month to date|Today|Forecast|Burn|Budget)\s/.test(line));
-    expect(rows).toHaveLength(5);
+    expect(rows).toHaveLength(3);
     expect(new Set(rows.map((line) => line.indexOf('.'))).size).toBe(1);
     for (const line of rows) expect(line.indexOf('.')).toBe(17 + '$12,345.67'.length - 3);
     expect(result).not.toContain('Burn $/h');
@@ -352,7 +344,11 @@ describe('terminal rendering', () => {
       .filter((line) => /^  [123]\. /.test(line));
     expect(rows).toHaveLength(3);
     expect(rows.every((line) => line.endsWith('/mo'))).toBe(true);
-    expect(new Set(rows.map((line) => line.length))).toEqual(new Set([width]));
+    const header = renderSummary(s, { ...opts, width })
+      .split('\n')
+      .find((line) => /^  By repo\s/.test(line))!;
+    const spendEnd = header.indexOf('Spend') + 'Spend'.length;
+    expect(new Set(rows.map((line) => line.indexOf('/mo')))).toEqual(new Set([spendEnd]));
     expect(new Set(rows.map((line) => line.indexOf('/mo'))).size).toBe(1);
   });
 
@@ -367,9 +363,9 @@ describe('terminal rendering', () => {
       cacheRead: 99000,
     };
     const result = renderWhere(s, 'model', 3, { ...opts, width: 120 });
-    const header = result.split('\n').find((line) => /^  Model\s/.test(line))!;
+    const header = result.split('\n').find((line) => /^  By model\s/.test(line))!;
     const row = result.split('\n').find((line) => /^  test-model\s/.test(line))!;
-    expect(header).toMatch(/Model\s+Spend\s+Share\s+Records\s+Tokens\s+Cached/);
+    expect(header).toMatch(/By model\s+Spend\s+Share\s+Records\s+Tokens\s+Cached/);
     expect(row).toMatch(/12\s+1K\s+99K$/);
     for (const [label, value] of [
       ['Spend', '$12.00'],
@@ -382,6 +378,62 @@ describe('terminal rendering', () => {
     }
     expect(renderSummary(s, { ...opts, width: 120 })).not.toContain('Cached');
     expect(renderWhere(s, 'model', 3, opts)).not.toContain('Cached');
+  });
+
+  it('merges budget status into MTD and removes the separate budget row and legend', () => {
+    const s = summary();
+    s.monthToDateUsd = 212.34;
+    const over = renderSummary(s, opts);
+    expect(over).toContain('Month to date  $212.34  of $180.00 · 118% · over by $32.34');
+    expect(over).toContain('Forecast       $268.00 · over budget');
+    expect(over).not.toMatch(/spent \$|^  Budget\s|^  Burn\s|\[█/m);
+    expect(over).toContain('budget ┊ crossed Oct 7 · ▼ forecast $268.00');
+    s.monthToDateUsd = 112;
+    s.daily = [bucket('2026-10-01', 112)];
+    const under = renderSummary(s, opts);
+    expect(under).toContain('Month to date  $112.00  of $180.00 · 62% · $68.00 left');
+    expect(under).toContain('budget ┊ $180.00 · ▼ forecast $268.00');
+    expect(renderBudget(s, opts)).toContain('/h  warm');
+  });
+
+  it('renders the compact footer for partial and healthy sources', () => {
+    const s = summary();
+    s.sources.push({ source: 'copilot', records: 1, status: 'ok' });
+    expect(renderSummary(s, opts)).toContain('3 of 4 sources · Cursor missing, excluded from totals');
+    s.sources[2]!.status = 'ok';
+    expect(renderSummary(s, opts)).toContain('4 sources · all ok');
+    expect(renderSummary(s, opts)).not.toContain('excluded from totals');
+  });
+
+  it('limits daily sparkline and crossing date to this month and averages over elapsed days', () => {
+    const s = summary();
+    s.daily = [bucket('2026-09-30', 1000), bucket('2026-10-09', 61.2), bucket('2026-10-21', 1000)];
+    const result = renderSummary(s, { ...opts, now: new Date(2026, 9, 20, 12).getTime() });
+    expect(result).toContain('Daily, Oct 1–20');
+    expect(result).toContain('········█···········');
+    expect(result).toContain('peak $61.20 Oct 9 · avg $10.62/day');
+    expect(result).toContain('budget ┊ $180.00');
+    expect(result).not.toContain('crossed');
+  });
+
+  it('uses accent only for MTD and spent fill and reserves bold for title and MTD', () => {
+    const colored = renderSummary(summary(), { ...opts, color: true });
+    const accents = [...colored.matchAll(/\x1b\[38;2;255;106;43m(?:\x1b\[1m)?([^\x1b]*)/g)].map(
+      (match) => match[1],
+    );
+    expect(accents).toEqual(['$212.40', expect.stringMatching(/^█+$/)]);
+    const bold = [...colored.matchAll(/\x1b\[1m([^\x1b]*)/g)].map((match) => match[1]);
+    expect(bold).toEqual(['Fleet Spend', '$212.40']);
+    expect(colored).toContain('\x1b[38;2;255;89;100mover by $32.40');
+    expect(colored).toContain('\x1b[38;2;245;184;61mCursor missing');
+    expect(colored).toMatch(/\x1b\[38;2;155;229;100m +\$38.20\/mo/);
+    const repo = stripAnsi(colored)
+      .split('\n')
+      .find((line) => /^  acme\/web/.test(line))!;
+    const tip = stripAnsi(colored)
+      .split('\n')
+      .find((line) => /^  1\. /.test(line))!;
+    expect(tip.indexOf('/mo')).toBe(repo.indexOf('$148.10') + '$148.10'.length);
   });
 
   it('produces stable TSV and neutralizes embedded delimiters and ANSI', () => {

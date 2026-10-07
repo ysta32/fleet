@@ -20,14 +20,14 @@ const palette = {
 } as const;
 type Tone = keyof typeof palette;
 type Span = { text: string; tone?: Tone; bold?: boolean };
-type Line = Span & { spans?: Span[]; continuation?: number };
+type Line = Span & { spans?: Span[]; continuation?: number; indent?: number };
 
 function rich(spans: Span[], continuation?: number): Line {
   return { text: spans.map((span) => span.text).join(''), spans, continuation };
 }
 
 function section(text: string): Line {
-  return { text, bold: true };
+  return { text };
 }
 
 const sources: Record<SpendSource, [string, string]> = {
@@ -88,7 +88,7 @@ function fit(text: string, size: number, o: RenderOpts): string {
 function finish(lines: Line[], o: RenderOpts): string {
   const output: string[] = [];
   for (const line of lines) {
-    const indent = line.tone === 'accent' || !line.text ? 0 : Math.min(2, width(o) - 1);
+    const indent = line.indent ?? (!line.text ? 0 : Math.min(2, width(o) - 1));
     let rest = (line.spans ?? [line]).flatMap((span) =>
       Array.from(clean(span.text, o.unicode), (char) => ({ ...span, text: char })),
     );
@@ -177,7 +177,11 @@ function kpi(s: SpendSummary, label: string, value: number, suffix = '', tone: T
   return rich(
     [
       { text: `${label.padEnd(13)}  `, tone: 'muted' },
-      { text: money(value).padStart(cashWidth(s)), bold: true },
+      {
+        text: money(value).padStart(cashWidth(s)),
+        tone: label === 'Month to date' ? 'accent' : 'fg',
+        bold: label === 'Month to date',
+      },
       { text: suffix, tone },
     ],
     17,
@@ -187,18 +191,32 @@ function kpi(s: SpendSummary, label: string, value: number, suffix = '', tone: T
 function header(s: SpendSummary, o: RenderOpts): Line {
   const month = new Date(s.monthStart).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   const dot = o.unicode ? ' · ' : ' | ';
-  return { text: `Fleet Spend${dot}${month}${dot}prices ${s.priceTableVersion}`, tone: 'accent' };
+  return {
+    ...rich([
+      { text: 'Fleet Spend', bold: true },
+      { text: `${dot}${month}${dot}prices ${s.priceTableVersion}`, tone: 'muted' },
+    ]),
+    indent: 0,
+  };
 }
 
 function sourceLines(s: SpendSummary, o: RenderOpts): Line[] {
+  const missing = s.sources.filter((source) => source.status !== 'ok');
+  const dot = o.unicode ? ' · ' : ' | ';
   return [
-    {
-      text: `Sources: ${s.sources.map((source) => `${source.status === 'ok' ? (o.unicode ? '✓' : 'ok') : o.unicode ? '✗' : 'x'} ${sources[source.source][0]}${source.status === 'ok' ? '' : ` (${source.status})`}`).join('  ')}`,
-      tone: 'muted',
-    },
-    ...(s.sources.some((source) => source.status !== 'ok')
-      ? [{ text: 'Partial: unavailable sources are excluded from totals.', tone: 'warn' as const }]
-      : []),
+    rich([
+      {
+        text: missing.length
+          ? `${s.sources.length - missing.length} of ${s.sources.length} sources${dot}`
+          : `${s.sources.length} sources${dot}all ok`,
+        tone: 'muted',
+      },
+      ...missing.flatMap((source, index): Span[] => [
+        { text: index ? ', ' : '', tone: 'muted' },
+        { text: `${sources[source.source][0]} ${source.status}`, tone: 'warn' },
+      ]),
+      { text: missing.length ? ', excluded from totals' : '', tone: 'muted' },
+    ]),
     ...(s.unpricedModels.length
       ? [
           {
@@ -232,63 +250,125 @@ function empty(s: SpendSummary, o: RenderOpts): string | undefined {
 
 function bar(ratio: number, size: number, o: RenderOpts): string {
   const units = Math.round(Math.max(0, Math.min(1, ratio)) * size * 8);
-  if (!o.unicode) return '#'.repeat(Math.round(units / 8)).padEnd(size, '.');
-  return ('█'.repeat(Math.floor(units / 8)) + (' ▏▎▍▌▋▊▉'[units % 8] ?? '').trim()).padEnd(size, '░');
+  if (!o.unicode) return '#'.repeat(Math.round(units / 8)).padEnd(size, ' ');
+  return ('█'.repeat(Math.floor(units / 8)) + (' ▏▎▍▌▋▊▉'[units % 8] ?? '').trim()).padEnd(size, ' ');
+}
+
+function monthDays(s: SpendSummary, o: RenderOpts): { key: string; costUsd: number }[] {
+  const date = new Date(s.monthStart);
+  date.setHours(0, 0, 0, 0);
+  const month = date.getMonth();
+  const days: { key: string; costUsd: number }[] = [];
+  while (date.getTime() <= o.now && date.getMonth() === month) {
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    days.push({
+      key,
+      costUsd: s.daily.filter((day) => day.key === key).reduce((sum, day) => sum + day.costUsd, 0),
+    });
+    date.setDate(date.getDate() + 1);
+  }
+  return days;
+}
+
+function dayLabel(key: string): string {
+  return new Date(`${key}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function monthLine(s: SpendSummary, o: RenderOpts): Line {
+  const line = kpi(s, 'Month to date', s.monthToDateUsd);
+  const budget = s.budget.monthlyUsd;
+  if (budget === null) return line;
+  const over = s.monthToDateUsd > budget;
+  const ratio = budget > 0 ? `${Math.round((s.monthToDateUsd / budget) * 100)}%` : over ? 'over' : '0%';
+  const dot = o.unicode ? ' · ' : ' / ';
+  return rich(
+    [
+      ...line.spans!,
+      { text: `  of ${money(budget)}${dot}${ratio}${dot}`, tone: 'muted' },
+      {
+        text: over
+          ? `over by ${money(s.monthToDateUsd - budget)}`
+          : `${money(budget - s.monthToDateUsd)} left`,
+        tone: over ? 'danger' : 'muted',
+      },
+    ],
+    17,
+  );
+}
+
+function forecastLine(s: SpendSummary, o: RenderOpts): Line {
+  return kpi(
+    s,
+    'Forecast',
+    s.forecastMonthEndUsd,
+    s.budget.monthlyUsd !== null && s.forecastMonthEndUsd > s.budget.monthlyUsd
+      ? `${o.unicode ? ' · ' : ' / '}over budget`
+      : '',
+    'warn',
+  );
 }
 
 function budgetLines(s: SpendSummary, o: RenderOpts): Line[] {
   const budget = s.budget.monthlyUsd;
-  if (budget === null)
-    return [
-      { text: 'Budget         Set a budget: fleet-spend budget set <usd>', tone: 'muted', continuation: 17 },
-    ];
-  const over = s.monthToDateUsd > budget;
-  const ratio = budget > 0 ? s.monthToDateUsd / budget : s.monthToDateUsd > 0 ? Infinity : 0;
-  const forecastOver = s.forecastMonthEndUsd > budget;
-  const tone: Tone = over ? 'danger' : ratio >= 0.75 || forecastOver ? 'warn' : 'muted';
-  const dot = o.unicode ? ' · ' : ' / ';
-  const status = [
-    Number.isFinite(ratio) ? `${Math.round(ratio * 100)}%` : 'over',
-    over ? `over ${money(s.monthToDateUsd - budget)}` : `${money(budget - s.monthToDateUsd)} left`,
-    ...(forecastOver ? ['forecast over'] : []),
-  ].join(dot);
-  const lines: Line[] = [kpi(s, 'Budget', budget, `  ${status}`, tone)];
-  if (width(o) >= 60) {
-    const size = Math.min(40, width(o) - 4);
-    const scale = Math.max(budget, s.monthToDateUsd, s.forecastMonthEndUsd, 0.01);
-    const position = (value: number): number =>
-      Math.max(0, Math.min(size - 1, Math.round((value / scale) * size)));
-    const budgetAt = position(budget);
-    const forecastAt = position(s.forecastMonthEndUsd);
-    const filled = Math.round((s.monthToDateUsd / scale) * size);
-    const spent = o.unicode ? '█' : '#';
-    const tick = o.unicode ? '┊' : ':';
-    const forecast = o.unicode ? '▼' : 'v';
-    const track: Span[] = Array.from({ length: size }, (_, i) => ({
-      text:
-        i === budgetAt
-          ? tick
-          : i === forecastAt
-            ? forecast
-            : i < filled
-              ? i > budgetAt
-                ? o.unicode
-                  ? '▓'
-                  : '!'
-                : spent
-              : o.unicode
-                ? '░'
-                : '.',
-      tone: i > budgetAt && i < filled && over ? 'danger' : 'subtle',
-    }));
-    if (forecastAt === budgetAt)
-      lines.push({ text: `${' '.repeat(forecastAt + 1)}${forecast}`, tone: 'subtle' });
-    lines.push(rich([{ text: '[' }, ...track, { text: ']' }]), {
-      text: `${spent} spent ${money(s.monthToDateUsd)}  ${tick} budget ${money(budget)}  ${forecast} forecast ${money(s.forecastMonthEndUsd)}`,
-      tone: 'subtle',
-    });
-  }
-  return lines;
+  if (budget === null) return [{ text: 'Set a budget: fleet-spend budget set <usd>', tone: 'muted' }];
+  if (width(o) < 60) return [];
+  const size = Math.min(40, width(o) - 4);
+  const scale = Math.max(budget, s.monthToDateUsd, s.forecastMonthEndUsd, 0.01);
+  const position = (value: number): number =>
+    Math.max(0, Math.min(size - 1, Math.round((value / scale) * size)));
+  const budgetAt = position(budget);
+  const forecastAt = position(s.forecastMonthEndUsd);
+  const filled = Math.max(0, Math.min(size, Math.round((s.monthToDateUsd / scale) * size)));
+  const tick = o.unicode ? '┊' : ':';
+  const forecast = o.unicode ? '▼' : 'v';
+  const track: Span[] = Array.from({ length: size }, (_, i) => ({
+    text: i === budgetAt ? tick : i < filled ? (o.unicode ? '█' : '#') : o.unicode ? '░' : '.',
+    tone:
+      i === budgetAt
+        ? 'muted'
+        : i < filled
+          ? i > budgetAt && s.monthToDateUsd > budget
+            ? 'danger'
+            : 'accent'
+          : 'subtle',
+  }));
+  let cumulative = 0;
+  const crossed = monthDays(s, o).find((day) => {
+    cumulative += day.costUsd;
+    return cumulative > budget;
+  });
+  return [
+    { text: `${' '.repeat(forecastAt)}${forecast}`, tone: 'muted' },
+    rich(track),
+    {
+      text: `budget ${tick} ${crossed ? `crossed ${dayLabel(crossed.key)}` : money(budget)}${o.unicode ? ' · ' : ' / '}${forecast} forecast ${money(s.forecastMonthEndUsd)}`,
+      tone: 'muted',
+    },
+  ];
+}
+
+function tableLabelWidth(
+  s: SpendSummary,
+  by: SpendDimension,
+  rows: SpendBucket[],
+  o: RenderOpts,
+  cached = false,
+): number {
+  const recordsWidth = Math.max(7, ...rows.map((row) => String(row.records).length));
+  const available =
+    width(o) -
+    2 -
+    cashWidth(s) -
+    9 -
+    (width(o) >= 60 ? 14 : 0) -
+    (width(o) >= 100 ? recordsWidth + 12 + (cached ? 10 : 0) : 0);
+  return Math.max(
+    1,
+    Math.min(
+      available,
+      Math.max(length(`By ${by}`), ...rows.map((row) => length(clean(row.key, o.unicode)))) + 2,
+    ),
+  );
 }
 
 function ranked(s: SpendSummary, by: SpendDimension, limit: number, o: RenderOpts, cached = false): Line[] {
@@ -299,28 +379,26 @@ function ranked(s: SpendSummary, by: SpendDimension, limit: number, o: RenderOpt
     bars = width(o) >= 60;
   const cash = cashWidth(s);
   const recordsWidth = Math.max(7, ...rows.map((row) => String(row.records).length));
-  const labelWidth = Math.max(
-    1,
-    width(o) - 2 - cash - 9 - (bars ? 14 : 0) - (wide ? recordsWidth + 12 + (cached ? 10 : 0) : 0),
-  );
+  const labelWidth = tableLabelWidth(s, by, rows, o, cached);
   const label = (value: string): string => {
     const text = fit(value, labelWidth, o);
     return text + ' '.repeat(Math.max(0, labelWidth - length(text)));
   };
-  const dimension = by[0]!.toUpperCase() + by.slice(1);
   const lines: Line[] = [
-    section(`By ${by}`),
-    {
-      text: `${label(dimension)}  ${'Spend'.padStart(cash)}  Share${bars ? '  ' + ' '.repeat(12) : ''}${wide ? `  ${'Records'.padStart(recordsWidth)}  ${'Tokens'.padStart(8)}${cached ? `  ${'Cached'.padStart(8)}` : ''}` : ''}`,
-      tone: 'muted',
-    },
+    rich([
+      { text: `${label(`By ${by}`)}  ` },
+      {
+        text: `${'Spend'.padStart(cash)}  Share${bars ? '  ' + ' '.repeat(12) : ''}${wide ? `  ${'Records'.padStart(recordsWidth)}  ${'Tokens'.padStart(8)}${cached ? `  ${'Cached'.padStart(8)}` : ''}` : ''}`,
+        tone: 'muted',
+      },
+    ]),
   ];
   for (const row of rows) {
     const share = s.monthToDateUsd > 0 ? row.costUsd / s.monthToDateUsd : 0;
     lines.push(
       rich([
         { text: `${label(row.key)}  ` },
-        { text: money(row.costUsd).padStart(cash), bold: true },
+        { text: money(row.costUsd).padStart(cash) },
         { text: `  ${(share * 100).toFixed(0).padStart(4)}%`, tone: 'muted' },
         {
           text: `${bars ? `  ${bar(share, 12, o)}` : ''}${wide ? `  ${String(row.records).padStart(recordsWidth)}  ${tokens(row).padStart(8)}${cached ? `  ${tokenCount(row.tokens.cacheRead).padStart(8)}` : ''}` : ''}`,
@@ -335,18 +413,20 @@ function ranked(s: SpendSummary, by: SpendDimension, limit: number, o: RenderOpt
 
 function tipLines(s: SpendSummary, o: RenderOpts, details: boolean): Line[] {
   const tips = [...s.tips].sort((a, b) => b.estMonthlySavingsUsd - a.estMonthlySavingsUsd).slice(0, 3);
-  const savingWidth = Math.max(0, ...tips.map((tip) => `${money(tip.estMonthlySavingsUsd)}/mo`.length));
-  const titleWidth = Math.max(1, width(o) - 2 - 3 - 2 - savingWidth);
+  const rows = [...s.breakdown.repo].sort((a, b) => b.costUsd - a.costUsd).slice(0, 3);
+  const spendEnd = 2 + tableLabelWidth(s, 'repo', rows, o) + 2 + cashWidth(s);
+  const savingWidth = Math.max(cashWidth(s), ...tips.map((tip) => money(tip.estMonthlySavingsUsd).length));
+  const titleWidth = Math.max(1, spendEnd - 2 - 3 - 2 - savingWidth);
   return [
     section('Top savings'),
     ...tips.flatMap((tip, index) => {
-      const saving = `${money(tip.estMonthlySavingsUsd)}/mo`;
+      const saving = money(tip.estMonthlySavingsUsd);
       const title = fit(tip.title, titleWidth, o);
       const lines: Line[] = [
         rich([
           { text: `${index + 1}. `, tone: 'subtle' },
           { text: title + ' '.repeat(Math.max(0, titleWidth - length(title))) },
-          { text: `  ${saving.padStart(savingWidth)}`, bold: true },
+          { text: `  ${saving.padStart(savingWidth)}/mo`, tone: 'success' },
         ]),
       ];
       if (details) lines.push({ text: `  ${tip.detail}`, tone: 'muted' });
@@ -359,44 +439,32 @@ function tipLines(s: SpendSummary, o: RenderOpts, details: boolean): Line[] {
 export function renderSummary(s: SpendSummary, o: RenderOpts): string {
   const firstRun = empty(s, o);
   if (firstRun !== undefined) return firstRun;
-  const tint = burnTint(s.burnUsdPerHour);
   const lines: Line[] = [
     header(s, o),
     { text: '' },
-    kpi(s, 'Month to date', s.monthToDateUsd),
+    monthLine(s, o),
     kpi(s, 'Today', s.todayUsd),
-    kpi(s, 'Forecast', s.forecastMonthEndUsd),
-    kpi(
-      s,
-      'Burn',
-      s.burnUsdPerHour,
-      `/h  ${tint}`,
-      tint === 'hot' ? 'danger' : tint === 'warm' ? 'warn' : tint === 'cool' ? 'info' : 'subtle',
-    ),
+    forecastLine(s, o),
     ...budgetLines(s, o),
   ];
   if (width(o) >= 60) {
-    const values = Array.from({ length: 31 }, (_, i) => {
-      const date = new Date(o.now);
-      date.setDate(date.getDate() - 30 + i);
-      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-      return s.daily.find((day) => day.key === key)?.costUsd ?? 0;
-    });
-    const peakValue = Math.max(...values);
+    const days = monthDays(s, o);
+    const values = days.map((day) => day.costUsd);
+    const peakValue = Math.max(0, ...values);
     const peak = Math.max(peakValue, 0.01);
-    const peakDate = new Date(o.now);
-    peakDate.setDate(peakDate.getDate() - 30 + values.indexOf(peakValue));
-    const dateLabel = peakDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const dateLabel = days.length ? dayLabel(days[values.indexOf(peakValue)]?.key ?? days[0]!.key) : '';
     const glyphs = o.unicode ? '▁▂▃▄▅▆▇█' : '_.-=+*#%';
     lines.push(
       { text: '' },
-      section('31-day'),
+      section(
+        `Daily, ${new Date(s.monthStart).toLocaleDateString('en-US', { month: 'short' })} 1${o.unicode ? '–' : '-'}${days.length}`,
+      ),
       {
-        text: `${values.map((value) => glyphs[Math.max(0, Math.min(7, Math.round((value / peak) * 7)))]).join('')}`,
-        tone: 'subtle',
+        text: `${values.map((value) => (value === 0 ? (o.unicode ? '·' : '.') : glyphs[Math.max(0, Math.min(7, Math.round((value / peak) * 7)))])).join('')}`,
+        tone: 'muted',
       },
       {
-        text: `peak ${money(peakValue)} ${dateLabel}${o.unicode ? ' · ' : ' / '}avg ${money(values.reduce((sum, value) => sum + value, 0) / 31)}/day`,
+        text: `peak ${money(peakValue)} ${dateLabel}${o.unicode ? ' · ' : ' / '}avg ${money(s.monthToDateUsd / Math.max(1, days.length))}/day`,
         tone: 'muted',
       },
     );
@@ -442,12 +510,20 @@ export function renderTips(s: SpendSummary, o: RenderOpts): string {
 export function renderBudget(s: SpendSummary, o: RenderOpts): string {
   const firstRun = empty(s, o);
   if (firstRun !== undefined) return firstRun;
+  const tint = burnTint(s.burnUsdPerHour);
   return finish(
     [
       header(s, o),
       { text: '' },
-      kpi(s, 'Month to date', s.monthToDateUsd),
-      kpi(s, 'Forecast', s.forecastMonthEndUsd),
+      monthLine(s, o),
+      forecastLine(s, o),
+      kpi(
+        s,
+        'Burn',
+        s.burnUsdPerHour,
+        `/h  ${tint}`,
+        tint === 'hot' ? 'danger' : tint === 'warm' ? 'warn' : 'muted',
+      ),
       ...budgetLines(s, o),
     ],
     o,
