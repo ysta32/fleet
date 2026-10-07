@@ -94,12 +94,21 @@ interface FakeOpts {
   repos: RepoSpec[];
   listHeaders?: Record<string, string>;
   detailStatus?: number;
+  detailBody?: unknown;
   detailErrorFor?: string;
   runsStatus?: (repo: string) => number;
+  runsBody?: unknown;
 }
 
 function fakeGitHub(opts: FakeOpts) {
-  const calls = { graphql: 0, list: 0, detail: 0, runs: [] as string[], other: [] as string[] };
+  const calls = {
+    graphql: 0,
+    list: 0,
+    detail: 0,
+    light: [] as string[],
+    runs: [] as string[],
+    other: [] as string[],
+  };
   const authHeaders: string[] = [];
   const fetch = vi.fn<FetchLike>(async (url, init) => {
     authHeaders.push(init?.headers?.Authorization ?? '');
@@ -128,7 +137,7 @@ function fakeGitHub(opts: FakeOpts) {
       }
       if (query.includes('OvernightDetail')) {
         calls.detail++;
-        if (opts.detailStatus) return resp({ message: 'nope' }, opts.detailStatus);
+        if (opts.detailStatus) return resp(opts.detailBody ?? { message: 'nope' }, opts.detailStatus);
         const data: Record<string, unknown> = {};
         const errors: unknown[] = [];
         for (let i = 0; variables[`n${i}`] !== undefined; i++) {
@@ -136,8 +145,20 @@ function fakeGitHub(opts: FakeOpts) {
           if (name === opts.detailErrorFor) {
             data[`r${i}`] = null;
             errors.push({ message: 'Resource not accessible', path: [`r${i}`] });
+            continue;
+          }
+          const full =
+            name === 'alpha'
+              ? (DETAIL as Record<string, unknown>)
+              : { merged: { nodes: [] }, open: { nodes: [] } };
+          if (query.includes(`r${i}: repository(owner: $o${i}, name: $n${i}) { ...OvernightRepoLight }`)) {
+            calls.light.push(name ?? '');
+            data[`r${i}`] = { releases: full.releases, issues: full.issues };
           } else {
-            data[`r${i}`] = name === 'alpha' ? DETAIL : { merged: { nodes: [] }, open: { nodes: [] } };
+            expect(query).toContain(
+              `r${i}: repository(owner: $o${i}, name: $n${i}) { ...OvernightRepoDetail }`,
+            );
+            data[`r${i}`] = full;
           }
         }
         return resp(errors.length ? { data, errors } : { data });
@@ -148,9 +169,9 @@ function fakeGitHub(opts: FakeOpts) {
     if (m) {
       const repo = m[1] ?? '';
       calls.runs.push(repo);
-      expect(decodeURIComponent(m[2] ?? '')).toContain(`created=>=${WINDOW.since}`);
+      expect(decodeURIComponent(m[2] ?? '')).toContain(`created=${WINDOW.since}..${WINDOW.until}`);
       const status = opts.runsStatus?.(repo) ?? 200;
-      if (status !== 200) return resp({ message: 'err' }, status);
+      if (status !== 200) return resp(opts.runsBody ?? { message: 'err' }, status);
       return resp(repo === 'alpha' ? RUNS : { total_count: 0, workflow_runs: [] });
     }
     calls.other.push(url);
@@ -266,7 +287,11 @@ describe('collectGitHub', () => {
     expect(p.ciFailures.map((c) => [c.runId, c.conclusion])).toEqual([
       [9001, 'failure'],
       [9004, 'cancelled'],
+      [9005, 'timed_out'],
     ]);
+    // timestamp is created_at (the field the window filter uses), never a later updated_at
+    expect(p.ciFailures.find((c) => c.runId === 9005)?.at).toBe('2026-10-07T05:50:00Z');
+    expect(p.ciFailures.every((c) => c.at >= WINDOW.since && c.at <= WINDOW.until)).toBe(true);
     expect(p.ciFailures[0]?.commitMessage).toBe('Add login flow');
   });
 
@@ -280,7 +305,9 @@ describe('collectGitHub', () => {
     const res = await collectGitHub(ctx(fetch));
     expect(res.projects).toHaveLength(12);
     expect(calls.list).toBe(1);
+    // 8 full (PR) repos + 4 light (releases/issues only) repos fit one detail query
     expect(calls.detail).toBe(1);
+    expect(calls.light.sort()).toEqual(['r10', 'r11', 'r8', 'r9']);
     expect(calls.graphql).toBeLessThanOrEqual(4);
     expect(calls.runs.sort()).toEqual(['r0', 'r1', 'r2', 'r3', 'r4', 'r5']);
     expect(calls.other).toEqual([]);
@@ -336,13 +363,76 @@ describe('collectGitHub', () => {
     expect(res.warnings.some((w) => /rate limit/i.test(w))).toBe(true);
   });
 
-  it('stops on 403 from the detail query without making REST calls', async () => {
-    const { fetch, calls } = fakeGitHub({ repos: [{ name: 'alpha', pushedAt: RECENT }], detailStatus: 403 });
+  it('stops on a secondary-rate-limit 403 from the detail query without making REST calls', async () => {
+    const { fetch, calls } = fakeGitHub({
+      repos: [{ name: 'alpha', pushedAt: RECENT }],
+      detailStatus: 403,
+      detailBody: { message: 'You have exceeded a secondary rate limit. Please wait a few minutes.' },
+    });
     const res = await collectGitHub(ctx(fetch));
     expect(calls.detail).toBe(1);
     expect(calls.runs).toEqual([]);
     expect(res.projects).toHaveLength(1);
-    expect(res.warnings.some((w) => w.includes('403'))).toBe(true);
+    expect(res.warnings.some((w) => /rate limit hit \(HTTP 403\)/.test(w))).toBe(true);
+  });
+
+  it('continues past a permission-denied 403 on the detail query (per-repo warnings)', async () => {
+    const { fetch, calls } = fakeGitHub({
+      repos: [
+        { name: 'a', pushedAt: RECENT },
+        { name: 'b', pushedAt: RECENT },
+      ],
+      detailStatus: 403,
+      detailBody: { message: 'Resource not accessible by integration' },
+    });
+    const res = await collectGitHub(ctx(fetch));
+    expect(calls.runs.sort()).toEqual(['a', 'b']);
+    expect(res.projects).toHaveLength(2);
+    expect(res.warnings.filter((w) => w.includes('details unavailable')).length).toBe(2);
+    expect(res.warnings.some((w) => /rate limit/i.test(w))).toBe(false);
+  });
+
+  it('continues past a permission-denied 403 on REST runs', async () => {
+    const { fetch, calls } = fakeGitHub({
+      repos: [
+        { name: 'a', pushedAt: RECENT },
+        { name: 'b', pushedAt: RECENT },
+      ],
+      runsStatus: (r) => (r === 'a' ? 403 : 200),
+      runsBody: { message: 'Resource not accessible by personal access token' },
+    });
+    const res = await collectGitHub(ctx(fetch));
+    expect(calls.runs).toEqual(['a', 'b']);
+    expect(res.warnings).toEqual([
+      'acme/a: workflow runs unavailable (HTTP 403: Resource not accessible by personal access token)',
+    ]);
+  });
+
+  it('stops on a 403 with x-ratelimit-remaining=0 (primary rate limit)', async () => {
+    const fetch = vi.fn<FetchLike>(async () =>
+      resp({ message: 'API rate limit exceeded' }, 403, { 'x-ratelimit-remaining': '0' }),
+    );
+    const res = await collectGitHub(ctx(fetch));
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(res.projects).toEqual([]);
+    expect(res.warnings.some((w) => /rate limit hit/.test(w))).toBe(true);
+  });
+
+  it('collects issues and releases for quiet repos without PR queries', async () => {
+    const { fetch, calls } = fakeGitHub({ repos: [{ name: 'alpha', pushedAt: OLD, openPRs: 0 }] });
+    const res = await collectGitHub(ctx(fetch));
+    const p = res.projects[0];
+    expect(calls.light).toEqual(['alpha']);
+    expect(p?.mergedPRs).toEqual([]);
+    expect(p?.openPRs).toEqual([]);
+    expect(p?.releases.map((r) => r.tag)).toEqual(['v1.2.0']);
+    expect(p?.issues.map((i) => [i.number, i.state])).toEqual([
+      [7, 'opened'],
+      [7, 'closed'],
+      [3, 'closed'],
+    ]);
+    // a release in the window counts as activity, so CI runs are checked too
+    expect(calls.runs).toEqual(['alpha']);
   });
 
   it('stops on 429 from REST runs', async () => {

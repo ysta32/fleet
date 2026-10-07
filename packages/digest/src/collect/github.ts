@@ -11,6 +11,7 @@ import type {
   ReleaseItem,
   TrafficStats,
 } from '../types.js';
+import { matchRepo } from '../config.js';
 
 const GRAPHQL_URL = 'https://api.github.com/graphql';
 const REST_BASE = 'https://api.github.com';
@@ -152,7 +153,6 @@ interface RestRun {
   head_branch?: string | null;
   conclusion?: string | null;
   created_at: string;
-  updated_at?: string | null;
   head_commit?: { message?: string | null } | null;
 }
 
@@ -189,7 +189,19 @@ const LIST_QUERY = `query OvernightRepos($owner: String!, $since: GitTimestamp!,
 const PR_COMMON =
   'number title url isDraft additions deletions author { login __typename } labels(first: 10) { nodes { name } }';
 
+/** Cheap per-repo fields fetched for every listed repo (activity that does not bump pushedAt). */
+const REPO_LIGHT_FRAGMENT = `fragment OvernightRepoLight on Repository {
+  releases(first: 10, orderBy: {field: CREATED_AT, direction: DESC}) {
+    nodes { tagName name url createdAt publishedAt isPrerelease isDraft description }
+  }
+  issues(first: 50, filterBy: {since: $since}, orderBy: {field: UPDATED_AT, direction: DESC}) {
+    nodes { number title url createdAt closedAt author { login __typename } labels(first: 10) { nodes { name } } }
+  }
+}`;
+
+/** Full per-repo fields: light fields plus PR queries (only for repos with pushes or open PRs). */
 const REPO_DETAIL_FRAGMENT = `fragment OvernightRepoDetail on Repository {
+  ...OvernightRepoLight
   merged: pullRequests(states: MERGED, first: 30, orderBy: {field: UPDATED_AT, direction: DESC}) {
     nodes { ${PR_COMMON} mergedAt }
   }
@@ -200,42 +212,45 @@ const REPO_DETAIL_FRAGMENT = `fragment OvernightRepoDetail on Repository {
       commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
     }
   }
-  releases(first: 10, orderBy: {field: CREATED_AT, direction: DESC}) {
-    nodes { tagName name url createdAt publishedAt isPrerelease isDraft description }
-  }
-  issues(first: 50, filterBy: {since: $since}, orderBy: {field: UPDATED_AT, direction: DESC}) {
-    nodes { number title url createdAt closedAt author { login __typename } labels(first: 10) { nodes { name } } }
-  }
 }`;
 
-function buildDetailQuery(count: number): string {
+/** `full[i]` selects the PR-inclusive fragment for alias r<i>; otherwise only releases + issues. */
+function buildDetailQuery(full: boolean[]): string {
   const vars: string[] = ['$since: DateTime!'];
   const fields: string[] = [];
-  for (let i = 0; i < count; i++) {
+  full.forEach((isFull, i) => {
     vars.push(`$o${i}: String!`, `$n${i}: String!`);
-    fields.push(`  r${i}: repository(owner: $o${i}, name: $n${i}) { ...OvernightRepoDetail }`);
+    const frag = isFull ? 'OvernightRepoDetail' : 'OvernightRepoLight';
+    fields.push(`  r${i}: repository(owner: $o${i}, name: $n${i}) { ...${frag} }`);
+  });
+  const fragments = full.some((f) => f)
+    ? `${REPO_DETAIL_FRAGMENT}\n${REPO_LIGHT_FRAGMENT}`
+    : REPO_LIGHT_FRAGMENT;
+  return `query OvernightDetail(${vars.join(', ')}) {\n${fields.join('\n')}\n}\n${fragments}`;
+}
+
+/** Group repos into queries: a full repo costs 2, a light one 1; max cost 20 => ≤10 full repos per query. */
+function batchByCost<T>(items: T[], isFull: (t: T) => boolean, maxCost = DETAIL_BATCH_SIZE * 2): T[][] {
+  const batches: T[][] = [];
+  let cur: T[] = [];
+  let cost = 0;
+  for (const item of items) {
+    const c = isFull(item) ? 2 : 1;
+    if (cur.length > 0 && cost + c > maxCost) {
+      batches.push(cur);
+      cur = [];
+      cost = 0;
+    }
+    cur.push(item);
+    cost += c;
   }
-  return `query OvernightDetail(${vars.join(', ')}) {\n${fields.join('\n')}\n}\n${REPO_DETAIL_FRAGMENT}`;
+  if (cur.length > 0) batches.push(cur);
+  return batches;
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function globToRegExp(pattern: string): RegExp {
-  const escaped = pattern
-    .split('*')
-    .map((s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
-    .join('.*');
-  return new RegExp(`^${escaped}$`, 'i');
-}
-
-/** Same semantics as config.matchRepo: include empty = all; exclude wins. */
-function repoMatches(name: string, config: OvernightConfig): boolean {
-  const included = config.include.length === 0 || config.include.some((p) => globToRegExp(p).test(name));
-  if (!included) return false;
-  return !config.exclude.some((p) => globToRegExp(p).test(name));
-}
 
 function makeActorFactory(
   config: OvernightConfig,
@@ -286,15 +301,23 @@ export async function collectGitHub(ctx: CollectContext): Promise<CollectResult>
   const actor = makeActorFactory(config);
   let budgetExhausted = false;
 
-  const checkRateLimit = (
-    res: { status: number; headers: { get(n: string): string | null } },
-    what: string,
-  ) => {
+  /**
+   * Halts collection only on confirmed rate limiting: 429, x-ratelimit-remaining=0 (on an error status),
+   * or a 403 whose body mentions a (secondary) rate limit. Other 403s (permission denied) are returned
+   * to the caller as ordinary errors. Returns the error body text (already consumed) for non-ok responses.
+   */
+  const checkRateLimit = async (res: Awaited<ReturnType<CollectContext['fetch']>>, what: string) => {
     const remaining = res.headers.get('x-ratelimit-remaining');
-    if (res.status === 403 || res.status === 429) {
+    let text = '';
+    if (!res.ok) text = await res.text().catch((e: unknown) => `(body unreadable: ${errMsg(e)})`);
+    const limited =
+      res.status === 429 ||
+      (!res.ok && remaining === '0') ||
+      (res.status === 403 && (res.headers.get('retry-after') !== null || /rate limit/i.test(text)));
+    if (limited) {
       budgetExhausted = true;
       throw new RateLimitError(
-        `GitHub rate limit or access denied (HTTP ${res.status}) during ${what}; results are partial`,
+        `GitHub rate limit hit (HTTP ${res.status}) during ${what}; results are partial`,
       );
     }
     if (remaining === '0') {
@@ -304,6 +327,7 @@ export async function collectGitHub(ctx: CollectContext): Promise<CollectResult>
         `GitHub rate limit exhausted after ${what}; remaining requests skipped, results are partial`,
       );
     }
+    return text;
   };
 
   const gql = async <T>(
@@ -322,9 +346,8 @@ export async function collectGitHub(ctx: CollectContext): Promise<CollectResult>
       },
       body: JSON.stringify({ query, variables }),
     });
-    checkRateLimit(res, what);
+    const text = await checkRateLimit(res, what);
     if (!res.ok) {
-      const text = await res.text().catch(() => '');
       throw new Error(`GitHub GraphQL ${what} failed: HTTP ${res.status} ${text.slice(0, 200)}`.trim());
     }
     const body = (await res.json()) as GqlResponse<T>;
@@ -346,8 +369,11 @@ export async function collectGitHub(ctx: CollectContext): Promise<CollectResult>
         'User-Agent': 'overnight-digest',
       },
     });
-    checkRateLimit(res, what);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await checkRateLimit(res, what);
+    if (!res.ok) {
+      const detail = /"message"\s*:\s*"([^"]{1,120})"/.exec(text)?.[1];
+      throw new Error(`HTTP ${res.status}${res.status === 403 && detail ? `: ${detail}` : ''}`);
+    }
     return res.json();
   };
 
@@ -401,7 +427,7 @@ export async function collectGitHub(ctx: CollectContext): Promise<CollectResult>
 
   const repos = listed.filter(
     (r) =>
-      repoMatches(r.name, config) &&
+      matchRepo(r.name, config) &&
       (config.includeForks || !r.isFork) &&
       (config.includeArchived || !r.isArchived),
   );
@@ -453,16 +479,16 @@ export async function collectGitHub(ctx: CollectContext): Promise<CollectResult>
 
   if (budgetExhausted) return finish(projects);
 
-  // ---- Phase 2: batched per-repo detail (≤10 repos per GraphQL call) --------
-  // Repos with no push in window are skipped unless they have open PRs (which may need attention).
-  const detailTargets = [...byId.values()].filter(
-    (e) => e.active || (e.repo.pullRequests?.totalCount ?? 0) > 0,
-  );
+  // ---- Phase 2: batched per-repo detail ---------------------------------------
+  // Every repo gets releases + issues (these don't bump pushedAt). PR queries are only added for
+  // repos with a push in the window or open PRs (which may need attention).
+  const needsPRs = (e: { active: boolean; repo: GqlRepoListNode }) =>
+    e.active || (e.repo.pullRequests?.totalCount ?? 0) > 0;
+  const batches = batchByCost([...byId.values()], needsPRs);
   const staleCutoff = untilMs - config.staleDays * DAY_MS;
 
   try {
-    for (let i = 0; i < detailTargets.length; i += DETAIL_BATCH_SIZE) {
-      const batch = detailTargets.slice(i, i + DETAIL_BATCH_SIZE);
+    for (const [bi, batch] of batches.entries()) {
       const variables: Record<string, unknown> = { since: window.since };
       batch.forEach((e, j) => {
         const [o, n] = e.project.id.split('/');
@@ -472,9 +498,9 @@ export async function collectGitHub(ctx: CollectContext): Promise<CollectResult>
       let body: GqlResponse<Record<string, GqlRepoDetail | null>>;
       try {
         body = await gql<Record<string, GqlRepoDetail | null>>(
-          buildDetailQuery(batch.length),
+          buildDetailQuery(batch.map(needsPRs)),
           variables,
-          `detail batch ${i / DETAIL_BATCH_SIZE + 1}`,
+          `detail batch ${bi + 1}`,
         );
       } catch (e) {
         if (e instanceof RateLimitError) throw e;
@@ -585,7 +611,7 @@ export async function collectGitHub(ctx: CollectContext): Promise<CollectResult>
   try {
     for (const entry of activeEntries) {
       const p = entry.project;
-      const created = encodeURIComponent(`>=${window.since}`);
+      const created = encodeURIComponent(`${window.since}..${window.until}`);
       let data: unknown;
       try {
         data = await rest(
@@ -613,7 +639,7 @@ export async function collectGitHub(ctx: CollectContext): Promise<CollectResult>
             runId: run.id,
             url: run.html_url,
             branch: run.head_branch ?? '',
-            at: run.updated_at ?? run.created_at,
+            at: run.created_at,
             conclusion: c,
             ...(commitMessage ? { commitMessage } : {}),
           },
