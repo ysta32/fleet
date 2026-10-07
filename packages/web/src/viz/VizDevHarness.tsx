@@ -1,28 +1,20 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useState } from 'react';
 import type { Selection } from '../data/contract';
-import { createDevFleet, type DevFleet } from './devView';
+import { isVizDevRequested, useVizDevView } from './devView';
 import FleetScene from './FleetScene';
 
-/** True when the page was opened with `?vizdev=1` (dev-only visualizer harness). */
-export function isVizDevRequested(
-  search: string = typeof window === 'undefined' ? '' : window.location.search,
-): boolean {
-  const v = new URLSearchParams(search).get('vizdev');
-  return v !== null && v !== '0' && v !== 'false';
-}
+export { isVizDevRequested };
 
 /**
- * DEV ONLY: full-viewport visualizer driven by the synthetic devView generator.
- * The app shell decides when to render this (e.g. when isVizDevRequested()).
+ * DEV ONLY: full-viewport visualizer driven by synthetic data (shared createDemoFleet when exported,
+ * else the local devView generator). Renders nothing unless the URL has `?vizdev=1`.
+ * Note: FleetScene itself also swaps in the synthetic view under `?vizdev=1`, so screenshots of the
+ * real app shell work without wiring this component.
  */
-export function VizDevHarness({ seed, projects }: { seed?: number; projects?: number }) {
-  const [fleet] = useState<DevFleet>(() => createDevFleet({ seed, projects }));
-  useEffect(() => {
-    fleet.start();
-    return () => fleet.stop();
-  }, [fleet]);
-  const view = useSyncExternalStore(fleet.subscribe, fleet.view);
+export function VizDevHarness() {
+  const view = useVizDevView();
   const [selection, setSelection] = useState<Selection>(null);
+  if (!view) return null;
   return (
     <div style={{ position: 'fixed', inset: 0 }}>
       <FleetScene view={view} selection={selection} onSelect={setSelection} />

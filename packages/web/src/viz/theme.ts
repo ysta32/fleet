@@ -1,105 +1,157 @@
+import { createContext, useContext, useEffect, useState } from 'react';
+import * as THREE from 'three';
+import { palette, type ThemeName } from '@fleet/ui';
 import type { AgentRole, CiState, ModelFamily, OrchPhase, OrchTaskState } from '@fleet/shared';
 
 /**
- * Halyard design tokens (packages/ui/tokens.css, dark theme) copied as constants:
- * WebGL cannot read CSS custom properties. Keep in sync with --fl-* values.
+ * Visualizer theme derived from the Halyard JS mirrors (@fleet/ui palette). WebGL cannot read CSS
+ * variables, so every colour here comes from `palette.dark | palette.light`.
+ *
+ * Colour discipline (DESIGN.md): ink + bone carry the scene; signal orange (accent) is reserved for
+ * "needs you" (blocked / waiting); status colours only for status.
  */
-export const HALYARD = {
-  bg: '#0b0d0c',
-  surface1: '#121514',
-  surface2: '#181c1a',
-  surface3: '#20251f',
-  border: 'rgba(233, 226, 207, 0.09)',
-  borderStrong: 'rgba(233, 226, 207, 0.18)',
-  fg: '#ece7da',
-  fgMuted: '#a7a596',
-  fgSubtle: '#6f7069',
-  accent: '#ff6a2b',
-  accentFg: '#0b0d0c',
-  success: '#9be564',
-  warn: '#f5b83d',
-  danger: '#ff5964',
-  info: '#7fd1d9',
-  focus: '#ffb547',
-  fontDisplay: "'Instrument Serif', 'Iowan Old Style', Georgia, serif",
-  fontSans: "'Schibsted Grotesk', ui-sans-serif, system-ui, -apple-system, sans-serif",
-  fontMono: "'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace",
+export interface VizTheme {
+  name: ThemeName;
+  dark: boolean;
+  bg: string;
+  surface1: string;
+  surface2: string;
+  fg: string;
+  fgMuted: string;
+  fgSubtle: string;
+  accent: string;
+  focus: string;
+  success: string;
+  warn: string;
+  danger: string;
+  info: string;
+  gridCell: string;
+  gridSection: string;
+  /** body colour of station cores / pillars */
+  coreBody: string;
+  model: Record<ModelFamily, string>;
+  task: Record<OrchTaskState, string>;
+  /** HDR multiplier per task state; only live states exceed the bloom threshold (dark only) */
+  taskGain: Record<OrchTaskState, number>;
+  phase: Record<OrchPhase, string>;
+  ci: Record<CiState, string>;
+  /** effects blend mode: additive light on ink, multiplied ink on paper */
+  fxBlending: THREE.Blending;
+  bloom: number;
+  /** clamp an emissive gain for the theme (paper cannot glow past 1) */
+  gain(k: number): number;
+  hud: { bg: string; border: string; borderStrong: string; shadow: string };
+  vignette: string;
+  grainOpacity: number;
+}
+
+export const FONTS = {
+  display: "'Instrument Serif', 'Iowan Old Style', Georgia, serif",
+  mono: "'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace",
+  sans: "'Schibsted Grotesk', ui-sans-serif, system-ui, sans-serif",
   trackingCaps: '0.08em',
-  radiusSm: 4,
-  radiusMd: 6,
 } as const;
 
-/** Visualizer palette derived from Halyard: warm ink, bone hairlines, one signal-orange accent. */
-export const THEME = {
-  background: HALYARD.bg,
-  fog: HALYARD.bg,
-  gridCell: '#171a18',
-  gridSection: '#262a26',
-  /** hairline geometry (rings, tethers, guides) */
-  hairline: HALYARD.fg,
-  hairlineDim: HALYARD.fgSubtle,
-  stationIdle: HALYARD.fgSubtle,
-  stationRunning: HALYARD.accent,
-  stationBlocked: HALYARD.danger,
-  stationDone: HALYARD.success,
-  stationPlain: HALYARD.fgMuted,
-  gate: HALYARD.warn,
-  beam: HALYARD.fg,
-  release: HALYARD.focus,
-  success: HALYARD.success,
-  failure: HALYARD.danger,
-  warn: HALYARD.warn,
-  scan: HALYARD.fg,
-  accent: HALYARD.accent,
-  hudBg: 'rgba(18, 21, 20, 0.92)',
-  hudBorder: HALYARD.borderStrong,
-  hudText: HALYARD.fg,
-  hudDim: HALYARD.fgSubtle,
-  hudMuted: HALYARD.fgMuted,
-} as const;
+function build(name: ThemeName): VizTheme {
+  const p = palette[name];
+  const dark = name === 'dark';
+  return {
+    name,
+    dark,
+    bg: p.bg,
+    surface1: p['surface-1'],
+    surface2: p['surface-2'],
+    fg: p.fg,
+    fgMuted: p['fg-muted'],
+    fgSubtle: p['fg-subtle'],
+    accent: p.accent,
+    focus: p.focus,
+    success: p.success,
+    warn: p.warn,
+    danger: p.danger,
+    info: p.info,
+    gridCell: dark ? '#141716' : '#e7e2d6',
+    gridSection: dark ? '#1f2320' : '#d6d0c1',
+    coreBody: dark ? '#141210' : '#f6f3ec',
+    model: {
+      opus: p['model-opus'],
+      sonnet: p['model-sonnet'],
+      haiku: p['model-haiku'],
+      fable: dark ? p['model-fable'] : '#8a8270',
+      astra: p['model-astra'],
+      unknown: p['model-unknown'],
+    },
+    task: {
+      queued: dark ? '#3a3e39' : '#c9c3b3',
+      running: p.fg,
+      review: p.warn,
+      landed: p.success,
+      blocked: p.accent,
+      failed: p.danger,
+    },
+    taskGain: dark
+      ? { queued: 1.2, running: 1.5, review: 1.05, landed: 0.5, blocked: 2.6, failed: 2.2 }
+      : { queued: 1, running: 1, review: 1, landed: 1, blocked: 1, failed: 1 },
+    phase: { running: p.fg, blocked: p.accent, done: p.success, idle: p['fg-subtle'] },
+    ci: { pending: p.warn, success: p.success, failure: p.danger, none: dark ? '#33372f' : '#c9c3b3' },
+    fxBlending: dark ? THREE.AdditiveBlending : THREE.MultiplyBlending,
+    bloom: dark ? 0.8 : 0,
+    gain: dark ? (k: number) => k : (k: number) => Math.min(1, k),
+    hud: dark
+      ? {
+          bg: 'rgba(18, 21, 20, 0.9)',
+          border: 'rgba(233, 226, 207, 0.09)',
+          borderStrong: 'rgba(233, 226, 207, 0.18)',
+          shadow: '0 1px 0 rgba(255,255,255,0.04) inset, 0 24px 64px rgba(0,0,0,0.6)',
+        }
+      : {
+          bg: 'rgba(251, 249, 244, 0.94)',
+          border: 'rgba(24, 26, 22, 0.1)',
+          borderStrong: 'rgba(24, 26, 22, 0.2)',
+          shadow: '0 12px 40px rgba(60, 50, 30, 0.14)',
+        },
+    vignette: dark
+      ? 'radial-gradient(140% 100% at 50% 0%, rgba(11,13,12,0) 55%, rgba(5,6,6,0.65) 100%)'
+      : 'radial-gradient(140% 100% at 50% 0%, rgba(243,240,232,0) 60%, rgba(214,206,188,0.55) 100%)',
+    grainOpacity: dark ? 0.07 : 0.05,
+  };
+}
 
-/** Model identity colours (--fl-model-*). */
-export const MODEL_COLORS: Record<ModelFamily, string> = {
-  opus: '#ff6a2b',
-  sonnet: '#7fd1d9',
-  haiku: '#b6e85a',
-  fable: '#e9e2cf',
-  astra: '#e58ac9',
-  unknown: '#8a8f88',
-};
+const cache: Partial<Record<ThemeName, VizTheme>> = {};
+export function vizTheme(name: ThemeName): VizTheme {
+  return (cache[name] ??= build(name));
+}
 
-export const TASK_STATE_COLORS: Record<OrchTaskState, string> = {
-  queued: '#3a3e39',
-  running: HALYARD.accent,
-  review: HALYARD.warn,
-  landed: HALYARD.success,
-  blocked: HALYARD.danger,
-  failed: HALYARD.danger,
-};
+/** Resolve the active theme: html[data-theme] wins, else prefers-color-scheme. */
+export function resolveThemeName(): ThemeName {
+  if (typeof document === 'undefined') return 'dark';
+  const attr = document.documentElement.getAttribute('data-theme');
+  if (attr === 'light' || attr === 'dark') return attr;
+  if (typeof window !== 'undefined' && typeof window.matchMedia === 'function')
+    return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  return 'dark';
+}
 
-/** HDR multiplier per task state. Only "live" states exceed the bloom threshold. */
-export const TASK_STATE_INTENSITY: Record<OrchTaskState, number> = {
-  queued: 1.4,
-  running: 2.6,
-  review: 1.3,
-  landed: 0.7,
-  blocked: 2.2,
-  failed: 2.2,
-};
+/** Live theme name, following html[data-theme] mutations and colour-scheme changes. */
+export function useThemeName(): ThemeName {
+  const [name, setName] = useState<ThemeName>(resolveThemeName);
+  useEffect(() => {
+    const update = () => setName(resolveThemeName());
+    const mo = new MutationObserver(update);
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    const mq = typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-color-scheme: light)') : null;
+    mq?.addEventListener('change', update);
+    update();
+    return () => {
+      mo.disconnect();
+      mq?.removeEventListener('change', update);
+    };
+  }, []);
+  return name;
+}
 
-export const PHASE_COLORS: Record<OrchPhase, string> = {
-  running: THEME.stationRunning,
-  blocked: THEME.stationBlocked,
-  done: THEME.stationDone,
-  idle: THEME.stationIdle,
-};
-
-export const CI_COLORS: Record<CiState, string> = {
-  pending: HALYARD.warn,
-  success: HALYARD.success,
-  failure: HALYARD.danger,
-  none: '#33372f',
-};
+export const VizThemeContext = createContext<VizTheme>(vizTheme('dark'));
+export const useVizTheme = (): VizTheme => useContext(VizThemeContext);
 
 export type BotShape = 'diamond' | 'cube' | 'tetra' | 'sphere' | 'torus' | 'cone' | 'ico';
 
@@ -116,12 +168,12 @@ export const ROLE_SHAPES: Record<AgentRole, BotShape> = {
 
 /** Base size of a bot by role (scene units). */
 export const ROLE_SCALE: Record<AgentRole, number> = {
-  lead: 0.3,
-  senior: 0.25,
-  coder: 0.19,
-  critic: 0.21,
-  scout: 0.14,
-  tester: 0.2,
-  triager: 0.2,
-  other: 0.18,
+  lead: 0.26,
+  senior: 0.22,
+  coder: 0.17,
+  critic: 0.19,
+  scout: 0.13,
+  tester: 0.18,
+  triager: 0.18,
+  other: 0.16,
 };

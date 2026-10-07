@@ -105,6 +105,15 @@ export function cameraFitPosition(r: number, out: Vec3 = vec3()): Vec3 {
 }
 
 /**
+ * Distance multiplier so a ring layout framed for a landscape viewport still fits portrait screens
+ * (the horizontal field of view shrinks with the aspect ratio).
+ */
+export function fitScaleForAspect(aspect: number): number {
+  if (!(aspect > 0)) return 1;
+  return aspect >= 1.6 ? 1 : 1.6 / aspect;
+}
+
+/**
  * Whether the camera should be refitted: always on the first non-empty layout (fitted === null),
  * otherwise when the layout radius changed by more than `tolerance` (relative).
  */

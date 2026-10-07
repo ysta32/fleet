@@ -2,9 +2,11 @@ import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { FleetSnapshot, OrchTaskState } from '@fleet/shared';
-import { normTaskId, taskOrbitOffset, vec3 } from './layout';
+import { easing, ease } from '@fleet/ui';
+import { clamp, normTaskId, taskOrbitOffset, vec3 } from './layout';
+import { INTRO_DELAY, INTRO_DUR, INTRO_STAGGER } from './Station';
 import { useSceneStore } from './store';
-import { TASK_STATE_COLORS, TASK_STATE_INTENSITY } from './theme';
+import { useVizTheme } from './theme';
 
 interface TaskSlot {
   projectId: string;
@@ -23,9 +25,6 @@ const s3 = new THREE.Vector3();
 const c3 = new THREE.Color();
 const off = vec3();
 const MAX_TASKS = 1024;
-const stateColors = Object.fromEntries(
-  (Object.keys(TASK_STATE_COLORS) as OrchTaskState[]).map((k) => [k, new THREE.Color(TASK_STATE_COLORS[k])]),
-) as Record<OrchTaskState, THREE.Color>;
 
 /** All orch task satellites of all stations in a single instanced draw call (+ one for halos). */
 export function TaskSatellites({
@@ -36,6 +35,14 @@ export function TaskSatellites({
   onSelectProject(id: string): void;
 }) {
   const store = useSceneStore();
+  const vt = useVizTheme();
+  const stateColors = useMemo(
+    () =>
+      Object.fromEntries(
+        (Object.keys(vt.task) as OrchTaskState[]).map((k) => [k, new THREE.Color(vt.task[k]).multiplyScalar(vt.taskGain[k])]),
+      ) as Record<OrchTaskState, THREE.Color>,
+    [vt],
+  );
   const mesh = useRef<THREE.InstancedMesh>(null);
   const halo = useRef<THREE.InstancedMesh>(null);
   const geo = useMemo(() => new THREE.CylinderGeometry(0.1, 0.1, 0.13, 6), []);
@@ -47,7 +54,6 @@ export function TaskSatellites({
         color: 0xffffff,
         wireframe: true,
         transparent: true,
-        blending: THREE.AdditiveBlending,
         depthWrite: false,
         toneMapped: false,
       }),
@@ -107,37 +113,43 @@ export function TaskSatellites({
     [geo, haloGeo, mat, haloMat],
   );
 
-  useFrame(() => {
+  useEffect(() => {
+    haloMat.blending = vt.dark ? THREE.AdditiveBlending : THREE.NormalBlending;
+    haloMat.needsUpdate = true;
+  }, [vt, haloMat]);
+
+  useFrame((_, dtRaw) => {
     const m = mesh.current;
     const h = halo.current;
     if (!m || !h) return;
-    const t = store.at;
+    // motion means work: each army's orbit only advances while it has running tasks / working agents
+    const dt = store.reduced ? 0 : Math.min(dtRaw, 0.05);
+    for (const l of store.layouts.values()) l.orbitT += dt * (l.busy ? 1 : 0);
     for (let i = 0; i < slots.length; i++) {
       const s = slots[i]!;
       const l = store.layouts.get(s.projectId);
       if (!l) continue;
+      const t = l.orbitT;
+      const iu = store.reduced ? 1 : clamp((store.t - INTRO_DELAY - l.index * INTRO_STAGGER - 0.15 - s.index * 0.024) / INTRO_DUR, 0, 1);
+      const ie = ease(easing.land, iu);
       taskOrbitOffset(s.index, s.count, t, l.scale, off);
       s.pos.set(l.pos.x + off.x, l.pos.y + off.y, l.pos.z + off.z);
       const running = s.state === 'running';
       const landed = s.state === 'landed';
-      e3.set(0, t * (running ? 2.2 : 0.4) + s.index, 0);
+      e3.set(0, t * (running ? 1.2 : 0) + s.index, 0);
       q.setFromEuler(e3);
-      const pulse = running ? 1 + 0.18 * Math.sin(t * 6 + s.phase * 6.28) : 1;
-      const sc = (landed ? 1.05 : s.state === 'queued' ? 0.8 : 1) * pulse;
+      const sc = (landed ? 0.9 : s.state === 'queued' ? 0.75 : 1) * ie;
       s3.set(sc, sc, sc);
       m4.compose(s.pos, q, s3);
       m.setMatrixAt(i, m4);
-      let k = TASK_STATE_INTENSITY[s.state];
-      if (running) k *= 0.65 + 0.45 * (0.5 + 0.5 * Math.sin(t * 5 + s.phase * 6.28));
-      if (s.state === 'blocked' || s.state === 'failed')
-        k *= 0.6 + 0.6 * (Math.sin(t * 9 + s.phase) > 0 ? 1 : 0.3);
-      c3.copy(stateColors[s.state]).multiplyScalar(k);
-      m.setColorAt(i, c3);
-      const hs = running ? 1 + 0.3 * Math.sin(t * 4 + s.phase * 6.28) : 0.0001;
+      // persistent states are static glows; only events animate
+      m.setColorAt(i, stateColors[s.state]);
+      const ringed = running || s.state === 'blocked';
+      const hs = ringed ? ie : 0.0001;
       s3.set(hs, 1, hs);
       m4.compose(s.pos, q, s3);
       h.setMatrixAt(i, m4);
-      c3.copy(stateColors[s.state]).multiplyScalar(k * 0.6);
+      c3.copy(stateColors[s.state]).multiplyScalar(vt.dark ? 0.55 : 1);
       h.setColorAt(i, c3);
     }
     m.instanceMatrix.needsUpdate = true;

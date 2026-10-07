@@ -5,6 +5,7 @@ import {
   anchorOffset,
   cameraFitPosition,
   needsRefit,
+  fitScaleForAspect,
   arcHeight,
   arcPoint,
   easeInOutCubic,
@@ -196,5 +197,14 @@ describe('camera fit', () => {
     const b = cameraFitPosition(20);
     expect(Math.hypot(b.x, b.y, b.z)).toBeGreaterThan(Math.hypot(a.x, a.y, a.z));
     expect(b.y).toBeGreaterThan(0);
+  });
+});
+
+describe('fitScaleForAspect', () => {
+  it('leaves landscape alone and backs off for portrait', () => {
+    expect(fitScaleForAspect(16 / 9)).toBe(1);
+    expect(fitScaleForAspect(375 / 812)).toBeGreaterThan(3);
+    expect(fitScaleForAspect(1)).toBeCloseTo(1.6);
+    expect(fitScaleForAspect(0)).toBe(1);
   });
 });
