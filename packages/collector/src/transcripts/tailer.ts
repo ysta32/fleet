@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { watch, type FSWatcher } from 'node:fs';
-import { open, readdir, stat } from 'node:fs/promises';
+import { lstat, open, readdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 export interface TranscriptFile {
@@ -28,6 +28,7 @@ interface FileState {
   pending: Buffer;
   mtimeMs: number;
   size: number;
+  skipping: boolean;
 }
 
 export class Tailer extends EventEmitter {
@@ -105,14 +106,31 @@ export class Tailer extends EventEmitter {
     }
   }
 
+  private async within(rootReal: string, p: string): Promise<boolean> {
+    try {
+      const real = await realpath(p);
+      return real === rootReal || real.startsWith(rootReal + path.sep);
+    } catch {
+      return false;
+    }
+  }
+
   private async discover(): Promise<TranscriptFile[]> {
     const out: TranscriptFile[] = [];
+    let rootReal: string;
+    try {
+      rootReal = await realpath(this.root);
+    } catch {
+      return out;
+    }
     for (const proj of await this.safeReaddir(this.root)) {
       if (!proj.isDirectory()) continue;
       const projectDir = proj.name;
       const projPath = path.join(this.root, projectDir);
+      if (!(await this.within(rootReal, projPath))) continue;
       for (const ent of await this.safeReaddir(projPath)) {
         if (ent.isFile() && ent.name.endsWith('.jsonl')) {
+          if (!(await this.within(rootReal, path.join(projPath, ent.name)))) continue;
           out.push({
             path: path.join(projPath, ent.name),
             sessionId: ent.name.slice(0, -'.jsonl'.length),
@@ -122,8 +140,15 @@ export class Tailer extends EventEmitter {
           });
         } else if (ent.isDirectory()) {
           const subDir = path.join(projPath, ent.name, 'subagents');
+          try {
+            if (!(await lstat(subDir)).isDirectory()) continue;
+          } catch {
+            continue;
+          }
+          if (!(await this.within(rootReal, subDir))) continue;
           for (const sub of await this.safeReaddir(subDir)) {
             if (!sub.isFile() || !sub.name.endsWith('.jsonl')) continue;
+            if (!(await this.within(rootReal, path.join(subDir, sub.name)))) continue;
             const base = sub.name.slice(0, -'.jsonl'.length);
             const agentFileId = base.startsWith('agent-') ? base.slice('agent-'.length) : base;
             out.push({
@@ -160,21 +185,24 @@ export class Tailer extends EventEmitter {
             pending: Buffer.alloc(0),
             mtimeMs: st.mtimeMs,
             size: st.size,
+            skipping: false,
           };
           this.files.set(file.path, state);
           this.emit('file', file);
           const start = st.size > INITIAL_TAIL_BYTES ? st.size - INITIAL_TAIL_BYTES : 0;
-          await this.readFrom(state, start, st.size, start > 0);
+          state.skipping = start > 0;
+          await this.readFrom(state, start, st.size);
         } else if (st.size < known.offset) {
           // truncated or rewritten: restart from the beginning
           known.pending = Buffer.alloc(0);
           known.mtimeMs = st.mtimeMs;
           known.size = st.size;
-          await this.readFrom(known, 0, st.size, false);
+          known.skipping = false;
+          await this.readFrom(known, 0, st.size);
         } else if (st.size !== known.size || st.mtimeMs !== known.mtimeMs || st.size > known.offset) {
           known.mtimeMs = st.mtimeMs;
           known.size = st.size;
-          await this.readFrom(known, known.offset, st.size, false);
+          await this.readFrom(known, known.offset, st.size);
         }
       } catch {
         // file vanished or unreadable; retry next poll
@@ -183,13 +211,12 @@ export class Tailer extends EventEmitter {
     for (const p of [...this.files.keys()]) if (!seen.has(p)) this.files.delete(p);
   }
 
-  private async readFrom(state: FileState, from: number, to: number, skipToNewline: boolean): Promise<void> {
+  private async readFrom(state: FileState, from: number, to: number): Promise<void> {
     state.offset = from;
     if (to <= from) return;
     const fh = await open(state.file.path, 'r');
     try {
       let pos = from;
-      let skipping = skipToNewline;
       while (pos < to) {
         const len = Math.min(CHUNK_BYTES, to - pos);
         const buf = Buffer.alloc(len);
@@ -197,7 +224,7 @@ export class Tailer extends EventEmitter {
         if (bytesRead <= 0) break;
         pos += bytesRead;
         let chunk = Buffer.concat([state.pending, buf.subarray(0, bytesRead)]);
-        if (skipping) {
+        if (state.skipping) {
           const nl = chunk.indexOf(0x0a);
           if (nl < 0) {
             state.pending = Buffer.alloc(0);
@@ -205,7 +232,7 @@ export class Tailer extends EventEmitter {
             continue;
           }
           chunk = chunk.subarray(nl + 1);
-          skipping = false;
+          state.skipping = false;
         }
         const lastNl = chunk.lastIndexOf(0x0a);
         if (lastNl < 0) {

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, utimes, writeFile, appendFile } from 'node:fs/promises';
+import { symlink, mkdir, mkdtemp, rm, utimes, writeFile, appendFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -114,5 +114,39 @@ describe('Tailer', () => {
     expect(all().length).toBeGreaterThan(0);
     expect(all().length).toBeLessThan(n);
     expect(all().every((l) => l === line.trimEnd())).toBe(true);
+  });
+
+  it('keeps skipping a newline-less initial tail across polls', async () => {
+    const dir = path.join(root, 'p');
+    await mkdir(dir);
+    const f = path.join(dir, 'nonl.jsonl');
+    await writeFile(f, 'y'.repeat(3 * 1024 * 1024));
+    await make().start();
+    expect(all()).toEqual([]);
+    await appendFile(f, 'rest-of-line\n{"ok":1}\n');
+    await wait(() => all().length >= 1);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(all()).toEqual(['{"ok":1}']);
+  });
+
+  it('does not follow symlinks that leave the root', async () => {
+    const outside = await mkdtemp(path.join(tmpdir(), 'fleet-outside-'));
+    try {
+      await mkdir(path.join(outside, 'subagents'));
+      await writeFile(path.join(outside, 'subagents', 'agent-z.jsonl'), '{"leak":1}\n');
+      await writeFile(path.join(outside, 'ext.jsonl'), '{"leak":2}\n');
+      await mkdir(path.join(outside, 'projdir'));
+      await writeFile(path.join(outside, 'projdir', 'q.jsonl'), '{"leak":3}\n');
+      const dir = path.join(root, 'p');
+      await mkdir(path.join(dir, 'sess'), { recursive: true });
+      await symlink(path.join(outside, 'subagents'), path.join(dir, 'sess', 'subagents'));
+      await symlink(path.join(outside, 'ext.jsonl'), path.join(dir, 'ext.jsonl'));
+      await symlink(path.join(outside, 'projdir'), path.join(root, 'linkproj'));
+      await make().start();
+      expect(files).toHaveLength(0);
+      expect(all()).toEqual([]);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 });
