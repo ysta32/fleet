@@ -11,3 +11,4 @@ coverage/
 *.jsonl
 !packages/shared/fixtures/**/*.jsonl
 captures/
+*.tsbuildinfo
