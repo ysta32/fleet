@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createServer } from 'vite';
 import { fleetSpendPlugin } from '../../vite.config';
 import { TABS } from '../shell/tabs';
-import { initialSpend } from './Spend';
+import { initialSpend, spendStart } from './Spend';
 import { KEYMAP } from '../shell/hotkeys';
 
 import type { FleetSnapshot } from '@fleet/shared';
@@ -268,5 +268,18 @@ describe('initialSpend', () => {
     expect(initialSpend(true, example)).toBe(example);
     expect(initialSpend(false, example)).toBeUndefined();
     expect(initialSpend(true, null)).toBeUndefined();
+  });
+});
+
+describe('spendStart', () => {
+  const example = { generatedAt: 1 };
+  it('shows the example without fetching while in demo', () => {
+    expect(spendStart(true, example)).toEqual({ summary: example, error: undefined, fetch: false });
+  });
+  it('resets to loading with no error and fetches when demo turns off', () => {
+    expect(spendStart(false, example)).toEqual({ summary: undefined, error: undefined, fetch: true });
+  });
+  it('fetches real data when no example ships', () => {
+    expect(spendStart(true, null)).toEqual({ summary: undefined, error: undefined, fetch: true });
   });
 });

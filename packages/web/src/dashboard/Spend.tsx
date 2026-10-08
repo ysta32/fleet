@@ -19,17 +19,27 @@ export function initialSpend(
   return demo && example ? example : undefined;
 }
 
+/**
+ * State to apply whenever the data source changes. Leaving demo resets to loading (undefined) and
+ * clears any error, so synthetic numbers never linger unlabelled or survive a failed real fetch.
+ */
+export function spendStart(
+  demo: boolean,
+  example: Record<string, unknown> | null | undefined,
+): { summary: SpendTabProps['summary']; error: undefined; fetch: boolean } {
+  const summary = initialSpend(demo, example);
+  return { summary, error: undefined, fetch: summary === undefined };
+}
+
 export function Spend({ demo = false }: { demo?: boolean }) {
   const [summary, setSummary] = useState<SpendTabProps['summary']>(() => initialSpend(demo, DEMO_SUMMARY));
   const [error, setError] = useState<string>();
   useEffect(() => {
     if (!Tab) return;
-    const example = initialSpend(demo, DEMO_SUMMARY);
-    if (example) {
-      setSummary(example);
-      setError(undefined);
-      return;
-    }
+    const start = spendStart(demo, DEMO_SUMMARY);
+    setSummary(start.summary);
+    setError(start.error);
+    if (!start.fetch) return;
     const controller = new AbortController();
     async function load() {
       try {
