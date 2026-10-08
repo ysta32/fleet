@@ -7,9 +7,12 @@ import {
   dagLayout,
   formatCost,
   formatCount,
+  incidents,
   nowWorking,
   relativeTime,
   sortSessions,
+  stationNeeds,
+  taskKey,
   totalTokens,
 } from './model';
 
@@ -245,5 +248,292 @@ describe('nowWorking', () => {
     data.sessions = [];
     data.agents = [];
     expect(nowWorking(data, now)).toEqual({ rows: [], agents: 0, projects: 0 });
+  });
+});
+
+describe('incidents', () => {
+  const coder = (overrides: Partial<Agent> = {}): Agent => ({
+    id: 'synthetic-session:coder',
+    sessionId: 'synthetic-session',
+    projectId: 'alpha',
+    role: 'coder',
+    model: 'opus',
+    label: 'coder t04',
+    status: 'waiting',
+    currentTask: 't04',
+    location: { kind: 'project', projectId: 'alpha' },
+    tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    startedAt: now,
+    lastActivity: now,
+    ...overrides,
+  });
+  /** the demo's shape: one blocked task, its waiting coder session, and both alerts */
+  const blockedArmy = (): FleetSnapshot => {
+    const data = snapshot();
+    data.projects[0]!.orch = {
+      projectId: 'alpha',
+      phase: 'blocked',
+      statusText: '',
+      handoffText: '',
+      tasks: [{ ...task('t04'), slug: 'rate-limit', state: 'blocked' }, task('t05')],
+      inflight: [],
+      worktrees: [],
+      blocked: ['t04'],
+      updatedAt: now - 3000,
+    };
+    data.sessions = [
+      session({
+        status: 'waiting',
+        title: 'Synthetic build',
+        lastActivity: now - 2000,
+        agentIds: ['synthetic-session', 'synthetic-session:coder'],
+      }),
+    ];
+    data.agents = [
+      coder(),
+      coder({ id: 'synthetic-session', role: 'lead', status: 'working', currentTask: undefined }),
+    ];
+    data.alerts = [
+      {
+        id: 'a1',
+        kind: 'session.waiting',
+        projectId: 'alpha',
+        title: 'session.waiting',
+        body: 'Synthetic t04 checkpoint',
+        at: now - 1000,
+      },
+      {
+        id: 'a2',
+        kind: 'army.blocked',
+        projectId: 'alpha',
+        title: 'army.blocked',
+        body: 'Synthetic t04 checkpoint',
+        at: now - 1000,
+      },
+    ];
+    return data;
+  };
+
+  it('normalises task ids', () => {
+    expect(taskKey('t04')).toBe('4');
+    expect(taskKey('04')).toBe('4');
+    expect(taskKey('T4')).toBe('4');
+    expect(taskKey('refactor-api')).toBe('refactor-api');
+  });
+
+  it('folds a blocked task, its waiting session and both alerts into one incident', () => {
+    const result = incidents(blockedArmy());
+    expect(result).toHaveLength(1);
+    const [incident] = result;
+    expect(incident).toMatchObject({
+      id: 'alpha:task:4',
+      kind: 'waiting',
+      projectId: 'alpha',
+      taskId: 't04',
+      taskSlug: 'rate-limit',
+      sessionId: 'synthetic-session',
+      sessionTitle: 'Synthetic build',
+      title: 't04 · rate-limit is waiting on you',
+      at: now - 3000,
+      alertIds: ['a1', 'a2'],
+    });
+    expect(incident!.reasons.map((reason) => reason.label)).toEqual(['Army blocked', 'Waiting on you']);
+    expect(incident!.body).toBeUndefined();
+    expect(stationNeeds(blockedArmy(), 'alpha')).toBe(1);
+    expect(stationNeeds(blockedArmy(), 'beta')).toBe(0);
+  });
+
+  it('keeps distinct subjects apart and orders oldest first', () => {
+    const data = blockedArmy();
+    data.sessions.push(
+      session({
+        id: 'other',
+        projectId: 'beta',
+        status: 'waiting',
+        title: 'Synthetic review',
+        lastActivity: now - 9000,
+      }),
+    );
+    data.alerts.push({
+      id: 'a3',
+      kind: 'ci.failed',
+      projectId: 'alpha',
+      title: 'ci.failed',
+      body: 'Synthetic checks failed on #3',
+      at: now - 500,
+    });
+    data.alerts.push({
+      id: 'a4',
+      kind: 'ci.failed',
+      projectId: 'alpha',
+      title: 'ci.failed',
+      body: 'Synthetic checks failed on #3',
+      at: now - 100,
+    });
+    const result = incidents(data);
+    expect(result.map((incident) => incident.id)).toEqual([
+      'beta:session:other',
+      'alpha:task:4',
+      'alpha:ci.failed:synthetic checks failed on #3',
+    ]);
+    expect(result[0]!.title).toBe('Synthetic review is waiting on you');
+    expect(result[2]).toMatchObject({
+      kind: 'alert',
+      title: 'CI failed',
+      body: 'Synthetic checks failed on #3',
+      alertIds: ['a3', 'a4'],
+    });
+    expect(result[2]!.reasons).toHaveLength(1);
+  });
+
+  it('dedupes run.blocked against blocked tasks and keeps a blocked-only incident', () => {
+    const data = blockedArmy();
+    data.sessions = [];
+    data.alerts = [];
+    data.projects[0]!.orch!.blocked = ['04'];
+    const result = incidents(data);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ kind: 'blocked', title: 't04 · rate-limit is blocked', alertIds: [] });
+    expect(result[0]!.reasons).toEqual([{ kind: 'blocked', label: 'Army blocked', at: now - 3000 }]);
+  });
+
+  it('drops dismissed and cleared alerts but keeps live state', () => {
+    const data = blockedArmy();
+    data.alerts[0]!.cleared = true;
+    const result = incidents(data, new Set(['a2']));
+    expect(result).toHaveLength(1);
+    expect(result[0]!.alertIds).toEqual([]);
+  });
+
+  it('keeps alerts with no confident subject as their own incidents', () => {
+    const data = snapshot();
+    data.alerts = [
+      {
+        id: 'a1',
+        kind: 'session.waiting',
+        projectId: 'alpha',
+        title: 'session.waiting',
+        body: 'Synthetic',
+        at: now - 10,
+      },
+      {
+        id: 'a2',
+        kind: 'army.blocked',
+        projectId: 'alpha',
+        title: 'Synthetic run stuck',
+        body: 'Synthetic',
+        at: now - 5,
+      },
+    ];
+    const result = incidents(data);
+    expect(result.map((incident) => [incident.id, incident.kind, incident.title, incident.alertIds])).toEqual(
+      [
+        ['alpha:alert:a1', 'waiting', 'Waiting on you', ['a1']],
+        ['alpha:alert:a2', 'blocked', 'Synthetic run stuck', ['a2']],
+      ],
+    );
+  });
+
+  it('matches task tokens exactly: an alert about t4 never joins t40, and ambiguity stays apart', () => {
+    const data = blockedArmy();
+    data.sessions = [];
+    const orch = data.projects[0]!.orch!;
+    orch.tasks = [
+      { ...task('t4'), slug: 'four', state: 'blocked' },
+      { ...task('t40'), slug: 'forty', state: 'blocked' },
+    ];
+    orch.blocked = [];
+    data.alerts = [
+      {
+        id: 'b4',
+        kind: 'army.blocked',
+        projectId: 'alpha',
+        title: 'army.blocked',
+        body: 'Synthetic t4 checkpoint',
+        at: now,
+      },
+      {
+        id: 'b40',
+        kind: 'army.blocked',
+        projectId: 'alpha',
+        title: 'army.blocked',
+        body: 'Synthetic t40 checkpoint',
+        at: now,
+      },
+      {
+        id: 'both',
+        kind: 'army.blocked',
+        projectId: 'alpha',
+        title: 'army.blocked',
+        body: 'Synthetic t4 and t40',
+        at: now,
+      },
+    ];
+    const byId = new Map(incidents(data).map((incident) => [incident.id, incident.alertIds]));
+    expect(byId.get('alpha:task:4')).toEqual(['b4']);
+    expect(byId.get('alpha:task:40')).toEqual(['b40']);
+    expect(byId.get('alpha:alert:both')).toEqual(['both']);
+  });
+
+  it('uses structured alert subjects: taskId joins the task, sessionId joins the session it holds', () => {
+    const data = blockedArmy();
+    data.alerts = [
+      {
+        id: 's1',
+        kind: 'session.waiting',
+        projectId: 'alpha',
+        title: 'Waiting',
+        body: '',
+        sessionId: 'synthetic-session',
+        at: now,
+      },
+      {
+        id: 't1',
+        kind: 'army.blocked',
+        projectId: 'alpha',
+        title: 'Blocked',
+        body: '',
+        taskId: '04',
+        at: now,
+      },
+      {
+        id: 't5',
+        kind: 'army.blocked',
+        projectId: 'alpha',
+        title: 'Blocked',
+        body: '',
+        taskId: 't05',
+        at: now,
+      },
+      {
+        id: 'gone',
+        kind: 'session.waiting',
+        projectId: 'alpha',
+        title: 'Waiting',
+        body: '',
+        sessionId: 'ended',
+        at: now,
+      },
+    ];
+    const byId = new Map(incidents(data).map((incident) => [incident.id, incident]));
+    expect(byId.get('alpha:task:4')!.alertIds).toEqual(['s1', 't1']);
+    expect(byId.get('alpha:task:5')).toMatchObject({
+      taskId: 't05',
+      title: 't05 · synthetic-t05 is blocked',
+      alertIds: ['t5'],
+    });
+    expect(byId.get('alpha:session:ended')).toMatchObject({ kind: 'waiting', alertIds: ['gone'] });
+    expect(byId.size).toBe(3);
+  });
+
+  it('reports an army blocked with no task ids as one incident', () => {
+    const data = blockedArmy();
+    data.sessions = [];
+    data.alerts = [];
+    data.projects[0]!.orch!.blocked = [];
+    data.projects[0]!.orch!.tasks = [task('t05')];
+    expect(incidents(data).map((incident) => [incident.id, incident.title])).toEqual([
+      ['alpha:army', 'Army blocked'],
+    ]);
   });
 });

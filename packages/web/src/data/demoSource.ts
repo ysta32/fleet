@@ -1,12 +1,7 @@
-import { createDemoFleet, demoSpendSummary } from '@fleet/shared';
+import { createDemoFleet, demoSpendSummary, localStartOfDay } from '@fleet/shared';
 import type { DemoFleet, SyntheticFleet } from '@fleet/shared';
 
-/** Local midnight, matching the top bar's "Today" so archived demo sessions roll up per local day. */
-function localStartOfDay(at: number): number {
-  const day = new Date(at);
-  day.setHours(0, 0, 0, 0);
-  return day.getTime();
-}
+// Local midnight matches the top bar's "Today", so archived demo sessions roll up per local day.
 
 let current: SyntheticFleet | null = null;
 

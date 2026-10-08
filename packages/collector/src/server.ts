@@ -298,11 +298,20 @@ export function redactSnapshot(s: FleetSnapshot, salt: RedactSalt, opts: RedactO
       }
       return out;
     }),
-    alerts: s.alerts.map((x) =>
-      share
-        ? { ...x, projectId: pid(x.projectId) }
-        : { ...x, projectId: pid(x.projectId), title: ALERT_TITLES[x.kind] ?? x.kind, body: '' },
-    ),
+    alerts: s.alerts.map((x) => {
+      if (share) return { ...x, projectId: pid(x.projectId) };
+      const out: Alert = {
+        ...x,
+        projectId: pid(x.projectId),
+        title: ALERT_TITLES[x.kind] ?? x.kind,
+        body: '',
+      };
+      // same rule as agent.currentTask: only id-like task tokens leave the machine
+      const task = safeTaskId(x.taskId);
+      if (task === undefined) delete out.taskId;
+      else out.taskId = task;
+      return out;
+    }),
   };
 }
 

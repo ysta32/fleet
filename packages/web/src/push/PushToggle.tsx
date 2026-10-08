@@ -1,21 +1,25 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import { pushSupported } from './logic';
-import { disablePush, enablePush, isSubscribed } from './subscribe';
+import { pushBackend } from './backend';
 import './push.css';
 
 const HELP = 'Get a notification on this device when an agent is blocked or waiting on you.';
 
 /**
  * Phone alerts as a self-contained section: heading, one line of help, then the switch. Pass
- * `titled={false}` when the surrounding dialog already carries the "Phone alerts" title.
+ * `titled={false}` when the surrounding dialog already carries the "Phone alerts" title. With `demo`,
+ * the switch is simulated: no permission prompt and no subscribe/unsubscribe calls.
  */
-export function PushToggle({ titled = true }: { titled?: boolean }) {
+export function PushToggle({ titled = true, demo = false }: { titled?: boolean; demo?: boolean }) {
   const id = useId();
-  const supported = pushSupported({
+  // one backend per mode: demo state lives with this mount and never reaches the real subscription
+  const api = useMemo(() => pushBackend(demo), [demo]);
+  const browserSupported = pushSupported({
     navigator: typeof navigator === 'undefined' ? undefined : navigator,
     window: typeof window === 'undefined' ? undefined : window,
     Notification: typeof Notification === 'undefined' ? undefined : Notification,
   });
+  const supported = !api.needsSupport || browserSupported;
   const [on, setOn] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -23,11 +27,11 @@ export function PushToggle({ titled = true }: { titled?: boolean }) {
   useEffect(() => {
     if (!supported) return;
     let live = true;
-    void isSubscribed().then((value) => live && setOn(value));
+    void api.isSubscribed().then((value) => live && setOn(value));
     return () => {
       live = false;
     };
-  }, [supported]);
+  }, [supported, api]);
 
   const heading = titled && (
     <h3 id={`${id}-title`} className="micro push-title">
@@ -54,7 +58,7 @@ export function PushToggle({ titled = true }: { titled?: boolean }) {
   const toggle = async () => {
     setBusy(true);
     setError(null);
-    const result = on ? await disablePush() : await enablePush();
+    const result = on ? await api.disable() : await api.enable();
     setOn(result.subscribed);
     if (!result.ok) setError(result.error);
     setBusy(false);

@@ -182,8 +182,8 @@ describe('GithubPoller', () => {
       { exec: vi.fn(), fetch: vi.fn(), platform: 'linux' },
     );
     const snap = { projects: [{ id: 'synthetic', name: 'demo', path: '/synthetic/project' }] };
-    const alert = notifier.handle(failure!, snap as unknown as FleetSnapshot);
-    expect(alert).toMatchObject({ kind: 'deploy.failed' });
+    const result = notifier.handle(failure!, snap as unknown as FleetSnapshot);
+    expect(result).toMatchObject({ notify: true, alert: { kind: 'deploy.failed' } });
   });
 
   it('emits only changed merge, CI, release and deployment events', async () => {

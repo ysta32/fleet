@@ -66,3 +66,27 @@
     transition: none;
   }
 }
+.phone-alerts .help-push {
+  border-top: 0;
+}
+.phone-alerts-note {
+  margin: 0;
+  padding: 0 var(--fl-space-6) var(--fl-space-5);
+  font: 400 var(--fl-text-2xs) / 1.5 var(--fl-font-mono);
+  color: var(--fl-fg-muted);
+}
+/* phones: a bottom sheet, matching the More sheet it usually opens from */
+@media (max-width: 767px) {
+  .overlay.overlay-phone-sheet {
+    place-items: end stretch;
+    padding: 0;
+  }
+  .overlay.overlay-phone-sheet .dialog.phone-alerts {
+    width: 100%;
+    max-height: 85vh;
+    border-width: var(--fl-hairline) 0 0;
+    border-radius: var(--fl-radius-xl) var(--fl-radius-xl) 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+    animation: drawer-up var(--fl-motion-land) both;
+  }
+}

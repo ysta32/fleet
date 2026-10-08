@@ -2,7 +2,8 @@ import { useId, useRef } from 'react';
 import type { ReactNode } from 'react';
 import type { FleetEvent, FleetSnapshot } from '@fleet/shared';
 import type { Selection } from '../data/contract';
-import { clockTime, formatCost, formatCount, relativeTime, totalTokens } from '../dashboard/model';
+import { formatCost, formatCount, relativeTime, timeTitle, totalTokens } from '../dashboard/model';
+import { eventClock, eventDelta, timelineGroups } from './timeline';
 import { Icon } from './Icon';
 import { useDrawer, useMediaQuery } from './modal';
 
@@ -188,6 +189,7 @@ export function SelectionCard({
     ];
   }
   const timeline = selectionEvents(snapshot, selection, events);
+  const groups = new Set(timeline.map((event) => event.taskId ?? '')).size;
   return (
     <Drawer kind={kind} title={title} onClose={onClose}>
       <div className="drawer-body">
@@ -202,18 +204,33 @@ export function SelectionCard({
           Timeline <span className="num">{timeline.length}</span>
         </h3>
         {timeline.length ? (
-          <ol className="drawer-events" aria-label={`Recent events for this ${kind.toLowerCase()}`}>
-            {timeline.map((event) => (
-              <li key={event.id} className={`drawer-event severity-${event.severity}`}>
-                <time
-                  className="num"
-                  dateTime={new Date(event.ts).toISOString()}
-                  title={relativeTime(event.ts, now)}
-                >
-                  {clockTime(event.ts)}
-                </time>
-                <i className="sev" aria-label={event.severity} />
-                <span className="drawer-event-label">{event.label}</span>
+          <ol
+            className="drawer-events"
+            aria-label={`Recent events for this ${kind.toLowerCase()}, oldest first`}
+          >
+            {timelineGroups(timeline).map((group) => (
+              <li key={group.key} className="drawer-group">
+                {(group.task !== null || groups > 1) && (
+                  <h4 className="micro drawer-group-head num">{group.task ?? 'Other activity'}</h4>
+                )}
+                <ol className="drawer-group-events">
+                  {group.events.map((event, index) => {
+                    const previous = index > 0 ? group.events[index - 1] : undefined;
+                    return (
+                      <li key={event.id} className={`drawer-event severity-${event.severity}`}>
+                        <time
+                          className={`num${previous ? ' drawer-event-delta' : ''}`}
+                          dateTime={new Date(event.ts).toISOString()}
+                          title={timeTitle(event.ts, now)}
+                        >
+                          {previous ? eventDelta(event.ts, previous.ts) : eventClock(event.ts)}
+                        </time>
+                        <i className="sev" aria-label={event.severity} />
+                        <span className="drawer-event-label">{event.label}</span>
+                      </li>
+                    );
+                  })}
+                </ol>
               </li>
             ))}
           </ol>

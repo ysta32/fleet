@@ -4,7 +4,7 @@ import { KEYMAP } from './hotkeys';
 import { useModal } from './modal';
 import { PushToggle } from '../push/PushToggle';
 
-export function HelpOverlay({ onClose }: { onClose(): void }) {
+export function HelpOverlay({ onClose, demo = false }: { onClose(): void; demo?: boolean }) {
   const close = useRef<HTMLButtonElement>(null);
   const overlay = useRef<HTMLDivElement>(null);
   const dialog = useRef<HTMLDivElement>(null);
@@ -49,7 +49,7 @@ export function HelpOverlay({ onClose }: { onClose(): void }) {
             ))}
           </div>
           <div className="help-push">
-            <PushToggle />
+            <PushToggle demo={demo} />
           </div>
         </div>
       </div>

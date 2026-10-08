@@ -22,9 +22,10 @@ function saveRecent(recent: readonly string[]) {
   }
 }
 
-/** Touch-first devices get entities first and no keyboard hints. */
-function coarsePointer(): boolean {
-  return typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches === true;
+/** Phones and touch-first devices get recents and entities first (and no keyboard hints on touch). */
+function phoneFirst(): boolean {
+  if (typeof window === 'undefined' || !window.matchMedia) return false;
+  return window.matchMedia('(pointer: coarse), (max-width: 767px)').matches;
 }
 
 export function CommandPalette({ items, onClose }: { items: readonly PaletteItem[]; onClose(): void }) {
@@ -37,7 +38,7 @@ export function CommandPalette({ items, onClose }: { items: readonly PaletteItem
   const dialog = useRef<HTMLDivElement>(null);
   useModal(dialog, overlay);
   const [recent] = useState(readRecent);
-  const [touch] = useState(coarsePointer);
+  const [touch] = useState(phoneFirst);
   const results = useMemo(
     () => rankPalette(items, query, 40, { recent, touch }),
     [items, query, recent, touch],

@@ -1,6 +1,9 @@
-import { demoModelId } from './demo.js';
+import { createDemoFleet, demoModelId } from './demo.js';
+import type { DemoDigest, SyntheticFleet } from './demo.js';
 import { estimateCostUsd } from './pricing.js';
+import { sessionSpend } from './spend.js';
 import type { SpendBucket, SpendDimension, SpendSummary, SpendTokens } from './spend.js';
+import { localStartOfDay } from './time.js';
 import type { FleetSnapshot } from './types.js';
 
 const DAY_MS = 86_400_000;
@@ -49,10 +52,7 @@ export function demoSpendSummary(snapshot: FleetSnapshot, opts: { seed?: number 
   const now = snapshot.generatedAt;
   const today = new Date(now);
   today.setHours(0, 0, 0, 0);
-  const todayUsd = snapshot.sessions
-    .filter((session) => session.startedAt >= today.getTime())
-    .reduce((sum, session) => sum + session.costUsd, 0);
-  const sessionsUsd = snapshot.sessions.reduce((sum, session) => sum + session.costUsd, 0);
+  const { todayUsd, totalUsd: sessionsUsd } = sessionSpend(snapshot.sessions, now);
   const earliest = Math.min(now, ...snapshot.sessions.map((session) => session.startedAt));
   const burnUsdPerHour = sessionsUsd / Math.max(1, (now - earliest) / 3_600_000);
   // Agents run about half the day; earlier days are estimated at that duty cycle.
@@ -166,5 +166,50 @@ export function demoSpendSummary(snapshot: FleetSnapshot, opts: { seed?: number 
       { source: 'codex', records: Math.round(monthToDateUsd * codexShare * 11), status: 'ok' },
     ],
     unpricedModels: [],
+  };
+}
+
+/** Seed shared by the app demo and the marketing site, so both show the same world. */
+export const DEMO_SEED = 42;
+
+export interface DemoWorldOptions {
+  /** default DEMO_SEED */
+  seed?: number;
+  /** the demo clock (epoch ms); default Date.now() */
+  now?: number;
+  /** default 6 */
+  projects?: number;
+  /** overnight digest window in hours (default 8, max 12) */
+  digestHours?: number;
+}
+
+export interface DemoWorld {
+  fleet: SyntheticFleet;
+  /** the harbour at `now` */
+  snapshot: FleetSnapshot;
+  /** Spend tab summary; `todayUsd` equals `sessionSpend(snapshot.sessions, now).todayUsd` */
+  spend: SpendSummary;
+  /** overnight digest ending at `now`, from the same simulation */
+  digest: DemoDigest;
+}
+
+/**
+ * One demo world (harbour, Spend and overnight digest) for a seed and clock. The app and the site call
+ * this with the same `seed`/`now` to render the same numbers. Days roll over at local midnight.
+ */
+export function createDemoWorld(opts: DemoWorldOptions = {}): DemoWorld {
+  const seed = opts.seed ?? DEMO_SEED;
+  const fleet = createDemoFleet({
+    seed,
+    ...(opts.now !== undefined ? { now: opts.now } : {}),
+    ...(opts.projects !== undefined ? { projects: opts.projects } : {}),
+    startOfDay: localStartOfDay,
+  });
+  const snapshot = fleet.snapshot();
+  return {
+    fleet,
+    snapshot,
+    spend: demoSpendSummary(snapshot, { seed }),
+    digest: fleet.overnight(opts.digestHours ?? 8),
   };
 }

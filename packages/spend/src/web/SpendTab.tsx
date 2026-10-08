@@ -294,7 +294,10 @@ function Dashboard({ s }: { s: SpendSummary }) {
               )}
             </span>
             <p className="fls-hero-line">
-              On pace for <span className="fls-num">{moneyWhole(m.forecast)}</span> by {mon} {m.days}
+              On pace for <span className="fls-num">{moneyWhole(m.forecast)}</span> by{' '}
+              <span className="fls-num">
+                {mon} {m.days}
+              </span>
               {budget !== null ? (
                 forecastOver ? (
                   <>

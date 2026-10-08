@@ -1072,3 +1072,24 @@
 .dashboard-list:empty {
   display: none;
 }
+
+/* incidents: one row per thing that needs you, with every signal about it as a sub-reason */
+.incident-row > .fl-icon {
+  color: var(--fl-accent);
+}
+.incident-alert > .fl-icon {
+  color: var(--fl-warn);
+}
+.incident-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--fl-space-1) var(--fl-space-2);
+  margin-top: var(--fl-space-2);
+  font-size: var(--fl-text-xs);
+}
+.incident-reasons > li {
+  padding: 0 var(--fl-space-2);
+  border: var(--fl-hairline) solid var(--fl-border);
+  border-radius: var(--fl-radius-sm);
+  color: var(--fl-fg-muted);
+}
