@@ -18,8 +18,9 @@ export const metadata = pageMeta(
 
 export default function Home() {
   const facts = repoFacts();
-  const { totals, inbox } = demoPreview();
-  const waiting = inbox.filter((i) => i.kind.endsWith('.waiting')).length;
+  const { totals, snapshot } = demoPreview();
+  // Agents that stopped for you, counted from the whole demo snapshot (the inbox preview is truncated).
+  const waiting = snapshot.agents.filter((a) => a.status === 'waiting').length;
   const version = fleetVersion();
   const release = readChangelog().find((r) => r.version === version);
   return (
