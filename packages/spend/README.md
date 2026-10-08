@@ -32,11 +32,11 @@ npx fleet-spend budget set 200
 | `fleet-spend tips`                  | Savings tips, each with a dollar estimate                                                         |
 | `fleet-spend budget set <usd>`      | Save the monthly budget to the config file                                                        |
 | `fleet-spend budget clear`          | Remove the budget                                                                                 |
-| `fleet-spend check`                 | Exit 0 under warn thresholds, 1 past a warn threshold or forecast over budget, 2 over budget      |
+| `fleet-spend check`                 | Exit 0 under warn thresholds, 1 past a warn threshold or forecast over budget, 2 over budget, 3 on error |
 | `fleet-spend json`                  | Full `SpendSummary` as JSON                                                                       |
 | `fleet-spend brief`                 | Compact `SpendBrief` as JSON                                                                      |
 | `fleet-spend watch [--interval 60]` | Collect every N seconds and send alerts; one status line per cycle. Ctrl-C exits                  |
-| `fleet-spend serve [--port 4917]`   | Local dashboard on 127.0.0.1; port must be 4900-4999                                              |
+| `fleet-spend serve [--port 4917]`   | Local dashboard on 127.0.0.1; port must be 4500-4999                                              |
 | `--json`                            | On summary, where, and tips: print JSON                                                           |
 | `--no-color`, `--ascii`             | Disable ANSI color; use ASCII instead of Unicode glyphs                                           |
 | `--help`, `--version`, `--debug`    | Help, version, stack traces on error                                                              |
@@ -48,6 +48,8 @@ Color is used only when stdout is a terminal and `NO_COLOR` is unset. When `wher
 ```sh
 fleet-spend check || echo "spend check exited $?"
 ```
+
+Errors print one line with no file paths, keys or prompt text (`--debug` adds a stack trace). Other commands exit 1 on error.
 
 `serve` is read-only, answers GET only, binds 127.0.0.1, and rejects requests whose Host header is not loopback. Routes: `/` (the Spend tab as a page, refreshes every 60 seconds), `/api/spend`, `/api/brief`, `/tokens.css` (Halyard tokens, when `@fleet/ui` is resolvable). Responses are cached for 30 seconds.
 
@@ -86,7 +88,7 @@ Optional file at `~/.config/fleet/spend.json` (mode 0600 when written by `budget
 | `paths.cursorDbPath`                                | unset                                     | Accepted by the config loader; the current Cursor ingester reads only the CSV export |
 | `notify.macos`, `notify.fleet`                      | `true`, `true`                            | macOS notification via `osascript`; POST to a running Fleet                          |
 | `notify.ntfyUrl`                                    | `""` (off)                                | Direct ntfy topic URL                                                                |
-| `port`                                              | `4917`                                    | `serve` port, 4900-4999 only                                                         |
+| `port`                                              | `4917`                                    | `serve` port, 4500-4999 only                                                         |
 
 ## Budgets and alerts
 

@@ -11,5 +11,6 @@ Initial release.
 - Month-to-date, today, forecast, and one-hour burn rate; breakdowns by repo, model, session, army, task, day, branch, and source.
 - Monthly budget with `warnAt` thresholds and budget alerts, delivered via macOS notification, Fleet loopback, or ntfy; delivered alerts are not repeated.
 - Savings tips with dollar estimates (tier fit, cache hit ratio, cache TTL, Copilot model choice, session share).
-- CLI: summary, `where`, `tips`, `budget set|clear`, `check` (exit 0/1/2), `json`, `brief`, `watch`, `serve` (127.0.0.1, ports 4900-4999), `--json`, `--no-color`, `--ascii`.
+- CLI: summary, `where`, `tips`, `budget set|clear`, `check` (exit 0/1/2, 3 on error), `json`, `brief`, `watch`, `serve` (127.0.0.1, ports 4500-4999), `--json`, `--no-color`, `--ascii`.
+- Error messages are one line and path-free; source errors never include paths or keys.
 - Spend tab React components (`fleet-spend/web`) for Fleet and the Fleet site.
