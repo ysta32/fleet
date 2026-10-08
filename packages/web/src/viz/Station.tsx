@@ -27,6 +27,8 @@ export interface StationData {
   index: number;
   /** blocked tasks + waiting agents: the "needs you" count (signal orange) */
   needs: number;
+  /** show the data block (large fleets label only the busiest stations) */
+  labelled: boolean;
 }
 
 /** Tick-marked dial ring (instrument bezel) as line segments in the xz plane. */
@@ -126,10 +128,13 @@ const ALERT_DUR = 0.64;
 function StationImpl({
   d,
   selected,
+  compact = false,
   onSelect,
 }: {
   d: StationData;
   selected: boolean;
+  /** narrow viewport: the needs-you tag stays on the station (the pennant crowds neighbours) */
+  compact?: boolean;
   onSelect(id: string): void;
 }) {
   const store = useSceneStore();
@@ -141,7 +146,6 @@ function StationImpl({
   const intro = useRef<THREE.Group>(null);
   const core = useRef<THREE.Group>(null);
   const r1 = useRef<THREE.Group>(null);
-  const r2 = useRef<THREE.Mesh>(null);
   const dial = useRef<THREE.LineSegments>(null);
   const sel = useRef<THREE.Group>(null);
   const gateRef = useRef<THREE.Group>(null);
@@ -172,7 +176,6 @@ function StationImpl({
   const geos = useMemo(
     () => ({
       ring1: new THREE.TorusGeometry(1.15 * s, 0.005, 4, 160),
-      ring2: new THREE.TorusGeometry(0.9 * s, 0.004, 4, 128, Math.PI * 1.4),
       dial: dialGeometry(1.45 * s, 72, 6, 0.05),
       cross: crossGeometry(1.9 * s),
       guides: Array.from({ length: Math.ceil(d.taskCount / TASKS_PER_RING) }, (_, i) => ({
@@ -185,7 +188,6 @@ function StationImpl({
   useEffect(
     () => () => {
       geos.ring1.dispose();
-      geos.ring2.dispose();
       geos.dial.dispose();
       geos.cross.dispose();
       for (const g of geos.guides) g.geo.dispose();
@@ -239,11 +241,11 @@ function StationImpl({
     if (wire.current) {
       tmpColor.copy(alerting ? alertColor : colors.line);
       wire.current.color.copy(tmpColor);
-      wire.current.opacity = (vt.dark ? 0.32 : 0.45) + recent * 0.2 + glow * 0.4;
+      wire.current.opacity =
+        (vt.dark ? 0.16 : 0.3) * (live ? 1 : 0.6) + recent * 0.22 + glow * 0.5 + (needs ? 0.2 : 0);
     }
     // motion means work: rings turn only while the station is busy
     const spin = busy * 0.25;
-    if (r2.current) r2.current.rotation.z += dt * spin;
     if (dial.current) dial.current.rotation.y -= dt * spin * 0.25;
     if (r1.current) r1.current.rotation.z += dt * spin * 0.15;
     if (sel.current) sel.current.visible = selected;
@@ -275,11 +277,13 @@ function StationImpl({
   const status = needs
     ? `needs you · ${d.needs}`
     : d.orch
-      ? `${d.phase ?? 'idle'} · ${d.taskCount} tasks`
+      ? `${d.phase ?? 'idle'} · ${d.taskCount}t`
       : d.working > 0
         ? 'working'
         : 'idle';
-  const lineOp = vt.dark ? 1 : 1.8;
+  // idle stations recede: their instruments draw at a lower level so live work leads the eye
+  const awake = (d.orch && d.phase !== 'idle') || d.working > 0 || needs;
+  const lineOp = (vt.dark ? 1 : 2.3) * (awake ? 1 : 0.55);
   const hairline = (opacity: number) => (
     <meshBasicMaterial
       color={colors.line}
@@ -301,7 +305,7 @@ function StationImpl({
           {hairline(0.08)}
         </mesh>
         <lineSegments geometry={geos.cross} position={[0, -d.y + 0.01, 0]} scale={0.6}>
-          <lineBasicMaterial color={colors.line} transparent opacity={0.18 * lineOp} depthWrite={false} />
+          <lineBasicMaterial color={colors.line} transparent opacity={0.1 * lineOp} depthWrite={false} />
         </lineSegments>
 
         {/* core: a dark faceted hull around one emissive pip (the only bloom source) */}
@@ -327,7 +331,7 @@ function StationImpl({
               toneMapped={false}
             />
           </mesh>
-          <mesh geometry={d.orch ? shared.ico : shared.oct} scale={1.9}>
+          <mesh geometry={d.orch ? shared.ico : shared.oct} scale={1.6}>
             <meshBasicMaterial
               ref={wire}
               color={colors.line}
@@ -349,9 +353,6 @@ function StationImpl({
             {hairline(0.45)}
           </mesh>
         </group>
-        <mesh ref={r2} geometry={geos.ring2} rotation={[Math.PI / 2.6, 0.4, phase]}>
-          {hairline(0.28)}
-        </mesh>
         <lineSegments ref={dial} geometry={geos.dial} position={[0, -0.02, 0]}>
           <lineBasicMaterial color={colors.line} transparent opacity={0.26 * lineOp} depthWrite={false} />
         </lineSegments>
@@ -381,6 +382,11 @@ function StationImpl({
 
         {/* halyard signal: the scene's focal point when something needs you */}
         {needs && (
+          <mesh geometry={shared.floor} position={[0, -d.y + 0.02, 0]} scale={1.5 * s}>
+            <meshBasicMaterial color={colors.signal} toneMapped={false} transparent opacity={0.9} />
+          </mesh>
+        )}
+        {needs && (
           <group ref={mast} position={[0, 0.5 * s, 0]} scale={[1, 0.001, 1]}>
             <lineSegments geometry={shared.mast} scale={[1, MAST_H, 1]}>
               <lineBasicMaterial color={colors.signal} toneMapped={false} />
@@ -401,8 +407,8 @@ function StationImpl({
           </group>
         )}
 
-        {/* CI / deploy beacon */}
-        <group position={ciPos}>
+        {/* CI / deploy beacon (only when there is a PR to report on) */}
+        <group position={ciPos} visible={d.ci !== 'none'}>
           <lineSegments geometry={shared.pillar}>
             <lineBasicMaterial color={colors.line} transparent opacity={0.3 * lineOp} depthWrite={false} />
           </lineSegments>
@@ -411,44 +417,82 @@ function StationImpl({
           </mesh>
         </group>
 
+        {/* ATC-style data block: tag offset up-right of the target on a hairline leader */}
         <Html
-          position={[0, 1.45 * s + 0.75, 0]}
-          center
+          position={needs ? (compact ? [0, -0.9 * s, 0] : [0, 0.5 * s + MAST_H - 0.17, 0]) : [0, 0.55 * s, 0]}
           zIndexRange={[20, 0]}
           style={{ pointerEvents: 'none', userSelect: 'none' }}
         >
-          <div ref={label} style={{ textAlign: 'center', whiteSpace: 'nowrap', opacity: 0 }}>
-            <div
-              className="fl-viz-name"
-              style={{
-                fontFamily: FONTS.display,
-                color: selected ? vt.focus : vt.fg,
-                fontSize: 'clamp(15px, 1.25vw, 24px)',
-                lineHeight: 1.05,
-                letterSpacing: '-0.01em',
-                textShadow: vt.dark ? '0 1px 14px rgba(11,13,12,0.95)' : '0 0 10px rgba(243,240,232,0.95)',
-              }}
+          <div
+            ref={label}
+            className="fl-viz-tag"
+            data-needs={needs ? '1' : '0'}
+            style={{
+              position: 'absolute',
+              left: 0,
+              bottom: 0,
+              opacity: 0,
+              display: d.labelled || needs || selected ? 'block' : 'none',
+            }}
+          >
+            <svg
+              width="30"
+              height="30"
+              viewBox="0 0 30 30"
+              style={{ position: 'absolute', left: 0, bottom: 0, overflow: 'visible' }}
+              aria-hidden
             >
-              {d.name}
-            </div>
+              <path
+                d="M0.5 29.5 L18 12 L30 12"
+                fill="none"
+                stroke={needs ? vt.accent : selected ? vt.focus : vt.fgSubtle}
+                strokeWidth="1"
+                opacity={needs || selected ? 1 : 0.7}
+              />
+            </svg>
             <div
-              className="fl-viz-sub"
-              data-needs={needs ? '1' : '0'}
+              className="fl-viz-block"
               style={{
+                position: 'absolute',
+                left: 34,
+                bottom: 10,
+                whiteSpace: 'nowrap',
                 fontFamily: FONTS.mono,
-                color: needs ? vt.accent : vt.fgSubtle,
-                fontSize: 10,
-                letterSpacing: FONTS.trackingCaps,
-                textTransform: 'uppercase',
-                marginTop: 4,
                 fontVariantNumeric: 'tabular-nums',
+                textShadow: vt.dark ? '0 0 8px rgba(11,13,12,0.9)' : '0 0 6px rgba(243,240,232,0.95)',
               }}
             >
-              {status}
-              <span style={{ color: vt.fgSubtle }}>
-                {' '}
-                · {d.working}/{d.agents}
-              </span>
+              <div
+                className="fl-viz-name"
+                style={{
+                  color: needs ? vt.accent : selected ? vt.focus : vt.fg,
+                  fontSize: 12,
+                  fontWeight: 500,
+                  lineHeight: 1.2,
+                  letterSpacing: '0.04em',
+                  textTransform: 'uppercase',
+                }}
+              >
+                {d.name}
+              </div>
+              <div
+                className="fl-viz-sub"
+                data-needs={needs ? '1' : '0'}
+                style={{
+                  color: needs ? vt.accent : vt.fgSubtle,
+                  fontSize: 10,
+                  lineHeight: 1.3,
+                  letterSpacing: FONTS.trackingCaps,
+                  textTransform: 'uppercase',
+                  marginTop: 2,
+                }}
+              >
+                {status}
+                <span style={{ color: vt.fgSubtle }}>
+                  {' '}
+                  · {d.working}/{d.agents}
+                </span>
+              </div>
             </div>
           </div>
         </Html>

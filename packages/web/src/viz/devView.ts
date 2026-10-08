@@ -22,6 +22,8 @@ import * as shared from '@fleet/shared';
 import type { DemoFleet } from '@fleet/shared';
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import type { FleetView, ReplayControls } from '../data/contract';
+import { clampPlayhead, normalizeHistory, reconstruct } from '../data/replay';
+import type { HistoryResponse } from '@fleet/shared';
 
 function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
@@ -57,12 +59,17 @@ export interface DevFleet {
   stop(): void;
   /** dev/screenshot trigger: fire a synthetic event of `kind` on the n-th project */
   fire(kind: FleetEventKind, projectIndex?: number): void;
+  /** dev/screenshot: enter replay of the last `hours` of synthetic history (if supported) */
+  replay?(hours: number): void;
+  /** dev/screenshot: move the replay playhead to fraction `f` (0..1) of the window */
+  seek?(f: number): void;
 }
 
 export function createDevFleet(opts: { seed?: number; projects?: number; tickMs?: number } = {}): DevFleet {
   const rnd = mulberry32(opts.seed ?? 7);
   const pick = <T>(xs: readonly T[]): T => xs[Math.floor(rnd() * xs.length)]!;
-  const nProjects = Math.max(1, Math.min(NAMES.length, opts.projects ?? 5));
+  // beyond the named set (perf staging, e.g. 40 projects) names are numbered and still synthetic
+  const nProjects = Math.max(1, Math.min(64, opts.projects ?? 5));
   const tickMs = opts.tickMs ?? 450;
   const now0 = Date.now();
   let seq = 0;
@@ -73,7 +80,8 @@ export function createDevFleet(opts: { seed?: number; projects?: number; tickMs?
   const prs: PullRequest[] = [];
 
   for (let p = 0; p < nProjects; p++) {
-    const id = `-synthetic-${NAMES[p]}`;
+    const name = NAMES[p] ?? `synth-${String(p + 1).padStart(2, '0')}`;
+    const id = `-synthetic-${name}`;
     const hasOrch = p % 3 !== 2;
     const tasks: OrchTask[] = [];
     if (hasOrch) {
@@ -90,9 +98,9 @@ export function createDevFleet(opts: { seed?: number; projects?: number; tickMs?
     }
     projects.push({
       id,
-      name: NAMES[p]!,
+      name,
       path: '',
-      repo: `example/${NAMES[p]}`,
+      repo: `example/${name}`,
       branch: hasOrch ? 'orch/synthetic' : 'main',
       lastActivity: now0,
       orch: hasOrch
@@ -407,6 +415,28 @@ export function fromDemoFleet(demo: DemoFleet, tickMs = 250): DevFleet {
     if (events.length > 300) events.shift();
     for (const l of listeners) l(e);
   };
+  // dev replay: the synthetic history reconstructed at a playhead (same math as the real data layer)
+  let hist: HistoryResponse | null = null;
+  let at = 0;
+  const makeReplay = (): FleetView => {
+    const h = hist!;
+    const r = reconstruct(h, at);
+    return {
+      mode: 'replay',
+      connected: true,
+      snapshot: r.snapshot,
+      events: r.events.slice(-300),
+      onEvent(cb) {
+        listeners.add(cb);
+        return () => listeners.delete(cb);
+      },
+      replay: { ...replay, from: h.from, to: h.to, at },
+      startReplay: () => undefined,
+    };
+  };
+  const notify = () => {
+    for (const l of changeListeners) l();
+  };
   return {
     view: () => current,
     subscribe(cb) {
@@ -416,6 +446,7 @@ export function fromDemoFleet(demo: DemoFleet, tickMs = 250): DevFleet {
     start() {
       if (timer) return;
       timer = setInterval(() => {
+        if (hist) return;
         for (const e of demo.tick(tickMs)) push(e);
         const now = Date.now();
         if (now - lastSnap >= 1000) {
@@ -444,6 +475,22 @@ export function fromDemoFleet(demo: DemoFleet, tickMs = 250): DevFleet {
         label: `synthetic ${kind}`,
       });
     },
+    replay(hours) {
+      hist = normalizeHistory(demo.history(hours));
+      at = hist.from;
+      current = makeReplay();
+      notify();
+    },
+    seek(f) {
+      if (!hist) return;
+      const prev = at;
+      at = clampPlayhead(hist, hist.from + (hist.to - hist.from) * Math.min(1, Math.max(0, f)));
+      current = makeReplay();
+      notify();
+      // small forward steps play their events (as playback would); jumps are silent scrubs
+      if (at > prev && at - prev <= 10_000)
+        for (const e of hist.events) if (e.ts > prev && e.ts <= at) for (const l of listeners) l(e);
+    },
   };
 }
 
@@ -452,7 +499,9 @@ type DemoFactory = (opts?: { seed?: number; projects?: number }) => DemoFleet;
 /** Prefer the shared demo generator when exported; fall back to the local synthetic one. */
 export function createVizDevFleet(opts: { seed?: number; projects?: number } = {}): DevFleet {
   const factory: unknown = Reflect.get(shared, 'createDemoFleet');
-  if (typeof factory === 'function') return fromDemoFleet((factory as DemoFactory)(opts));
+  // the shared generator caps at 24 projects; perf staging beyond that uses the local one
+  if (typeof factory === 'function' && (opts.projects ?? 6) <= 24)
+    return fromDemoFleet((factory as DemoFactory)(opts));
   return createDevFleet(opts);
 }
 
@@ -473,14 +522,18 @@ let sharedUsers = 0;
 
 /** One synthetic fleet per page: every useVizDevView caller (harness + nested scene) shares it. */
 function sharedVizDevFleet(): DevFleet {
-  return (sharedFleet ??= createVizDevFleet());
+  const qs = new URLSearchParams(window.location.search);
+  const n = Number(qs.get('projects'));
+  const opts = Number.isInteger(n) && n > 0 ? { projects: n } : {};
+  // `?vizdev=local` stages the local generator (one agent waiting on you: the needs-you state)
+  return (sharedFleet ??= qs.get('vizdev') === 'local' ? createDevFleet(opts) : createVizDevFleet(opts));
 }
 
 function acquireSharedFleet(fleet: DevFleet): () => void {
   if (sharedUsers++ === 0) {
     fleet.start();
-    const w = window as unknown as { __vizdev?: { fire: DevFleet['fire'] } };
-    w.__vizdev = { fire: fleet.fire };
+    const w = window as unknown as { __vizdev?: Pick<DevFleet, 'fire' | 'replay' | 'seek'> };
+    w.__vizdev = { fire: fleet.fire, replay: fleet.replay, seek: fleet.seek };
   }
   return () => {
     if (--sharedUsers > 0) return;

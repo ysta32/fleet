@@ -72,6 +72,8 @@ export interface ParticleFx {
 }
 
 const tmpV = vec3();
+/** forward playhead jump (ms) treated as a scrub rather than playback */
+export const SEEK_JUMP_MS = 10_000;
 /** global effect brightness: restrained, instrument-like bloom */
 const FX_GAIN = 0.6;
 
@@ -105,6 +107,12 @@ export class SceneStore {
   /** data-source mode + playhead last seen; used to invalidate pending move overrides */
   private clockMode: string | null = null;
   private playhead = -Infinity;
+  /**
+   * Bumped on a discontinuity of the data clock (mode switch, replay seek backward, or a forward
+   * jump larger than playback can produce). Vessels snap and transient effects clear, so a scrubbed
+   * scene is a function of the playhead rather than of the path taken to it.
+   */
+  seekEpoch = 0;
   rings: RingFx[] = [];
   beams: BeamFx[] = [];
   particles: ParticleFx[] = [];
@@ -157,10 +165,26 @@ export class SceneStore {
    * future that no longer applies. Idempotent for repeated calls with the same values.
    */
   syncClock(mode: string, playhead: number): void {
-    if ((this.clockMode !== null && mode !== this.clockMode) || playhead < this.playhead)
-      this.locOverride.clear();
+    const switched = this.clockMode !== null && mode !== this.clockMode;
+    const back = playhead < this.playhead;
+    if (switched || back) this.locOverride.clear();
+    // replay playback advances at most 100ms x 60 per frame; anything larger is a scrub
+    const jump =
+      mode === 'replay' && Number.isFinite(this.playhead) && playhead - this.playhead > SEEK_JUMP_MS;
+    if (switched || (mode === 'replay' && back) || jump) this.discontinuity();
     this.clockMode = mode;
     this.playhead = playhead;
+  }
+
+  /** Drop everything transient (effects, alerts, pending moves) and start a new seek epoch. */
+  discontinuity(): void {
+    this.seekEpoch++;
+    this.locOverride.clear();
+    this.alerts.clear();
+    this.activityAt.clear();
+    for (const r of this.rings) r.active = false;
+    for (const b of this.beams) b.active = false;
+    for (const p of this.particles) p.active = false;
   }
 
   /** Apply a new snapshot: recompute station layout (stable by sorted id). Called during render, idempotent. */
@@ -308,8 +332,10 @@ export class SceneStore {
     to: number,
     dur: number,
     rise = 0,
+    delay = 0,
   ): void {
     if (this.reduced) {
+      delay = 0;
       from = to;
       dur = Math.min(dur, 0.6);
       rise = 0;
@@ -318,7 +344,7 @@ export class SceneStore {
     this.ringCursor = (this.ringCursor + 1) % RING_POOL;
     r.active = true;
     r.kind = kind;
-    r.start = this.t;
+    r.start = this.t + delay;
     r.dur = dur;
     r.from = from;
     r.to = to;
@@ -416,15 +442,19 @@ export class SceneStore {
         scratch.y += tmpV.y;
         scratch.z += tmpV.z;
         const col = err ? c.danger : e.kind === 'release' ? c.focus : c.fg;
-        this.spawnBeam(scratch, col, 0.7, 14, 0.28, 1.8);
-        this.spawnBeam(scratch, col, 3, 16, 0.035, 1.2);
-        this.spawnRing('shock', scratch, col, 2.2, 0.2, 3, 1);
-        this.spawnBurst(scratch, col, 2.2, 22, 3, 1.2, 0.8);
+        // launch: a short hairline beam with a ring climbing it (reads as "shipped", not a light show)
+        this.spawnBeam(scratch, col, 0.5, 5.5, 0.14, 1.4);
+        this.spawnBeam(scratch, col, 2.6, 6.5, 0.022, 1.1);
+        this.spawnRing('scan', scratch, col, 2.4, 0.5, 0.5, 1.2, 9);
+        this.spawnRing('shock', scratch, col, 2, 0.2, 2.6, 0.9);
+        this.spawnBurst(scratch, col, 2, 16, 2.4, 1, 0.8);
         if (err) this.alerts.set(e.projectId, { start: this.t, kind: 'fail' });
         return;
       }
       case 'failure': {
-        this.spawnRing('pulse', scratch, c.danger, 2.6, 0.8 * s, 4.5 * s, 0.9);
+        // two staggered red rings: reads as an alarm at a glance, without looping
+        this.spawnRing('pulse', scratch, c.danger, 2.8, 0.8 * s, 4.8 * s, 1.3);
+        this.spawnRing('pulse', scratch, c.danger, 1.6, 0.8 * s, 3.2 * s, 1.0, 0, 0.16);
         this.alerts.set(e.projectId, { start: this.t, kind: 'fail' });
         return;
       }
