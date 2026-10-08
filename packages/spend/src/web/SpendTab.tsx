@@ -367,7 +367,7 @@ function Dashboard({ s }: { s: SpendSummary }) {
       <div className="fls-kpis">
         <Kpi label="Today" value={money(s.todayUsd)}>
           <span className="fls-kpi-sub">
-            {mon} {m.today}, through{' '}
+            {mon} {m.today} · updated{' '}
             <time
               dateTime={Number.isFinite(s.generatedAt) ? new Date(s.generatedAt).toISOString() : undefined}
               title={formatUtcTime(s.generatedAt)}
