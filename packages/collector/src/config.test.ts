@@ -1,4 +1,12 @@
-import { mkdtempSync, readFileSync, statSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+  mkdirSync,
+  readdirSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -80,6 +88,31 @@ describe('config', () => {
     const saved = JSON.parse(readFileSync(configPath(), 'utf8'));
     expect(saved.port).toBe(4747);
     expect(saved.lan).toBe(false);
+  });
+
+  it('tightens an existing config broader than 0600 on every load', () => {
+    const p = join(home, 'perm', 'c.json');
+    mkdirSync(join(home, 'perm'));
+    writeFileSync(p, JSON.stringify({ token: 'keep-me', port: 4512 }));
+    for (const loose of [0o644, 0o666, 0o640, 0o604, 0o700]) {
+      chmodSync(p, loose);
+      const cfg = loadConfig(p);
+      expect(cfg.token).toBe('keep-me');
+      expect(cfg.port).toBe(4512);
+      expect(statSync(p).mode & 0o777).toBe(0o600);
+    }
+    expect(JSON.parse(readFileSync(p, 'utf8'))).toEqual({ token: 'keep-me', port: 4512 });
+  });
+
+  it('leaves a config that is already 0600 or narrower alone', () => {
+    const p = join(home, 'narrow.json');
+    writeFileSync(p, JSON.stringify({ token: 't' }));
+    chmodSync(p, 0o400);
+    expect(loadConfig(p).token).toBe('t');
+    expect(statSync(p).mode & 0o777).toBe(0o400);
+    chmodSync(p, 0o600);
+    loadConfig(p);
+    expect(statSync(p).mode & 0o777).toBe(0o600);
   });
 
   it('loser of a first-run race adopts the winner token (EEXIST branch)', () => {

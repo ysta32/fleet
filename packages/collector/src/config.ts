@@ -1,9 +1,13 @@
 import { randomBytes } from 'node:crypto';
 import {
   chmodSync,
+  closeSync,
   existsSync,
+  fchmodSync,
+  fstatSync,
   linkSync,
   mkdirSync,
+  openSync,
   readFileSync,
   renameSync,
   unlinkSync,
@@ -42,8 +46,32 @@ export function defaultConfig(): Omit<FleetConfig, 'token'> {
   };
 }
 
+/**
+ * The config holds the access token: if the file is ours and readable/writable/executable by anyone
+ * else (mode broader than 0600), tighten it. Works on the open fd so the checked file is the one
+ * changed. A failure is reported, not fatal: the config is still usable.
+ */
+function tightenMode(fd: number, path: string): void {
+  const uid = process.getuid?.();
+  if (uid === undefined) return;
+  const st = fstatSync(fd);
+  if (!st.isFile() || st.uid !== uid || (st.mode & 0o777 & ~0o600) === 0) return;
+  try {
+    fchmodSync(fd, 0o600);
+  } catch (e) {
+    console.warn(`fleet: could not restrict permissions of ${path} to 0600: ${(e as Error).message}`);
+  }
+}
+
 function readJson(path: string): Record<string, unknown> {
-  const raw = readFileSync(path, 'utf8');
+  const fd = openSync(path, 'r');
+  let raw: string;
+  try {
+    tightenMode(fd, path);
+    raw = readFileSync(fd, 'utf8');
+  } finally {
+    closeSync(fd);
+  }
   const parsed: unknown = JSON.parse(raw);
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new Error(`config at ${path} must be a JSON object`);

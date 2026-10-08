@@ -100,9 +100,9 @@ async function status(): Promise<number> {
 
 async function doctor(): Promise<number> {
   const path = configPath();
-  const cfg = existsSync(path)
-    ? loadConfig(path)
-    : { ...defaultConfig(), port: envPort() ?? defaultConfig().port };
+  // read-only: loadConfig would chmod the file and hide the permission problem doctor reports
+  const cfg = { ...defaultConfig(), ...readConfigFile(path) };
+  cfg.port = envPort() ?? configuredPort(path) ?? defaultConfig().port;
   const lines = await runDoctor({
     port: cfg.port,
     claudeProjectsDir: cfg.claudeProjectsDir,
@@ -113,6 +113,18 @@ async function doctor(): Promise<number> {
   });
   for (const l of lines) console.log(formatLine(l));
   return exitCode(lines);
+}
+
+/** Config file contents, read without creating, chmod-ing or rewriting anything. */
+function readConfigFile(path: string): Partial<ReturnType<typeof defaultConfig>> {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Partial<ReturnType<typeof defaultConfig>>)
+      : {};
+  } catch {
+    return {};
+  }
 }
 
 /** Port from an existing config file, read without creating or rewriting anything. */

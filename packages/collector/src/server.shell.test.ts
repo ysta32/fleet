@@ -155,7 +155,8 @@ describe('remote web shell without a token', () => {
   it('a valid ?token= link on the shell still sets the session cookie; a bad one does not', async () => {
     const port = await start();
     const ok = await get(port, `/?token=${TOKEN}`);
-    expect(ok.status).toBe(200);
+    expect(ok.status).toBe(303);
+    expect(ok.headers.location).toBe('/');
     expect(String(ok.headers['set-cookie'])).toContain(`fleet_token=${TOKEN}`);
     const bad = await get(port, '/?token=wrong');
     expect(bad.status).toBe(200);
