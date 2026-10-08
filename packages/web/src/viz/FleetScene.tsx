@@ -12,14 +12,16 @@ import { Grid, OrbitControls, PerformanceMonitor, Stars } from '@react-three/dre
 import { Bloom, EffectComposer, Vignette } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import type { Agent, FleetSnapshot } from '@fleet/shared';
+import { easing, ease } from '@fleet/ui';
 import type { FleetView, Selection } from '../data/contract';
-import { Bot } from './Bots';
+import { Bots, type BotEntry } from './Bots';
 import { useVizDevView } from './devView';
 import { Effects } from './Effects';
 import { Hud } from './Hud';
 import {
   cameraFitPosition,
   cameraMaxDistance,
+  clamp,
   damp,
   fitScaleForAspect,
   fogRange,
@@ -38,6 +40,8 @@ export interface FleetSceneProps {
 }
 
 const MAX_BOTS = 240;
+const LABEL_ALL_UP_TO = 12;
+const LABEL_TOP = 6;
 /** Halyard grain (same SVG noise as --fl-grain), inlined so the scene does not depend on tokens.css. */
 const GRAIN =
   "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0.55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")";
@@ -85,6 +89,8 @@ function SceneClock() {
   });
   return null;
 }
+
+const HARBOUR_FADE = 1.4;
 
 function Floor({ radius, vt }: { radius: number; vt: VizTheme }) {
   const rings = useMemo(() => {
@@ -142,8 +148,32 @@ function Floor({ radius, vt }: { radius: number; vt: VizTheme }) {
     [rings, ticks],
   );
   const k = vt.dark ? 1 : 1.6;
+  // first load: the harbour (range rings, bezel ticks) fades up and settles before stations land
+  const store = useSceneStore();
+  const group = useRef<THREE.Group>(null);
+  const mats = useRef<{ m: THREE.Material; o: number }[]>([]);
+  const settled = useRef(false);
+  useFrame(() => {
+    if (settled.current) return;
+    const g = group.current;
+    if (!g) return;
+    if (!mats.current.length)
+      g.traverse((o) => {
+        const m = (o as THREE.Mesh).material as THREE.Material | undefined;
+        if (m && m.transparent) mats.current.push({ m, o: m.opacity });
+      });
+    const u = store.reduced ? 1 : clamp(store.t / HARBOUR_FADE, 0, 1);
+    const e = ease(easing.land, u);
+    for (const { m, o } of mats.current) m.opacity = o * e;
+    g.scale.setScalar(0.94 + 0.06 * e);
+    if (u >= 1) settled.current = true;
+  });
+  useEffect(() => {
+    mats.current = [];
+    settled.current = false;
+  }, [vt, radius]);
   return (
-    <group>
+    <group ref={group}>
       <Grid
         position={[0, 0, 0]}
         args={[10, 10]}
@@ -318,7 +348,16 @@ function buildStations(snap: FleetSnapshot, store: SceneStore): StationData[] {
       needs:
         tasks.filter((t) => t.state === 'blocked').length +
         agents.filter((a) => a.status === 'waiting').length,
+      labelled: true,
     });
+  }
+  // large fleets: tag only the busiest stations (needs-you and selection are always tagged)
+  if (out.length > LABEL_ALL_UP_TO) {
+    const rank = out
+      .slice()
+      .sort((a, b) => b.working + b.running - (a.working + a.running) || a.index - b.index);
+    const top = new Set(rank.slice(0, LABEL_TOP).map((d) => d.id));
+    for (const d of out) d.labelled = top.has(d.id);
   }
   return out;
 }
@@ -329,12 +368,17 @@ function SceneContents({ view, selection, onSelect }: FleetSceneProps) {
   store.vt = vt;
   const snap = view.snapshot;
   const replayAt = view.mode === 'replay' ? view.replay.at : null;
-  store.syncClock(view.mode, replayAt ?? snap?.generatedAt ?? -Infinity);
+  store.syncClock(
+    view.mode,
+    replayAt ?? snap?.generatedAt ?? -Infinity,
+    view.mode !== 'replay' || view.replay.playing,
+  );
   store.setSnapshot(snap);
   const stations = useMemo(() => (snap ? buildStations(snap, store) : []), [snap, store]);
   const radius = layoutRadius(store.projectCount);
   const aspect = useThree((s) => s.size.width / Math.max(1, s.size.height));
   const fog = fogRange(radius, aspect);
+  const narrow = useNarrow();
 
   useEffect(() => {
     const scratch = new THREE.Vector3();
@@ -343,7 +387,7 @@ function SceneContents({ view, selection, onSelect }: FleetSceneProps) {
 
   const selectProject = useCallback((id: string) => onSelect({ kind: 'project', id }), [onSelect]);
   const selectAgent = useCallback((id: string) => onSelect({ kind: 'agent', id }), [onSelect]);
-  const agents = useMemo(() => {
+  const agents = useMemo<BotEntry[]>(() => {
     if (!snap) return [];
     const perProject = new Map<string, number>();
     return snap.agents.slice(0, MAX_BOTS).map((a) => {
@@ -381,23 +425,19 @@ function SceneContents({ view, selection, onSelect }: FleetSceneProps) {
           key={d.id}
           d={d}
           selected={selection?.kind === 'project' && selection.id === d.id}
+          compact={narrow}
           onSelect={selectProject}
         />
       ))}
       {snap && <TaskSatellites snapshot={snap} onSelectProject={selectProject} />}
-      {agents.map(({ a, order }) => (
-        <Bot
-          key={a.id}
-          agent={a}
-          order={order}
-          selected={
-            !!selection &&
-            (selection.kind === 'agent' || selection.kind === 'session') &&
-            selection.id === a.id
-          }
-          onSelect={selectAgent}
-        />
-      ))}
+      <Bots
+        entries={agents}
+        max={MAX_BOTS}
+        selectedId={
+          selection && (selection.kind === 'agent' || selection.kind === 'session') ? selection.id : null
+        }
+        onSelect={selectAgent}
+      />
       <Effects />
       <Hud selection={selection} snapshot={snap} replayAt={replayAt} onClose={() => onSelect(null)} />
       <CameraRig selection={selection} radius={radius} projectCount={store.projectCount} />
@@ -534,7 +574,7 @@ export default function FleetScene({ view: viewProp, selection, onSelect }: Flee
           </SceneStoreContext.Provider>
         </VizThemeContext.Provider>
       </Canvas>
-      <style>{`@media (max-width: 560px) { .fl-viz-name { font-size: 14px !important; } .fl-viz-sub[data-needs='0'] { display: none; } }`}</style>
+      <style>{`@media (max-width: 560px) { .fl-viz-name { font-size: 11px !important; } .fl-viz-tag svg { display: none; } .fl-viz-block { left: 0 !important; bottom: 4px !important; transform: translateX(-50%); text-align: center; } .fl-viz-tag[data-needs='1'] .fl-viz-block { bottom: auto !important; top: 6px; } .fl-viz-sub[data-needs='0'] { display: none; } }`}</style>
       {/* depth: Halyard vignette + film grain (DOM, composited by the browser; no per-frame GPU cost) */}
       <div
         aria-hidden
