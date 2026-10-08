@@ -1174,7 +1174,7 @@ export const DIGEST_CSS = `
 .ovn-root .ovn-spark-end { fill: var(--ovn-spark); stroke: var(--ovn-bg); stroke-width: 1.5; }
 .ovn-root .ovn-spark-cap { display: flex; flex-direction: column; gap: var(--ovn-space-1); max-width: 11rem; }
 .ovn-root .ovn-spark-note { font-family: var(--ovn-font-mono); font-size: var(--ovn-text-xs); color: var(--ovn-muted); }
-.ovn-root .ovn-mast-main .ovn-trend-overall { flex-basis: 100%; }
+.ovn-root .ovn-mast-main .ovn-trend-overall { flex-basis: 100%; flex-wrap: wrap; row-gap: var(--ovn-space-3); }
 .ovn-root .ovn-mast-main .ovn-spark-cap { flex-direction: row; flex-wrap: wrap; align-items: baseline; column-gap: var(--ovn-space-4); max-width: none; }
 
 .ovn-root .ovn-notice { margin-top: var(--ovn-space-5); padding: var(--ovn-space-3) var(--ovn-space-4); border: 1px solid color-mix(in srgb, var(--ovn-yellow) 45%, transparent); background: color-mix(in srgb, var(--ovn-yellow) 7%, transparent); border-radius: var(--ovn-radius-sm); font-size: var(--ovn-text-sm); }
@@ -1383,7 +1383,7 @@ export const DIGEST_CSS = `
   .ovn-root .ovn-archive-headline { flex: 1; }
 }
 @container ovn (min-width: 1080px) {
-  .ovn-root .ovn-mast-main .ovn-trend-overall { flex-basis: auto; }
+  .ovn-root .ovn-mast-main .ovn-trend-overall { flex-basis: auto; flex-wrap: nowrap; }
   .ovn-root .ovn-mast-main .ovn-spark-cap { flex-direction: column; max-width: 11rem; }
   .ovn-root .ovn-lane-row { grid-template-columns: minmax(0, 1fr) 64px 4.5rem; }
   .ovn-root .ovn-lane-row .ovn-split-mini { width: 64px; }

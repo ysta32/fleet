@@ -162,9 +162,10 @@ const results = [];
 try {
   for (const scenario of only ? [only] : scenarios) {
     const digest = scenarioDigest(scenario);
+    const index = scenarioIndex(scenario, digest);
     const surfaces = {
-      page: renderDigestHtml(digest, { siteTitle: 'Overnight' }),
-      index: renderIndexHtml(scenarioIndex(scenario, digest), { siteTitle: 'Overnight', latest: digest }),
+      page: renderDigestHtml(digest, { siteTitle: 'Overnight', edition: index.digests.length }),
+      index: renderIndexHtml(index, { siteTitle: 'Overnight', latest: digest }),
       email: renderEmailHtml(digest),
     };
     for (const [surface, html] of Object.entries(surfaces)) {
@@ -173,11 +174,17 @@ try {
         const htmlPath = join(visual, 'out', `${name}.html`);
         await writeFile(
           htmlPath,
-          html.replace(
-            /<html\b([^>]*)>/i,
-            (_, attributes) =>
-              `<html${attributes.replace(/\sdata-theme\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')} data-theme="${theme}">`,
-          ),
+          html
+            .replace(
+              /<html\b([^>]*)>/i,
+              (_, attributes) =>
+                `<html${attributes.replace(/\sdata-theme\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')} data-theme="${theme}">`,
+            )
+            // Email clients switch on the OS scheme, not [data-theme]: pin the media query per theme.
+            .replace(
+              /@media \(prefers-color-scheme: dark\)/g,
+              surface === 'email' ? (theme === 'dark' ? '@media all' : '@media not all') : '$&',
+            ),
         );
         for (const width of [360, 768, 1280, 1920]) {
           const filename = `${name}-${width}.png`;
