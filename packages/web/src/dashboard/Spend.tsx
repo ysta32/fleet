@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { DEMO_SUMMARY, SpendTab as Tab } from 'virtual:fleet-spend';
 import { Icon } from '../shell/Icon';
 import { CopyCommand } from '../shell/Onboarding';
+import { demoSpendExample } from '../data/demoSource';
 
 export interface SpendTabProps {
   summary: Record<string, unknown> | null | undefined;
@@ -32,11 +33,13 @@ export function spendStart(
 }
 
 export function Spend({ demo = false }: { demo?: boolean }) {
-  const [summary, setSummary] = useState<SpendTabProps['summary']>(() => initialSpend(demo, DEMO_SUMMARY));
+  // Demo spend comes from the same synthetic fleet as the harbour; DEMO_SUMMARY only signals fleet-spend is installed.
+  const example = () => (demo && DEMO_SUMMARY ? demoSpendExample() : DEMO_SUMMARY);
+  const [summary, setSummary] = useState<SpendTabProps['summary']>(() => initialSpend(demo, example()));
   const [error, setError] = useState<string>();
   useEffect(() => {
     if (!Tab) return;
-    const start = spendStart(demo, DEMO_SUMMARY);
+    const start = spendStart(demo, example());
     setSummary(start.summary);
     setError(start.error);
     if (!start.fetch) return;

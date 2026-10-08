@@ -139,7 +139,9 @@ describe('Dashboard', () => {
     expect(html).toContain('Since you left');
     expect(html).toContain('>Synthetic<');
     expect(html).toContain('Replay the night');
-    expect(html).toContain('5 need attention');
+    // The demo night comes from the same synthetic fleet: one army is waiting on you at load.
+    expect(html).toMatch(/\d+ need attention/);
+    expect(html).toMatch(/needs? you/);
   });
   it('registers both panels in the shared rail, palette and hotkey tab list', () => {
     expect(TABS).toContainEqual({ id: 'overnight', label: 'Overnight', icon: 'moon', key: 'n' });

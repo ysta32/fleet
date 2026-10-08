@@ -1,7 +1,7 @@
 import { performance } from 'node:perf_hooks';
 import { describe, expect, it } from 'vitest';
 import { createDemoFleet } from './demo.js';
-import type { FleetSnapshot } from './types.js';
+import type { FleetEvent, FleetSnapshot } from './types.js';
 
 const NOW = Date.UTC(2026, 0, 1);
 
@@ -15,6 +15,12 @@ function checkReferences(snapshot: FleetSnapshot): void {
         .sort(),
     );
     const agents = snapshot.agents.filter((agent) => agent.sessionId === session.id);
+    if (session.status === 'ended' && agents.length === 0) {
+      // Archived and rolled-up sessions keep their usage after their agents leave the harbour.
+      expect(session.costUsd).toBeGreaterThanOrEqual(0);
+      expect(session.agentIds).toEqual([]);
+      continue;
+    }
     expect(session.tokens.input).toBe(agents.reduce((sum, agent) => sum + agent.tokens.input, 0));
   }
   for (const agent of snapshot.agents) {
@@ -88,7 +94,7 @@ describe('createDemoFleet', () => {
     expect(aEvents.every((event) => event.ts > NOW && event.ts <= NOW + 600_000)).toBe(true);
   });
 
-  it('runs the complete lifecycle with realistic overall event cadence and costs', () => {
+  it('runs the visual task lifecycle with a busy event cadence and costs', () => {
     const fleet = createDemoFleet({ seed: 42, now: NOW });
     const events = Array.from({ length: 5 }, () => fleet.tick(120_000)).flat();
     const kinds = new Set(events.map((event) => event.kind));
@@ -101,14 +107,8 @@ describe('createDemoFleet', () => {
       'task.state',
       'test.run',
       'review',
-      'merge',
-      'ci',
-      'deploy',
-      'release',
       'army.done',
       'session.end',
-      'session.waiting',
-      'blocked',
     ]) {
       expect(kinds.has(kind as (typeof events)[number]['kind'])).toBe(true);
     }
@@ -120,22 +120,52 @@ describe('createDemoFleet', () => {
     expect(
       new Set(events.filter((event) => event.kind === 'agent.tool').map((event) => event.data?.name)),
     ).toEqual(new Set(['Read', 'Edit', 'Bash']));
-    const failure = events.findIndex((event) => event.kind === 'ci' && event.severity === 'error');
-    expect(failure).toBeGreaterThanOrEqual(0);
-    expect(
-      events
-        .slice(failure + 1)
-        .some(
-          (event) =>
-            event.projectId === events[failure]!.projectId &&
-            event.kind === 'ci' &&
-            event.label === 'CI repaired',
-        ),
-    ).toBe(true);
     const done = events.findIndex((event) => event.kind === 'army.done');
     expect(events.slice(done + 1).some((event) => event.kind === 'session.start')).toBe(true);
     expect(fleet.snapshot().sessions.reduce((sum, session) => sum + session.costUsd, 0)).toBeGreaterThan(0);
     expect(events.every((event) => event.label.length <= 80)).toBe(true);
+  });
+
+  it.each([42, 7, 999])('keeps a believable business pace over an 8h night (seed %i)', (seed) => {
+    const fleet = createDemoFleet({ seed, now: NOW });
+    const events: FleetEvent[] = [];
+    const open: number[] = [];
+    for (let hour = 0; hour < 8; hour++) {
+      open.push(fleet.snapshot().prs.filter((pr) => pr.state === 'open').length);
+      for (let step = 0; step < 30; step++) events.push(...fleet.tick(120_000));
+    }
+    const count = (kind: FleetEvent['kind'], severity?: FleetEvent['severity']) =>
+      events.filter((event) => event.kind === kind && (!severity || event.severity === severity)).length;
+    expect(count('merge')).toBeGreaterThanOrEqual(15);
+    expect(count('merge')).toBeLessThanOrEqual(35);
+    expect(count('ci', 'error')).toBeGreaterThanOrEqual(1);
+    expect(count('ci', 'error')).toBeLessThanOrEqual(3);
+    expect(count('release')).toBeLessThanOrEqual(2);
+    expect(count('deploy')).toBeGreaterThanOrEqual(3);
+    expect(count('deploy')).toBeLessThanOrEqual(10);
+    for (const value of open) {
+      expect(value).toBeGreaterThanOrEqual(2);
+      expect(value).toBeLessThanOrEqual(8);
+    }
+    // Every CI failure is repaired later on the same project.
+    events.forEach((event, index) => {
+      if (event.kind !== 'ci' || event.severity !== 'error') return;
+      expect(
+        events
+          .slice(index + 1)
+          .some(
+            (next) =>
+              next.projectId === event.projectId && next.kind === 'ci' && next.label === 'CI repaired',
+          ),
+      ).toBe(true);
+    });
+    const totals = fleet.overnight(8).totals;
+    expect(totals.mergedPRs).toBe(count('merge'));
+    expect(totals.ciFailures).toBe(count('ci', 'error'));
+    expect(totals.commits).toBeGreaterThanOrEqual(2 * totals.mergedPRs);
+    expect(totals.commits).toBeLessThanOrEqual(5 * totals.mergedPRs);
+    // The harbour stays busy: visual events far outnumber business ones.
+    expect(count('agent.tool')).toBeGreaterThan(50 * count('merge'));
   });
 
   it('keeps references and dependency states valid through multiple army restarts', () => {
@@ -145,17 +175,19 @@ describe('createDemoFleet', () => {
       checkReferences(fleet.snapshot());
     }
     const snapshot = fleet.snapshot();
-    expect(snapshot.sessions.length).toBeLessThanOrEqual(6);
+    expect(snapshot.sessions.filter((session) => session.status !== 'ended').length).toBeLessThanOrEqual(6);
+    expect(snapshot.sessions.length).toBeLessThanOrEqual(6 + 12 + 12);
     expect(snapshot.agents.length).toBeLessThanOrEqual(36);
   });
 
   it('isolates snapshots, events and historical frames from caller mutation', () => {
     const fleet = createDemoFleet({ now: NOW });
-    const event = fleet.tick(800).find((entry) => entry.to)!;
+    const event = fleet.tick(8000).find((entry) => entry.to)!;
     event.to!.projectId = 'mutated';
     const before = fleet.snapshot();
     const detached = fleet.snapshot();
-    detached.projects[0]!.orch!.tasks[0]!.depends.push('missing');
+    const running = detached.projects.findIndex((project) => project.orch);
+    detached.projects[running]!.orch!.tasks[0]!.depends.push('missing');
     detached.agents[0]!.tokens.input = -1;
     detached.agents[0]!.location.projectId = 'missing';
     detached.sessions[0]!.agentIds.length = 0;
@@ -163,16 +195,16 @@ describe('createDemoFleet', () => {
     const history = fleet.history(0.1);
     const live = fleet.snapshot();
     const first = JSON.stringify(history.frames[0]);
-    history.frames[1]!.projects[0]!.orch!.tasks[0]!.depends.push('missing');
+    history.frames[1]!.projects.find((project) => project.orch)!.orch!.tasks[0]!.depends.push('missing');
     expect(JSON.stringify(history.frames[0])).toBe(first);
     history.events[0]!.label = 'mutated';
     expect(fleet.snapshot()).toEqual(live);
     expect(fleet.history(0.1).events[0]!.label).not.toBe('mutated');
   });
 
-  it('prewarms bounded history and continues the live fleet from its final state', () => {
-    const fleet = createDemoFleet({ now: NOW, seed: 17 });
+  it('pre-simulates history on creation and continues the same trajectory live', () => {
     const start = performance.now();
+    const fleet = createDemoFleet({ now: NOW, seed: 17 });
     const history = fleet.history(6);
     expect(performance.now() - start).toBeLessThan(500);
     expect(history.from).toBe(NOW - 6 * 3_600_000);
@@ -185,19 +217,97 @@ describe('createDemoFleet', () => {
       ),
     ).toBe(true);
     expect(history.frames.at(-1)).toEqual(fleet.snapshot());
-    const replay = createDemoFleet({ seed: 17, now: history.from });
-    const events = [];
-    for (let elapsed = 0; elapsed < 6 * 3_600_000; elapsed += 30_000) {
-      events.push(...replay.tick(30_000));
-    }
-    expect(history.events).toHaveLength(20_000);
-    expect(history.events).toEqual(events.slice(-20_000));
-    expect(fleet.snapshot()).toEqual(replay.snapshot());
-    expect(fleet.tick(60_000)).toEqual(replay.tick(60_000));
+    // Notable events cover the whole window, not just its tail.
+    const notable = history.events.filter((event) => ['merge', 'ci', 'release'].includes(event.kind));
+    expect(notable[0]!.ts - history.from).toBeLessThan(10 * 60_000);
+    expect(history.events.every((event) => event.ts >= history.from && event.ts <= NOW)).toBe(true);
+    expect(history.events.map((event) => event.ts)).toEqual(
+      history.events.map((event) => event.ts).sort((a, b) => a - b),
+    );
+    // Same seed and clock reproduce the same past and the same future.
+    const twin = createDemoFleet({ now: NOW, seed: 17 });
+    expect(twin.history(6)).toEqual(history);
+    expect(fleet.tick(60_000)).toEqual(twin.tick(60_000));
     const current = fleet.snapshot();
+    expect(current).toEqual(twin.snapshot());
     expect(fleet.history(6).frames.at(-1)).toEqual(current);
     expect(fleet.snapshot()).toEqual(current);
     expect(fleet.history(6).events.at(-1)!.ts).toBeGreaterThan(NOW);
+  });
+
+  it('starts with a past at first paint and exactly one army waiting on the user', () => {
+    const snapshot = createDemoFleet({ now: NOW }).snapshot();
+    expect(snapshot.prs.some((pr) => pr.state === 'merged')).toBe(true);
+    expect(snapshot.prs.some((pr) => pr.state === 'open')).toBe(true);
+    expect(snapshot.prs.some((pr) => pr.ci !== 'pending')).toBe(true);
+    expect(snapshot.releases.length).toBeGreaterThan(0);
+    expect(snapshot.deploys.length).toBeGreaterThan(0);
+    expect(snapshot.sessions.reduce((sum, session) => sum + session.costUsd, 0)).toBeGreaterThan(1);
+    expect(snapshot.sessions.filter((session) => session.status === 'waiting')).toHaveLength(1);
+    expect(snapshot.agents.filter((agent) => agent.status === 'waiting')).toHaveLength(1);
+    expect(
+      snapshot.alerts.filter((alert) => !alert.cleared && alert.kind === 'session.waiting'),
+    ).toHaveLength(1);
+    const runs = snapshot.projects.flatMap((project) => (project.orch ? [project.orch] : []));
+    expect(runs.some((run) => run.tasks.some((task) => task.state === 'landed'))).toBe(true);
+    // Every lead does its own work, so a lead never shows zero tokens next to a nonzero cost.
+    for (const session of snapshot.sessions.filter(
+      (entry) => entry.status !== 'ended' && entry.costUsd > 0,
+    )) {
+      const lead = snapshot.agents.find((agent) => agent.id === session.id)!;
+      expect(lead.tokens.input).toBeGreaterThan(0);
+      expect(lead.label).not.toMatch(/lead lead/);
+    }
+    checkReferences(snapshot);
+  });
+
+  it('varies army DAGs across runs', () => {
+    const fleet = createDemoFleet({ now: NOW, seed: 5 });
+    const shapes = new Set<string>();
+    for (let step = 0; step < 60; step++) {
+      fleet.tick(120_000);
+      for (const project of fleet.snapshot().projects)
+        if (project.orch) shapes.add(project.orch.tasks.map((task) => task.depends.join('+')).join('|'));
+    }
+    expect(shapes.size).toBeGreaterThan(3);
+  });
+
+  it('keeps needs-you waits rare and realistic: a handful per 6h, each 5 to 45 minutes', () => {
+    const fleet = createDemoFleet({ now: NOW, seed: 9 });
+    const events = Array.from({ length: 180 }, () => fleet.tick(120_000)).flat();
+    const starts = events.filter((event) => event.kind === 'session.waiting');
+    expect(starts.length).toBeGreaterThanOrEqual(4);
+    expect(starts.length).toBeLessThanOrEqual(10);
+    for (const begin of starts) {
+      const end = events.find(
+        (event) =>
+          event.ts > begin.ts && event.sessionId === begin.sessionId && event.label === 'Dependency ready',
+      );
+      if (!end) continue;
+      expect(end.ts - begin.ts).toBeGreaterThanOrEqual(5 * 60_000);
+      expect(end.ts - begin.ts).toBeLessThanOrEqual(45 * 60_000 + 3_000);
+    }
+  });
+
+  it('summarizes the night ending now from the same simulation', () => {
+    const fleet = createDemoFleet({ now: NOW });
+    const digest = fleet.overnight();
+    const snapshot = fleet.snapshot();
+    expect(digest.window.until).toBe(new Date(NOW).toISOString());
+    expect(Date.parse(digest.window.until) - Date.parse(digest.window.since)).toBe(8 * 3_600_000);
+    expect(digest.projects.map((project) => project.name)).toEqual(
+      snapshot.projects.map((project) => project.name),
+    );
+    expect(digest.totals.projectsActive).toBe(snapshot.projects.length);
+    expect(digest.totals.mergedPRs).toBeGreaterThan(0);
+    const waiting = snapshot.sessions.find((session) => session.status === 'waiting')!;
+    expect(digest.projects.find((project) => project.id === waiting.projectId)!.health).toBe('red');
+    expect(digest.headline).toMatch(/needs? you/);
+    const prs = new Set(snapshot.prs.map((pr) => `${pr.projectId}#${pr.number}`));
+    const latest = digest.projects.flatMap((project) =>
+      project.mergedPRs.slice(0, 1).map((pr) => `${project.id}#${pr.number}`),
+    );
+    expect(latest.some((key) => prs.has(key))).toBe(true);
   });
 
   it('uses the current state for zero history and caps history to twelve hours', () => {
@@ -212,7 +322,7 @@ describe('createDemoFleet', () => {
     const history = fleet.history(25);
     expect(history.to - history.from).toBe(12 * 3_600_000);
     expect(history.frames.length).toBeLessThanOrEqual(720);
-    expect(history.events.length).toBeLessThanOrEqual(20_000);
+    expect(history.events.length).toBeLessThanOrEqual(28_000);
     expect(history.frames.at(-1)).toEqual(fleet.snapshot());
     checkReferences(fleet.snapshot());
   });
@@ -231,8 +341,9 @@ describe('createDemoFleet', () => {
     const seen = new Map<string, number>();
     let lastSequence = -1;
     let pairedAlerts = false;
-    for (let step = 0; step < 1500; step++) {
-      fleet.tick(800);
+    // Six hours: waits (paired alerts) and CI failures are rare, so sample a longer span.
+    for (let step = 0; step < 180; step++) {
+      fleet.tick(120_000);
       const alerts = fleet.snapshot().alerts;
       expect(new Set(alerts.map((alert) => alert.id)).size).toBe(alerts.length);
       for (const alert of alerts) {
@@ -274,19 +385,34 @@ describe('createDemoFleet', () => {
 
   it('removes completed armies from their old projects after relocation', () => {
     const fleet = createDemoFleet({ now: NOW });
-    const initial = fleet.snapshot().sessions.map((session) => session.id);
-    for (let step = 0; step < 900; step++) {
+    const initial = fleet
+      .snapshot()
+      .sessions.filter((session) => session.agentIds.length > 0)
+      .map((session) => session.id);
+    // Long enough to outlast the needs-you wait seeded at load (at most 30 minutes) plus a full run.
+    for (let step = 0; step < 4500; step++) {
       fleet.tick(800);
       const snapshot = fleet.snapshot();
-      expect(snapshot.sessions).toHaveLength(3);
+      expect(snapshot.sessions.filter((session) => session.agentIds.length > 0)).toHaveLength(3);
       expect(snapshot.agents).toHaveLength(18);
+      for (const session of snapshot.sessions.filter((entry) => entry.agentIds.length === 0))
+        expect(snapshot.agents.some((agent) => agent.sessionId === session.id)).toBe(false);
       expect(snapshot.projects.filter((project) => project.orch)).toHaveLength(3);
       for (const project of snapshot.projects.filter((project) => !project.orch)) {
-        expect(snapshot.sessions.some((session) => session.projectId === project.id)).toBe(false);
+        expect(
+          snapshot.sessions.some(
+            (session) => session.projectId === project.id && session.agentIds.length > 0,
+          ),
+        ).toBe(false);
         expect(snapshot.agents.some((agent) => agent.projectId === project.id)).toBe(false);
       }
     }
-    expect(fleet.snapshot().sessions.every((session) => !initial.includes(session.id))).toBe(true);
+    expect(
+      fleet
+        .snapshot()
+        .sessions.filter((session) => session.agentIds.length > 0)
+        .every((session) => !initial.includes(session.id)),
+    ).toBe(true);
   });
 
   it('supports smaller project counts and rejects invalid time or count inputs', () => {
