@@ -59,6 +59,47 @@ describe('needs-you moments', () => {
       { ts: 60 * MIN, end: 100 * MIN, projectId: 'p2', open: true },
     ]);
   });
+  it('keys collector task blocks by project and task and ends them only when that task unblocks', () => {
+    const block = { sessionId: undefined, taskId: 't04' };
+    const moments = needsYouMoments(
+      history([
+        event(10 * MIN, 'blocked', block),
+        event(12 * MIN, 'agent.tool', { sessionId: 's1' }),
+        event(14 * MIN, 'merge', { sessionId: undefined }),
+        event(16 * MIN, 'task.state', { sessionId: undefined, taskId: 't05', data: { state: 'running' } }),
+        event(18 * MIN, 'task.state', { sessionId: undefined, taskId: 't04', data: { state: 'blocked' } }),
+        event(20 * MIN, 'task.state', {
+          projectId: 'p2',
+          sessionId: undefined,
+          taskId: 't04',
+          data: { state: 'running' },
+        }),
+        event(25 * MIN, 'task.state', { sessionId: undefined, taskId: 't04', data: { state: 'running' } }),
+        event(30 * MIN, 'blocked', { ...block, taskId: 't07' }),
+      ]),
+    );
+    expect(moments).toEqual([
+      { ts: 10 * MIN, end: 25 * MIN, projectId: 'p1', open: false },
+      { ts: 30 * MIN, end: 100 * MIN, projectId: 'p1', open: true },
+    ]);
+  });
+  it('keeps session waits keyed by session while a block raised with them waits for its task', () => {
+    const moments = needsYouMoments(
+      history([
+        event(10 * MIN, 'session.waiting'),
+        event(10 * MIN, 'blocked', { taskId: 't02' }),
+        event(15 * MIN, 'agent.tool', { projectId: 'p1', sessionId: 's1' }),
+        event(40 * MIN, 'task.state', { sessionId: undefined, taskId: 't02', data: { state: 'running' } }),
+        event(50 * MIN, 'session.waiting', { sessionId: 's2' }),
+        event(55 * MIN, 'agent.tool', { sessionId: 's2' }),
+      ]),
+    );
+    // the wait and the block raised together are one moment that lasts until the later of the two ends
+    expect(moments).toEqual([
+      { ts: 10 * MIN, end: 40 * MIN, projectId: 'p1', open: false },
+      { ts: 50 * MIN, end: 55 * MIN, projectId: 'p1', open: false },
+    ]);
+  });
   it('falls back to the project when an event has no session or agent', () => {
     const moments = needsYouMoments(
       history([
@@ -100,16 +141,17 @@ describe('timeline model', () => {
       10,
     );
     expect(model.notches.map((notch) => [notch.ts, notch.projectName, notch.waitedMs, notch.count])).toEqual([
-      [10 * MIN, 'orbit-docs', 40 * MIN, 2],
+      [12 * MIN, 'orbit-docs', 40 * MIN, 2],
       [70 * MIN, 'helix-db', 30 * MIN, 1],
     ]);
     expect(notchMessage(model.notches[0]!)).toBe('orbit-docs waited 40m here (+1 more)');
     expect(notchMessage(model.notches[1]!)).toBe('helix-db waited 30m+ here');
-    expect(stepNotch(model.notches, 0, 1)?.ts).toBe(10 * MIN);
-    expect(stepNotch(model.notches, 10 * MIN, 1)?.ts).toBe(70 * MIN);
+    // the merged notch sits where the named (longest) wait began, not at the cluster's first moment
+    expect(stepNotch(model.notches, 0, 1)?.ts).toBe(12 * MIN);
+    expect(stepNotch(model.notches, 12 * MIN, 1)?.ts).toBe(70 * MIN);
     expect(stepNotch(model.notches, 70 * MIN, 1)).toBeUndefined();
-    expect(stepNotch(model.notches, 70 * MIN, -1)?.ts).toBe(10 * MIN);
-    expect(stepNotch(model.notches, 10 * MIN, -1)).toBeUndefined();
+    expect(stepNotch(model.notches, 70 * MIN, -1)?.ts).toBe(12 * MIN);
+    expect(stepNotch(model.notches, 12 * MIN, -1)).toBeUndefined();
     expect(nearestNotch(model.notches, 68 * MIN, 3 * MIN)?.ts).toBe(70 * MIN);
     expect(nearestNotch(model.notches, 40 * MIN, 3 * MIN)).toBeUndefined();
   });

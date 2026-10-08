@@ -703,15 +703,16 @@ time {
 .tape-toast {
   position: absolute;
   bottom: calc(100% + 12px);
-  left: clamp(8em, var(--at), calc(100% - 8em));
-  max-width: min(32ch, 100%);
+  left: var(--at);
+  max-width: calc(100vw - 16px);
   padding: 6px 10px;
   border: var(--fl-hairline) solid var(--fl-border-strong);
   border-left: 2px solid var(--fl-accent);
   border-radius: var(--fl-radius-sm);
   background: var(--fl-surface-2);
   box-shadow: var(--fl-elev-2);
-  transform: translateX(-50%);
+  /* centred on the notch, then nudged (by ReplayBar) to stay inside the viewport */
+  transform: translateX(calc(-50% + var(--nudge, 0px)));
   font: 500 var(--fl-text-xs) / 1.3 var(--fl-font-mono);
   color: var(--fl-fg);
   white-space: nowrap;
@@ -721,10 +722,17 @@ time {
   z-index: 2;
   animation: tape-toast-in var(--fl-dur-fast) var(--fl-ease-land) both;
 }
+/* the notch toast floats over the bottom of the scene: the legend steps aside while it shows */
+.stage [data-fl-legend] {
+  transition: opacity var(--fl-dur-fast) linear;
+}
+.stage:has(.tape-toast) [data-fl-legend] {
+  opacity: 0;
+}
 @keyframes tape-toast-in {
   from {
     opacity: 0;
-    transform: translate(-50%, 4px);
+    translate: 0 4px;
   }
 }
 .notch-prev svg {
@@ -770,10 +778,18 @@ time {
   border-radius: 1px;
   background: var(--fl-fg);
 }
+/* focus: an outline on the whole tape (every engine) plus a ringed thumb; --fl-focus is >= 3:1 on both themes */
 .timeline input[type='range']:focus-visible {
-  outline: none;
+  outline: var(--fl-focus-width, 2px) solid var(--fl-focus);
+  outline-offset: 3px;
+  border-radius: var(--fl-radius-xs);
 }
 .timeline input[type='range']:focus-visible::-webkit-slider-thumb {
+  box-shadow:
+    0 0 0 3px var(--fl-bg),
+    0 0 0 5px var(--fl-focus);
+}
+.timeline input[type='range']:focus-visible::-moz-range-thumb {
   box-shadow:
     0 0 0 3px var(--fl-bg),
     0 0 0 5px var(--fl-focus);

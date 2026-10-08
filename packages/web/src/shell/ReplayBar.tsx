@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { HistoryResponse } from '@fleet/shared';
 import type { FleetView } from '../data/contract';
 import {
@@ -119,6 +119,22 @@ export function ReplayBar({ view }: { view: FleetView }) {
     [span, replay.from],
   );
   useEffect(() => () => window.clearTimeout(toastTimer.current), []);
+  const toastEl = useRef<HTMLDivElement>(null);
+  // keep the micro-toast inside the viewport (it may be wider than a phone's short tape)
+  useLayoutEffect(() => {
+    const el = toastEl.current;
+    if (!el) return;
+    el.style.setProperty('--nudge', '0px');
+    const rect = el.getBoundingClientRect();
+    const edge = 8;
+    const nudge =
+      rect.left < edge
+        ? edge - rect.left
+        : rect.right > window.innerWidth - edge
+          ? window.innerWidth - edge - rect.right
+          : 0;
+    if (nudge) el.style.setProperty('--nudge', `${Math.round(nudge)}px`);
+  }, [toast]);
   useEffect(() => {
     if (!active) {
       setToast(null);
@@ -263,6 +279,7 @@ export function ReplayBar({ view }: { view: FleetView }) {
           {toast && (
             <div
               key={toast.key}
+              ref={toastEl}
               className="tape-toast"
               role="status"
               style={{ ['--at' as string]: `${toast.left}%` }}

@@ -219,9 +219,12 @@ const REFIT_SECONDS = 3;
 const HOME_SECONDS = 2.2;
 const homeSph = new THREE.Spherical();
 const homeRel = new THREE.Vector3();
-/** scrub dolly: heading swing per full-window scrub (rad), per-seek cap, push-in while scrubbing */
-const DOLLY_SWING = 0.9;
-const DOLLY_STEP_CAP = 0.08;
+/**
+ * Replay dolly: the heading offset is a pure function of the playhead (DOLLY_SWING rad across the whole
+ * window, measured from the window start), so a playhead always settles to the same offset whatever
+ * path the scrub took. Dragging adds a transient push-in that settles back out.
+ */
+const DOLLY_SWING = 0.6;
 const DOLLY_PUSH = 0.07;
 
 function CameraRig({
@@ -231,6 +234,7 @@ function CameraRig({
   replaying,
   replayAt,
   replayPlaying,
+  replayFrom,
   replaySpan,
 }: {
   selection: Selection;
@@ -239,6 +243,7 @@ function CameraRig({
   replaying: boolean;
   replayAt: number | null;
   replayPlaying: boolean;
+  replayFrom: number;
   replaySpan: number;
 }) {
   const store = useSceneStore();
@@ -258,7 +263,8 @@ function CameraRig({
   const prevSel = useRef(selKey);
   const wasReplaying = useRef(replaying);
   const lastAt = useRef<number | null>(null);
-  const scrubSwing = useRef(0);
+  /** heading offset (rad) currently applied for the playhead */
+  const headingApplied = useRef(0);
   const scrubAt = useRef(-Infinity);
   const push = useRef(0);
   const pushApplied = useRef(1);
@@ -284,16 +290,18 @@ function CameraRig({
     wasReplaying.current = replaying;
   }, [replaying, hasSelection, store]);
 
-  // scrubbing (a paused playhead moving) swings the heading a little in the scrub direction
+  // a paused playhead moving is a scrub: it triggers the transient push-in
   useEffect(() => {
     if (replayAt === null) return;
     const previous = lastAt.current;
     lastAt.current = replayAt;
-    if (previous === null || replayPlaying || replaySpan <= 0 || replayAt === previous) return;
-    const step = clamp((replayAt - previous) / replaySpan, -DOLLY_STEP_CAP, DOLLY_STEP_CAP);
-    scrubSwing.current += step * DOLLY_SWING;
+    if (previous === null || replayPlaying || replayAt === previous) return;
     scrubAt.current = store.t;
-  }, [replayAt, replayPlaying, replaySpan, store]);
+  }, [replayAt, replayPlaying, store]);
+  const headingTarget =
+    replaying && replayAt !== null && replaySpan > 0
+      ? DOLLY_SWING * clamp((replayAt - replayFrom) / replaySpan, 0, 1)
+      : 0;
 
   // reframe on the first non-empty snapshot and when the fleet grows/shrinks a lot
   useEffect(() => {
@@ -358,14 +366,12 @@ function CameraRig({
         delta.copy(HOME).sub(c.target).multiplyScalar(damp(0.5, dt));
         c.target.add(delta);
       }
-      if (store.reduced || !replaying) {
-        scrubSwing.current = 0;
-        push.current = 0;
-      }
-      // scrub dolly: swing the heading by the scrubbed amount and push in slightly while the playhead is dragged
+      if (store.reduced || !replaying) push.current = 0;
+      // replay dolly: ease the heading toward the playhead's offset; push in slightly while dragging
       offset.copy(camera.position).sub(c.target);
-      const swing = scrubSwing.current * damp(5, dt);
-      scrubSwing.current -= swing;
+      const target = store.reduced ? 0 : headingTarget;
+      const swing = (target - headingApplied.current) * (store.reduced ? 1 : damp(5, dt));
+      headingApplied.current += swing;
       const want = store.t - scrubAt.current < 0.35 && replaying && !store.reduced ? 1 : 0;
       push.current += (want - push.current) * damp(want ? 6 : 2, dt);
       const factor = 1 - DOLLY_PUSH * push.current;
@@ -393,6 +399,8 @@ function CameraRig({
       onStart={() => {
         lastInteract.current = performance.now();
         refitStart.current = -Infinity;
+        // the user takes the camera: stop easing home so the rig never fights the drag
+        homeStart.current = -Infinity;
       }}
       onEnd={() => {
         lastInteract.current = performance.now();
@@ -534,6 +542,7 @@ function SceneContents({ view, selection, onSelect }: FleetSceneProps) {
         replaying={view.mode === 'replay'}
         replayAt={replayAt}
         replayPlaying={view.mode === 'replay' && view.replay.playing}
+        replayFrom={view.replay.from}
         replaySpan={view.replay.to - view.replay.from}
       />
     </>
