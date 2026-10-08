@@ -1,30 +1,18 @@
 import { useEffect, useState } from 'react';
-import type { ComponentType } from 'react';
+import { SpendTab as Tab } from 'virtual:fleet-spend';
 
-interface SpendTabProps {
+export interface SpendTabProps {
   summary: Record<string, unknown> | null | undefined;
   error?: string;
 }
 
 export function Spend() {
-  const [Tab, setTab] = useState<ComponentType<SpendTabProps> | null | undefined>();
   const [summary, setSummary] = useState<SpendTabProps['summary']>();
   const [error, setError] = useState<string>();
   useEffect(() => {
+    if (!Tab) return;
     const controller = new AbortController();
     async function load() {
-      try {
-        const moduleName = 'fleet-spend/web';
-        const module: { SpendTab?: ComponentType<SpendTabProps> } = await import(
-          /* @vite-ignore */ moduleName
-        );
-        if (!module.SpendTab) throw new Error('Spend unavailable');
-        if (controller.signal.aborted) return;
-        setTab(() => module.SpendTab);
-      } catch {
-        if (!controller.signal.aborted) setTab(null);
-        return;
-      }
       try {
         const response = await fetch('/api/spend', { signal: controller.signal, credentials: 'same-origin' });
         if (controller.signal.aborted) return;
@@ -71,35 +59,19 @@ export function Spend() {
       >
         SPEND
       </p>
-      {Tab === undefined ? (
-        <div role="status" aria-busy="true">
-          <h2>Loading spend tracking…</h2>
-          <div
-            aria-hidden="true"
-            style={{
-              height: 'var(--fl-space-8)',
-              background: 'var(--fl-skeleton)',
-              borderRadius: 'var(--fl-radius-sm)',
-            }}
-          />
-        </div>
-      ) : (
-        <>
-          <h2
-            style={{
-              fontFamily: 'var(--fl-font-display)',
-              fontWeight: 400,
-              fontSize: 'var(--fl-text-2xl)',
-              lineHeight: 'var(--fl-leading-tight)',
-            }}
-          >
-            Spend tracking not installed
-          </h2>
-          <p style={{ color: 'var(--fl-fg-muted)', maxWidth: 'var(--fl-measure)' }}>
-            Connect Fleet Spend to see where your model budget goes, across projects and providers.
-          </p>
-        </>
-      )}
+      <h2
+        style={{
+          fontFamily: 'var(--fl-font-display)',
+          fontWeight: 400,
+          fontSize: 'var(--fl-text-2xl)',
+          lineHeight: 'var(--fl-leading-tight)',
+        }}
+      >
+        Spend tracking not installed
+      </h2>
+      <p style={{ color: 'var(--fl-fg-muted)', maxWidth: 'var(--fl-measure)' }}>
+        Connect Fleet Spend to see where your model budget goes, across projects and providers.
+      </p>
     </section>
   );
 }

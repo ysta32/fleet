@@ -1,7 +1,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { IconName } from '@fleet/ui';
 import type { Selection } from './data/contract';
 import type { DashboardTab } from './dashboard/Dashboard';
+import { TABS } from './shell/tabs';
 import { formatCost, needsYou } from './dashboard/model';
 import { useFleet } from './data/useFleet';
 import { Dashboard, FleetScene } from './shell/slots';
@@ -22,14 +22,6 @@ import { useTheme } from './shell/theme';
 import type { PaletteItem } from './shell/palette';
 import './styles.css';
 
-const TABS: { id: DashboardTab; label: string; icon: IconName; key: string }[] = [
-  { id: 'overview', label: 'Overview', icon: 'fleet', key: 'o' },
-  { id: 'sessions', label: 'Sessions', icon: 'session', key: 's' },
-  { id: 'armies', label: 'Armies', icon: 'army', key: 'a' },
-  { id: 'prs', label: 'PRs', icon: 'merge', key: 'p' },
-  { id: 'alerts', label: 'Alerts', icon: 'bell', key: 'i' },
-  { id: 'overnight', label: 'Overnight', icon: 'moon', key: 'n' },
-];
 const DISMISSED_KEY = 'fleet.dismissedAlerts';
 
 function readDismissed(): Set<string> {

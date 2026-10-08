@@ -1,10 +1,18 @@
+import { createServer as createHttpServer } from 'node:http';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { createServer } from 'vite';
+import { fleetSpendPlugin } from '../../vite.config';
+import { TABS } from '../shell/tabs';
+import { KEYMAP } from '../shell/hotkeys';
+
 import type { FleetSnapshot } from '@fleet/shared';
 import type { FleetView } from '../data/contract';
 import Dashboard from './Dashboard';
 import type { DashboardTab } from './Dashboard';
+
+vi.mock('virtual:fleet-spend', () => ({ SpendTab: null }));
 
 const now = 1791374400000;
 function fixture(): FleetView {
@@ -125,8 +133,44 @@ function render(tab: DashboardTab, view = fixture()) {
 }
 
 describe('Dashboard', () => {
-  it('renders the overnight slot even before the snapshot arrives', () => {
-    expect(render('overnight', { ...fixture(), snapshot: null })).toBe('<div data-slot="overnight"></div>');
+  it('renders the demo overnight digest even before the snapshot arrives', () => {
+    const html = render('overnight', { ...fixture(), snapshot: null });
+    expect(html).toContain('Since you left');
+    expect(html).toContain('OVERNIGHT / DEMO');
+    expect(html).toContain('Replay the night');
+    expect(html).toContain('Across your projects');
+  });
+  it('registers both panels in the shared rail, palette and hotkey tab list', () => {
+    expect(TABS).toContainEqual({ id: 'overnight', label: 'Overnight', icon: 'moon', key: 'n' });
+    expect(TABS).toContainEqual({ id: 'spend', label: 'Spend', icon: 'cost', key: 'c' });
+    expect(new Set(TABS.map((tab) => tab.key)).size).toBe(TABS.length);
+    for (const tab of TABS.filter((tab) => tab.id === 'overnight' || tab.id === 'spend')) {
+      expect(KEYMAP).toContainEqual({ group: 'Go to', keys: ['G', tab.key.toUpperCase()], label: tab.label });
+    }
+  });
+  it('renders the spend not-installed state without needing a snapshot', () => {
+    const html = render('spend', { ...fixture(), snapshot: null });
+    expect(html).toContain('Spend tracking not installed');
+    expect(html).toContain('Connect Fleet Spend');
+    expect(html).not.toContain('Loading spend tracking');
+  });
+  it('resolves the optional spend module to a real null export when absent', async () => {
+    const server = await createServer({
+      configFile: false,
+      plugins: [
+        fleetSpendPlugin(() => {
+          throw new Error('MODULE_NOT_FOUND');
+        }),
+      ],
+      server: { middlewareMode: true, hmr: { server: createHttpServer() }, ws: false },
+      optimizeDeps: { noDiscovery: true, include: [] },
+    });
+    try {
+      const module = await server.ssrLoadModule('virtual:fleet-spend');
+      expect(module.SpendTab).toBeNull();
+    } finally {
+      await server.close();
+    }
   });
   it('renders a loading state', () => {
     expect(render('overview', { ...fixture(), snapshot: null })).toContain('Waiting for fleet data');
