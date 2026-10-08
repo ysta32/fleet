@@ -212,7 +212,8 @@ describe('createDemoFleet', () => {
     const start = performance.now();
     const fleet = createDemoFleet({ now: NOW, seed: 17 });
     const history = fleet.history(6);
-    expect(performance.now() - start).toBeLessThan(500);
+    // Smoke budget against pathological slowdowns: ~100ms locally, but shared CI runners are 5x slower and noisy.
+    expect(performance.now() - start).toBeLessThan(1500);
     expect(history.from).toBe(NOW - 6 * 3_600_000);
     expect(history.to).toBe(NOW);
     expect(history.frames.length).toBeLessThanOrEqual(720);
