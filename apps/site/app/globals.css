@@ -519,7 +519,8 @@ kbd {
 }
 .hero-poster {
   object-fit: cover;
-  object-position: 60% 50%;
+  /* centred: the hero camera centres the waiting station, and the posters are stills of that framing */
+  object-position: 50% 50%;
 }
 .hero-live {
   opacity: 0;
@@ -613,6 +614,10 @@ kbd {
 .split {
   display: grid;
   gap: var(--fl-space-8);
+}
+/* a long unbreakable line (a command in a code block) scrolls inside its column, never widens the page */
+.split > * {
+  min-width: 0;
 }
 @media (min-width: 1024px) {
   .split {
@@ -823,6 +828,16 @@ kbd {
   text-align: right;
   font-family: var(--fl-font-mono);
   font-variant-numeric: tabular-nums;
+}
+/* Narrow phones: the money column stays; the model is the column that goes (M10). */
+@media (max-width: 419px) {
+  .table .col-model {
+    display: none;
+  }
+  .table th,
+  .table td {
+    padding-inline: var(--fl-space-3);
+  }
 }
 .dot {
   display: inline-block;
@@ -1688,4 +1703,1432 @@ pre.code .c {
 }
 .fleet-index button[data-status='waiting'] .fleet-index-meta {
   color: var(--fl-accent);
+}
+
+/* ======================================================================
+   v1.1 site pass (t40): rhythm, numbering, hero sync, proof, phone,
+   spend beat, CTA, docs rail and copy, live 404.
+   ====================================================================== */
+
+/* One section gap for every page. Adjacent sections meet at exactly twice this. */
+:root {
+  --site-section: var(--fl-space-10);
+}
+@media (min-width: 1280px) {
+  :root {
+    --site-section: var(--fl-space-11);
+  }
+}
+.section,
+.action {
+  padding-block: var(--site-section);
+}
+
+/* Section numbers are derived from document order, never typed in. */
+main {
+  counter-reset: fl-section;
+}
+.sec-n {
+  counter-increment: fl-section;
+}
+.sec-n::before {
+  content: counter(fl-section, decimal-leading-zero) ' · ';
+}
+
+/* Section heads: headline left, lead right on wide screens, so no half of the row sits empty. */
+@media (min-width: 1024px) {
+  .section-head {
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    column-gap: var(--fl-space-9);
+    align-items: end;
+  }
+  .section-head > .label-row {
+    grid-column: 1 / -1;
+  }
+  .section-head > .lead {
+    margin: 0;
+  }
+  .head-split {
+    display: grid;
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    column-gap: var(--fl-space-9);
+    align-items: end;
+    margin-bottom: var(--fl-space-9);
+  }
+  .head-split > .section-head {
+    grid-template-columns: minmax(0, 1fr);
+    margin-bottom: 0;
+  }
+}
+.head-split {
+  display: grid;
+  gap: var(--fl-space-7);
+  margin-bottom: var(--fl-space-9);
+}
+.head-split > .section-head {
+  margin-bottom: 0;
+}
+
+/* ---- hero: problem-first copy column, scene masked away from it ---- */
+.hero {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
+  justify-content: stretch;
+  min-height: min(calc(100svh - var(--nav-h)), 960px);
+}
+.hero-copy {
+  align-content: center;
+  padding-block: var(--fl-space-10);
+}
+.hero-copy .display {
+  max-width: 12ch;
+}
+.hero-sync {
+  color: var(--fl-accent);
+}
+.hero-stage {
+  -webkit-mask-image: linear-gradient(to top, transparent 0, #000 22%);
+  mask-image: linear-gradient(to top, transparent 0, #000 22%);
+}
+@media (min-width: 1024px) {
+  /* The words own the left 40%; the scene is drawn only to their right, so no label crosses a letter. */
+  .hero-stage {
+    left: 40%;
+    -webkit-mask-image:
+      linear-gradient(to right, transparent 0, #000 24%), linear-gradient(to top, transparent 0, #000 22%);
+    -webkit-mask-composite: source-in;
+    mask-image:
+      linear-gradient(to right, transparent 0, #000 24%), linear-gradient(to top, transparent 0, #000 22%);
+    mask-composite: intersect;
+  }
+  .hero-shade {
+    background: linear-gradient(to top, var(--fl-bg) 0%, transparent 24%);
+  }
+  .hero-copy {
+    max-width: var(--site-max);
+  }
+  .hero-copy > * {
+    max-width: calc(40vw - var(--site-gutter));
+  }
+}
+@media (min-width: 1680px) {
+  .hero-copy > * {
+    max-width: 640px;
+  }
+}
+@media (max-width: 1023px) {
+  .hero-stage {
+    bottom: auto;
+    /* A fixed height, not a share of the hero: the hero grows with its copy, and a taller stage would
+       crop the square phone poster at the sides and push its legend down behind the headline. */
+    height: min(100vw, 46svh);
+    /* Fully clear by 88%: the poster's legend row sits below that, under the copy. */
+    -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent 88%);
+    mask-image: linear-gradient(to bottom, #000 55%, transparent 88%);
+  }
+  .hero-shade {
+    background: none;
+  }
+  .hero-copy {
+    align-content: end;
+    padding-top: calc(min(100vw, 46svh) - var(--fl-space-7));
+    padding-bottom: var(--fl-space-8);
+  }
+}
+
+/* S1: the scene's own halyard signal (packages/web viz) raises the flare; the headline's last words
+   turn signal orange in step with it. Reduced motion shows the end state. */
+@media (prefers-reduced-motion: no-preference) {
+  .hero-sync {
+    animation: hero-sync 0.6s 1.2s ease-out both;
+  }
+}
+@keyframes hero-sync {
+  from {
+    color: var(--fl-fg);
+  }
+}
+
+/* ---- proof: the current release, from CHANGELOG.md ---- */
+.release-card {
+  display: grid;
+  gap: var(--fl-space-5);
+  padding: var(--fl-space-6);
+  border: var(--fl-hairline) solid var(--fl-border);
+  border-radius: var(--fl-radius-lg);
+  background: var(--fl-surface-1);
+}
+.release-tag {
+  font-family: var(--fl-font-display);
+  font-size: var(--fl-text-3xl);
+  line-height: var(--fl-leading-display);
+  letter-spacing: var(--fl-tracking-display);
+}
+.release-counts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--fl-space-2) var(--fl-space-6);
+  font-size: var(--fl-text-sm);
+  color: var(--fl-fg-muted);
+}
+.release-counts li {
+  display: flex;
+  gap: var(--fl-space-2);
+  align-items: baseline;
+}
+.release-counts .num {
+  color: var(--fl-fg);
+}
+
+/* ---- overnight digest: proof list, honest sparklines, fade-crop ---- */
+.digest-keys {
+  margin-top: var(--fl-space-7);
+}
+.digest-try {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--fl-space-3);
+  margin-top: var(--fl-space-8);
+  min-width: 0;
+}
+/* The demo fixture has one recorded night; a sparkline with no line is just noise, so drop it. */
+.digest-frame .ovn-spark:not(:has(.ovn-spark-line)) {
+  display: none;
+}
+.digest-scroll[data-fade] {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 120px), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 120px), transparent 100%);
+}
+.digest-scroll[data-fade]::after {
+  content: '';
+  display: block;
+  height: 96px;
+}
+/* The preview is a half-width column at every viewport: one column, and what needs you right under the
+   headline, so the faded foot of the frame crops projects, never the one thing to act on (M11). */
+.digest-frame .ovn-root .ovn-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ovn-space-8);
+}
+.digest-frame .ovn-root .ovn-body > * {
+  margin-bottom: 0;
+}
+.digest-frame .ovn-root .ovn-rail {
+  display: contents;
+}
+.digest-frame .ovn-root .ovn-needs {
+  order: 2;
+}
+.digest-frame .ovn-root .ovn-numbers {
+  order: 3;
+}
+
+/* ---- spend beat (fleet-spend example month) on the 64px container ---- */
+.spend-beat {
+  margin: 0;
+  display: grid;
+  gap: var(--fl-space-6);
+  padding: var(--fl-space-6);
+  border: var(--fl-hairline) solid var(--fl-border);
+  border-radius: var(--fl-radius-lg);
+  background: var(--fl-surface-1);
+  min-width: 0;
+}
+.spend-figs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--fl-space-5) var(--fl-space-8);
+}
+.spend-figs > div {
+  display: grid;
+  gap: var(--fl-space-2);
+}
+.spend-n {
+  font: 400 var(--fl-text-2xl) / 1 var(--fl-font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--fl-tracking-tight);
+}
+.spend-n-hot {
+  color: var(--fl-warn);
+}
+.spend-verdict {
+  margin: var(--fl-space-4) 0 0;
+  color: var(--fl-fg-muted);
+  font-size: var(--fl-text-sm);
+}
+.spend-chart {
+  position: relative;
+  height: 200px;
+  /* room for the dollar axis on the left and the day axis below */
+  margin: 0 0 var(--fl-space-6) 40px;
+}
+.spend-grid {
+  stroke: var(--fl-border);
+  stroke-width: 1;
+}
+.spend-axis {
+  position: absolute;
+  white-space: nowrap;
+  font: var(--fl-text-2xs) / 1 var(--fl-font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--fl-fg-subtle);
+}
+.spend-axis-y {
+  right: calc(100% + var(--fl-space-2));
+  transform: translateY(-50%);
+}
+.spend-axis-x {
+  top: calc(100% + var(--fl-space-2));
+  transform: translateX(-50%);
+}
+.spend-axis-x[data-edge='start'] {
+  transform: none;
+}
+.spend-axis-x[data-edge='end'] {
+  transform: translateX(-100%);
+}
+@media (max-width: 480px) {
+  .spend-axis-x[data-minor] {
+    display: none;
+  }
+}
+.spend-chart svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.spend-area {
+  fill: color-mix(in srgb, var(--fl-fg) 7%, transparent);
+}
+.spend-line {
+  fill: none;
+  stroke: var(--fl-fg);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+.spend-forecast {
+  fill: none;
+  stroke: var(--fl-warn);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
+.spend-budget {
+  stroke: var(--fl-border-strong);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}
+.spend-cross {
+  stroke: var(--fl-warn);
+  stroke-width: 1;
+  opacity: 0.6;
+}
+.spend-dot {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  border-radius: var(--fl-radius-pill);
+  background: var(--fl-fg);
+  box-shadow: 0 0 0 3px var(--fl-surface-1);
+}
+.spend-tag {
+  position: absolute;
+  white-space: nowrap;
+  padding: 1px var(--fl-space-1);
+  font: 500 var(--fl-text-2xs) / 1.4 var(--fl-font-mono);
+  letter-spacing: var(--fl-tracking-caps);
+  text-transform: uppercase;
+  color: var(--fl-fg-muted);
+  background: var(--fl-surface-1);
+}
+.spend-tag-budget {
+  left: 0;
+  transform: translateY(calc(-100% - 4px));
+}
+.spend-tag-cross {
+  left: var(--x);
+  color: var(--fl-warn);
+  transform: translate(6px, 6px);
+}
+/* Narrow charts: the crossing label hangs from the right edge; the vertical rule still marks the day. */
+@media (max-width: 640px) {
+  .spend-tag-cross {
+    left: auto;
+    right: 0;
+    transform: translateY(6px);
+  }
+  .spend-tag-wide {
+    display: none;
+  }
+}
+.spend-tag-today {
+  transform: translate(calc(-100% - 10px), calc(-100% - 6px));
+}
+
+/* ---- phone: a lock screen with Fleet's alerts stacked ---- */
+.phone {
+  width: 268px;
+  border-radius: 40px;
+}
+.phone-screen {
+  position: relative;
+  min-height: 500px;
+  border-radius: 30px;
+  overflow: hidden;
+  padding: var(--fl-space-8) var(--fl-space-3) var(--fl-space-5);
+  background: var(--fl-gradient-horizon), var(--fl-bg);
+  gap: 0;
+}
+.phone-notch {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  width: 76px;
+  height: 22px;
+  transform: translateX(-50%);
+  border-radius: var(--fl-radius-pill);
+  background: var(--fl-surface-3);
+}
+.phone-clock {
+  display: grid;
+  justify-items: center;
+  gap: var(--fl-space-1);
+  margin-bottom: var(--fl-space-7);
+}
+.phone-date {
+  font-size: var(--fl-text-xs);
+  font-weight: 500;
+  color: var(--fl-fg-muted);
+}
+.phone-time {
+  font-family: var(--fl-font-display);
+  font-size: var(--fl-text-3xl);
+  line-height: 1;
+  letter-spacing: var(--fl-tracking-display);
+  font-variant-numeric: tabular-nums;
+}
+.phone-stack {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--fl-space-2);
+}
+.phone .notif {
+  min-width: 0;
+  gap: 2px;
+  padding: var(--fl-space-3);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--fl-surface-2) 86%, transparent);
+  -webkit-backdrop-filter: blur(var(--fl-blur-md));
+  backdrop-filter: blur(var(--fl-blur-md));
+}
+.phone .notif[data-depth='0'] {
+  border-color: color-mix(in srgb, var(--fl-accent) 45%, var(--fl-border));
+}
+.phone .notif[data-depth='2'] {
+  transform: scale(0.96);
+  opacity: 0.7;
+}
+.notif-app {
+  display: flex;
+  align-items: center;
+  gap: var(--fl-space-2);
+  font: 500 var(--fl-text-2xs) / 1.4 var(--fl-font-mono);
+  letter-spacing: var(--fl-tracking-caps);
+  text-transform: uppercase;
+  color: var(--fl-fg-muted);
+}
+.notif-icon {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--fl-accent);
+}
+.notif-when {
+  margin-left: auto;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.phone .notif strong {
+  font-size: var(--fl-text-sm);
+  font-weight: 600;
+}
+.notif-body {
+  color: var(--fl-fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- CTA: headline left, a 640px action column right ---- */
+.action-grid {
+  display: grid;
+  gap: var(--fl-space-7);
+}
+.action-body {
+  display: grid;
+  gap: var(--fl-space-6);
+  max-width: 640px;
+  min-width: 0;
+}
+.action-grid .display {
+  max-width: 12ch;
+}
+@media (min-width: 1024px) {
+  .action-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 640px);
+    column-gap: var(--fl-space-9);
+    align-items: end;
+  }
+  .action-grid > .label-row {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ---- docs: article plus a scroll-spy "On this page" rail ---- */
+@media (min-width: 1024px) {
+  .doc {
+    grid-template-columns: minmax(0, 760px) 220px;
+    gap: var(--fl-space-10);
+  }
+  .doc > .toc {
+    order: 2;
+    top: calc(var(--nav-h) + var(--fl-space-9));
+  }
+}
+.toc h2 {
+  margin: 0 0 var(--fl-space-3);
+}
+.toc ol {
+  gap: 0;
+}
+.toc a {
+  padding-left: var(--fl-space-3);
+  border-left: var(--fl-hairline) solid var(--fl-border);
+  transition:
+    color var(--fl-dur-fast) ease-out,
+    border-color var(--fl-dur-fast) ease-out;
+}
+.toc a[aria-current='location'] {
+  color: var(--fl-fg);
+  border-left-color: var(--fl-accent);
+}
+.toc a[aria-current='location']::before {
+  color: var(--fl-accent);
+}
+.article section {
+  scroll-margin-top: calc(var(--nav-h) + var(--fl-space-6));
+}
+.code-block {
+  position: relative;
+}
+.code-block pre.code {
+  padding-right: calc(var(--fl-space-5) + 88px);
+}
+.code-copy {
+  position: absolute;
+  top: var(--fl-space-3);
+  right: var(--fl-space-3);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fl-space-2);
+  min-height: 32px;
+  padding: 0 var(--fl-space-3);
+  font: 500 var(--fl-text-xs) / 1 var(--fl-font-sans);
+  color: var(--fl-fg-muted);
+  background: var(--fl-surface-2);
+  border: var(--fl-hairline) solid var(--fl-border);
+  border-radius: var(--fl-radius-sm);
+  cursor: pointer;
+}
+.code-copy:hover {
+  color: var(--fl-fg);
+  border-color: var(--fl-border-strong);
+}
+
+/* ---- S3: the live 404 ---- */
+.lost {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: var(--fl-space-7);
+}
+.lost-copy {
+  display: grid;
+  gap: var(--fl-space-6);
+  justify-items: start;
+}
+.adrift {
+  position: relative;
+  container-type: size;
+  width: min(100% - var(--fl-space-8), 300px);
+  aspect-ratio: 1;
+  justify-self: center;
+}
+@media (min-width: 900px) {
+  .lost {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .adrift {
+    grid-column: 2;
+    grid-row: 1;
+    width: min(100%, 520px);
+  }
+  .lost-copy {
+    grid-column: 1;
+    grid-row: 1;
+  }
+}
+.adrift-rings {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: var(--fl-border-strong);
+  stroke-width: 1;
+  stroke-dasharray: 2 5;
+}
+.adrift-home {
+  fill: var(--fl-fg-subtle);
+  stroke: none;
+}
+.adrift-tow {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 51cqw;
+  height: 1px;
+  background: var(--fl-accent);
+  transform-origin: 0 50%;
+  transform: rotate(-45deg) scaleX(1);
+  opacity: 0;
+}
+.adrift-vessel {
+  position: absolute;
+  left: 86%;
+  top: 14%;
+  width: 64px;
+  height: 70px;
+  margin: -35px 0 0 -32px;
+  color: var(--fl-fg);
+  text-decoration: none;
+}
+.adrift-bob {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 70px;
+  cursor: pointer;
+}
+.adrift-bob svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.25;
+  stroke-linejoin: round;
+  overflow: visible;
+}
+.adrift-bob svg path:first-child {
+  stroke: var(--fl-accent);
+  stroke-width: 2;
+}
+.adrift-tag {
+  position: absolute;
+  right: 20px;
+  top: 79px;
+  white-space: nowrap;
+  font: 500 var(--fl-text-2xs) / 1.4 var(--fl-font-mono);
+  letter-spacing: var(--fl-tracking-caps);
+  text-transform: uppercase;
+  color: var(--fl-fg-muted);
+}
+.adrift-vessel:hover .adrift-tag,
+.adrift-vessel:focus-visible .adrift-tag {
+  color: var(--fl-fg);
+}
+.adrift-vessel:focus-visible {
+  outline: none;
+}
+.adrift-vessel:focus-visible .adrift-bob {
+  outline: var(--fl-focus-width) solid var(--fl-focus);
+  outline-offset: 2px;
+  border-radius: var(--fl-radius-md);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .adrift-bob {
+    animation: adrift 7s ease-in-out infinite alternate;
+  }
+  .adrift-vessel {
+    transition: transform 0.9s var(--fl-ease-land);
+  }
+  .adrift-tow {
+    transition:
+      transform 0.9s var(--fl-ease-land),
+      opacity 0.2s ease-out;
+  }
+  .adrift[data-towing] .adrift-vessel {
+    transform: translate(-36cqw, 36cqh);
+  }
+  .adrift[data-towing] .adrift-bob {
+    animation: none;
+  }
+  .adrift[data-towing] .adrift-tow {
+    opacity: 1;
+    transform: rotate(-45deg) scaleX(0);
+  }
+}
+@keyframes adrift {
+  from {
+    transform: translate(0, 0) rotate(-2deg);
+  }
+  to {
+    transform: translate(10px, -10px) rotate(4deg);
+  }
+}
+
+/* ======================================================================
+   v1.1 round 2 (t43): hero beacon and phone framing, install box,
+   capped product table, cost math, features index, replay deck.
+   ====================================================================== */
+
+/* ---- hero stage: the scene, its frame and the beacon (components/FleetStage.tsx) ---- */
+.stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  container-type: size;
+}
+.stage-frame {
+  position: absolute;
+  inset: 0;
+}
+/* Where the waiting station's signal sits, in stage pixels. Poster state: the anchor recorded by
+   scripts/assets.mjs (fractions of the still) mapped through object-fit: cover. Live: measured each frame.
+   The camera itself frames the station (island `frame`), so the stage is never zoomed or panned in CSS: a CSS
+   scale would also skew the scene's own label projection, which measures the scaled box. */
+.stage[data-signal] {
+  --ia: 1.7778;
+  --fx: var(--fx-dark-wide);
+  --fy: var(--fy-dark-wide);
+  --dw: max(100cqw, 100cqh * var(--ia));
+  --dh: max(100cqh, 100cqw / var(--ia));
+  --ax: calc((100cqw - var(--dw)) * 0.5 + var(--fx) * var(--dw));
+  --ay: calc((100cqh - var(--dh)) * 0.5 + var(--fy) * var(--dh));
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) .stage[data-signal] {
+    --fx: var(--fx-light-wide);
+    --fy: var(--fy-light-wide);
+  }
+}
+:root[data-theme='light'] .stage[data-signal] {
+  --fx: var(--fx-light-wide);
+  --fy: var(--fy-light-wide);
+}
+/* Phones get the square poster (FleetStage <picture>), rendered closer in on the waiting station (N12). */
+@media (max-width: 720px) {
+  .stage[data-signal] {
+    --ia: 1;
+    --fx: var(--fx-dark-m);
+    --fy: var(--fy-dark-m);
+  }
+  :root[data-theme='light'] .stage[data-signal] {
+    --fx: var(--fx-light-m);
+    --fy: var(--fy-light-m);
+  }
+}
+@media (max-width: 720px) and (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) .stage[data-signal] {
+    --fx: var(--fx-light-m);
+    --fy: var(--fy-light-m);
+  }
+}
+.stage[data-signal='live'] {
+  --ax: var(--live-ax);
+  --ay: var(--live-ay);
+}
+.beacon {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  transform: translate(var(--ax), var(--ay));
+  transition: opacity var(--fl-dur-slow) ease-out;
+}
+.stage[data-signal='none'] .beacon {
+  opacity: 0;
+}
+/* A light column from the signal to the sky, a soft halo, and rings on the harbour plane. The column stops
+   --beam-clear short of the stage top, so it never runs into the header rule or the scene's corner tag. */
+.beacon-beam {
+  --beam-clear: 80px;
+  position: absolute;
+  left: -1px;
+  bottom: 0;
+  width: 2px;
+  height: max(0px, calc(var(--ay) - var(--beam-clear)));
+  background: linear-gradient(to top, var(--fl-accent) 0%, transparent 85%);
+  transform-origin: 50% 100%;
+}
+.beacon-beam::before {
+  content: '';
+  position: absolute;
+  inset: 0 -18px;
+  background: linear-gradient(to top, var(--fl-accent) 0%, transparent 60%);
+  opacity: 0.22;
+  filter: blur(10px);
+}
+.beacon-core {
+  position: absolute;
+  left: -36px;
+  top: -36px;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: radial-gradient(
+    closest-side,
+    color-mix(in srgb, var(--fl-accent) 55%, transparent),
+    transparent
+  );
+}
+/* Rings sit just below the signal anchor, clear of the tag text that rises up and out from it. */
+.beacon-ring {
+  position: absolute;
+  left: -60px;
+  top: -6px;
+  width: 120px;
+  height: 40px;
+  border: 1.5px solid var(--fl-accent);
+  border-radius: 50%;
+  opacity: 0.4;
+}
+.beacon-ring-2 {
+  opacity: 0;
+}
+@media (max-width: 720px) {
+  .beacon-beam {
+    --beam-clear: 40px;
+  }
+  .beacon-ring {
+    left: -44px;
+    top: -4px;
+    width: 88px;
+    height: 30px;
+  }
+}
+/* Phones set the waiting tag centred under its anchor (FleetScene): no ring there would clear the text, and the
+   scene already draws the station's own signal floor, so the beam and its core carry the signal alone. */
+@media (max-width: 560px) {
+  .beacon-ring {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .beacon-beam {
+    animation: beacon-rise 1.1s 0.6s var(--fl-ease-land) both;
+  }
+  .beacon-core {
+    animation: beacon-breathe 3.2s 1.2s ease-in-out infinite both;
+  }
+  .beacon-ring {
+    animation: beacon-ping 3.2s 1.2s ease-out infinite both;
+  }
+  .beacon-ring-2 {
+    animation-delay: 2.8s;
+  }
+  .stage[data-signal='live'] .beacon {
+    transition:
+      opacity var(--fl-dur-slow) ease-out,
+      transform 1.2s var(--fl-ease-land);
+  }
+}
+@keyframes beacon-rise {
+  from {
+    transform: scaleY(0);
+    opacity: 0;
+  }
+}
+@keyframes beacon-breathe {
+  0%,
+  100% {
+    transform: scale(0.85);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+}
+@keyframes beacon-ping {
+  0% {
+    transform: scale(0.3);
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+/* ---- install command: full command, never a silent ellipsis (components/InstallCommand.tsx) ---- */
+.install {
+  min-width: 0;
+}
+.install code {
+  white-space: nowrap;
+  overflow-x: auto;
+  overflow-wrap: normal;
+  scrollbar-width: none;
+}
+.install code::-webkit-scrollbar {
+  display: none;
+}
+.install code .cmd {
+  flex: none;
+}
+/* More of the command off one side: fade that side. */
+.install code[data-more-end] {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 56px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 56px), transparent);
+}
+.install code[data-more-start] {
+  -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 56px), transparent);
+  mask-image: linear-gradient(to left, #000 calc(100% - 56px), transparent);
+}
+.install code[data-more-start][data-more-end] {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 56px, #000 calc(100% - 56px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 56px, #000 calc(100% - 56px), transparent);
+}
+.install code:focus-visible {
+  outline-offset: -3px;
+}
+/* Wide screens: the box grows to the whole command, past the copy column if it must. */
+@media (min-width: 1024px) {
+  .hero-copy > .hero-actions {
+    max-width: none;
+  }
+  .hero-actions .install,
+  .action-body .install {
+    max-width: calc(100vw - 2 * var(--site-gutter));
+  }
+  .install code {
+    font-size: var(--fl-text-xs);
+  }
+}
+/* CTA: widen the action column where the headline still fits beside it, so the command shows whole. */
+@media (min-width: 1360px) {
+  .action-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 800px);
+  }
+  .action-body {
+    max-width: 800px;
+  }
+  .action-body .lead {
+    max-width: 640px;
+  }
+}
+/* Phones: one scrolling line with the fade, and a full-width Copy under it. */
+@media (max-width: 520px) {
+  .install {
+    flex-direction: column;
+  }
+  .install code {
+    white-space: nowrap;
+    overflow-wrap: normal;
+    min-height: 44px;
+    padding-block: 0;
+    font-size: var(--fl-text-xs);
+  }
+  .install button {
+    min-height: 44px;
+  }
+}
+
+/* ---- product: capped sessions table, fixed-aspect scene preview ---- */
+.media-fixed {
+  aspect-ratio: 16 / 10;
+}
+.table-more {
+  margin: 0;
+  padding: var(--fl-space-3) var(--fl-space-4);
+  border-top: var(--fl-hairline) solid var(--fl-border);
+  font-size: var(--fl-text-xs);
+  color: var(--fl-fg-subtle);
+}
+.phone .notif-body {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+/* ---- cost math: where the dollars go, and the same tokens on other models ---- */
+.math-share {
+  display: flex;
+  height: 10px;
+  gap: 2px;
+  margin-top: var(--fl-space-3);
+  border-radius: var(--fl-radius-pill);
+  overflow: hidden;
+}
+.math-share span,
+.math-legend li::before {
+  background: var(--fl-fg-subtle);
+}
+.math-share [data-part='output'],
+.math-legend [data-part='output']::before {
+  background: var(--fl-accent);
+}
+.math-share [data-part='cache read'],
+.math-legend [data-part='cache read']::before {
+  background: var(--fl-info);
+}
+.math-share [data-part='cache write'],
+.math-legend [data-part='cache write']::before {
+  background: var(--fl-fg-muted);
+}
+.math-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--fl-space-2) var(--fl-space-5);
+  color: var(--fl-fg-muted);
+}
+.math-legend li {
+  display: flex;
+  align-items: center;
+  gap: var(--fl-space-2);
+}
+.math-legend li::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.math-legend b {
+  font-weight: 500;
+  color: var(--fl-fg);
+}
+.math-alt {
+  display: grid;
+  gap: var(--fl-space-2);
+  margin-top: var(--fl-space-5);
+  padding-top: var(--fl-space-4);
+  border-top: var(--fl-hairline) solid var(--fl-border);
+}
+.math-alt-row {
+  display: grid;
+  grid-template-columns: 6ch minmax(0, 1fr) 8ch;
+  align-items: center;
+  gap: var(--fl-space-3);
+  color: var(--fl-fg-muted);
+}
+.math-alt-row span:last-child {
+  text-align: right;
+  color: var(--fl-fg);
+}
+.math-alt-bar {
+  height: 6px;
+  border-radius: var(--fl-radius-pill);
+  background: linear-gradient(to right, var(--fl-fg-subtle) var(--w), transparent var(--w));
+}
+.math-alt-row[data-current] .math-alt-bar {
+  background: linear-gradient(to right, var(--fl-accent) var(--w), transparent var(--w));
+}
+.math-alt-row[data-current] span:first-child {
+  color: var(--fl-fg);
+}
+
+/* Beside the taller phone panel, the cost panel fills its row: the worked sum stays on top and the model
+   comparison settles at the bottom edge, level with the phone, instead of leaving a blank strip under it. */
+@media (min-width: 1024px) {
+  .depth > .panel > .math {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+  .depth > .panel > .math > .math-alt {
+    margin-top: auto;
+    gap: var(--fl-space-3);
+  }
+  /* The lock screen holds one notification per incident; a shorter screen keeps the row from towering. */
+  .depth .phone-screen {
+    min-height: 420px;
+  }
+}
+
+/* ---- features 04: the lock screen beside the alert kinds it can show ---- */
+.phone-pair {
+  display: grid;
+  gap: var(--fl-space-6);
+  justify-items: center;
+}
+.phone-pair > .panel {
+  width: 100%;
+}
+@media (min-width: 1100px) {
+  .phone-pair {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+  }
+  .phone-pair .phone-screen {
+    min-height: 440px;
+  }
+}
+
+/* ---- inner page head with a right-hand aside (features index) ---- */
+@media (min-width: 1024px) {
+  .page-head-split {
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    column-gap: var(--fl-space-9);
+    align-items: end;
+  }
+}
+.page-head-main {
+  display: grid;
+  gap: var(--fl-space-5);
+}
+.feature-index {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: var(--fl-hairline) solid var(--fl-border);
+}
+.feature-index a {
+  display: grid;
+  grid-template-columns: 3ch minmax(0, 1fr) auto;
+  gap: var(--fl-space-4);
+  align-items: center;
+  padding-block: var(--fl-space-4);
+  border-bottom: var(--fl-hairline) solid var(--fl-border);
+  color: var(--fl-fg);
+  text-decoration: none;
+}
+.feature-index .num {
+  font-family: var(--fl-font-mono);
+  font-size: var(--fl-text-xs);
+  color: var(--fl-fg-subtle);
+}
+.feature-index b {
+  display: block;
+  font-weight: 600;
+}
+.feature-index a > span:nth-child(2) > span {
+  display: block;
+  font-size: var(--fl-text-sm);
+  color: var(--fl-fg-muted);
+}
+.feature-index .icon {
+  color: var(--fl-fg-subtle);
+  transition: transform var(--fl-dur-fast) var(--fl-ease-out);
+}
+.feature-index a:hover .icon,
+.feature-index a:focus-visible .icon {
+  transform: translateX(3px);
+  color: var(--fl-accent);
+}
+.feature-index a:hover b {
+  text-decoration: underline;
+}
+
+/* ---- replay tape deck (components/Previews.tsx ReplayDeck) ---- */
+.deck {
+  margin: 0;
+  display: grid;
+  gap: var(--fl-space-5);
+  padding: var(--fl-space-5);
+  border: var(--fl-hairline) solid var(--fl-border-strong);
+  border-radius: var(--fl-radius-xl);
+  background:
+    repeating-linear-gradient(
+      to right,
+      transparent 0 calc(12.5% - 1px),
+      color-mix(in srgb, var(--fl-border) 60%, transparent) calc(12.5% - 1px) 12.5%
+    ),
+    var(--fl-surface-1);
+  box-shadow: var(--fl-elev-2);
+}
+.deck-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--fl-space-4);
+}
+.deck-rec {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: var(--fl-space-2);
+  border-radius: 50%;
+  background: var(--fl-accent);
+  vertical-align: middle;
+}
+.deck-speeds {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--fl-radius-sm);
+  background: var(--fl-surface-3);
+  font: 500 var(--fl-text-2xs) / 1 var(--fl-font-mono);
+}
+.deck-speeds span {
+  padding: 5px 8px;
+  border-radius: calc(var(--fl-radius-sm) - 2px);
+  color: var(--fl-fg-muted);
+}
+.deck-speeds [data-on] {
+  background: var(--fl-surface-1);
+  color: var(--fl-fg);
+  box-shadow: var(--fl-elev-1);
+}
+.deck-tape {
+  position: relative;
+  display: grid;
+  gap: 6px;
+}
+.deck-track,
+.deck-ruler,
+.deck-head-rail {
+  display: grid;
+  grid-template-columns: 11ch minmax(0, 1fr);
+  gap: var(--fl-space-3);
+  align-items: center;
+}
+.deck-name {
+  font: 500 var(--fl-text-2xs) / 1 var(--fl-font-mono);
+  letter-spacing: var(--fl-tracking-caps);
+  text-transform: uppercase;
+  color: var(--fl-fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.deck-lane {
+  position: relative;
+  height: 22px;
+}
+.deck-track .deck-lane {
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--fl-surface-3) 70%, transparent);
+}
+.deck-mark {
+  position: absolute;
+  top: 5px;
+  bottom: 5px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--fl-fg-muted);
+}
+.deck-mark[data-kind='ci'] {
+  top: 6px;
+  bottom: auto;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  border-radius: 50%;
+  background: var(--fl-danger);
+}
+.deck-mark[data-kind='release'] {
+  background: var(--fl-success);
+  width: 3px;
+  top: 3px;
+  bottom: 3px;
+}
+.deck-wait {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--fl-accent) 28%, transparent);
+  box-shadow: inset 0 0 0 1px var(--fl-accent);
+}
+.deck-ruler .deck-lane {
+  height: 16px;
+}
+.deck-tick {
+  position: absolute;
+  top: 0;
+  font: 500 var(--fl-text-2xs) / 1 var(--fl-font-mono);
+  color: var(--fl-fg-subtle);
+  transform: translateX(-50%);
+  font-variant-numeric: tabular-nums;
+}
+.deck-tick:nth-child(1) {
+  left: 0;
+  transform: none;
+}
+.deck-tick:nth-child(2) {
+  left: 25%;
+}
+.deck-tick:nth-child(3) {
+  left: 50%;
+}
+.deck-tick:nth-child(4) {
+  left: 75%;
+}
+.deck-tick:nth-child(5) {
+  left: 100%;
+  transform: translateX(-100%);
+}
+/* The playhead spans the tracks; it sits in its own rail laid over them. */
+.deck-head-rail {
+  position: absolute;
+  inset: 0 0 22px 0;
+  pointer-events: none;
+}
+.deck-head-rail .deck-lane {
+  height: 100%;
+  container-type: inline-size;
+}
+.deck-head {
+  position: absolute;
+  top: -6px;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  transform: translateX(calc(var(--head) * 100cqw));
+}
+.deck-head::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -1px;
+  width: 2px;
+  background: var(--fl-fg);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--fl-fg) 40%, transparent);
+}
+.deck-head-time {
+  position: absolute;
+  top: -18px;
+  left: 0;
+  transform: translateX(-50%);
+  padding: 2px 6px;
+  border-radius: var(--fl-radius-xs);
+  background: var(--fl-fg);
+  color: var(--fl-bg);
+  font: 600 var(--fl-text-2xs) / 1.2 var(--fl-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.deck-tape {
+  padding-top: 18px;
+}
+.deck-transport {
+  display: flex;
+  align-items: center;
+  gap: var(--fl-space-2);
+  flex-wrap: wrap;
+}
+.deck-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: var(--fl-hairline) solid var(--fl-border-strong);
+  color: var(--fl-fg-muted);
+}
+.deck-btn:first-child .icon {
+  transform: scaleX(-1);
+}
+.deck-play {
+  width: 40px;
+  height: 40px;
+  background: var(--fl-fg);
+  border-color: var(--fl-fg);
+}
+.deck-play::before {
+  content: '';
+  margin-left: 3px;
+  border-style: solid;
+  border-width: 7px 0 7px 11px;
+  border-color: transparent transparent transparent var(--fl-bg);
+}
+.deck-legend {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--fl-space-1) var(--fl-space-3);
+  font-size: var(--fl-text-xs);
+  color: var(--fl-fg-muted);
+}
+.deck-legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: -2px;
+  border-radius: 2px;
+  background: var(--fl-fg-muted);
+}
+.deck-legend i[data-kind='ci'] {
+  border-radius: 50%;
+  background: var(--fl-danger);
+}
+.deck-legend i[data-kind='release'] {
+  background: var(--fl-success);
+}
+.deck-legend i[data-kind='wait'] {
+  background: color-mix(in srgb, var(--fl-accent) 28%, transparent);
+  box-shadow: inset 0 0 0 1px var(--fl-accent);
+}
+/* The tape plays in as it is revealed: the playhead sweeps to its place once; reduced motion shows it there. */
+@media (prefers-reduced-motion: no-preference) {
+  .js [data-reveal][data-shown] .deck-head {
+    animation: deck-sweep 2.4s 0.4s var(--fl-ease-land) both;
+  }
+}
+@keyframes deck-sweep {
+  from {
+    transform: translateX(0);
+  }
+}
+@media (max-width: 520px) {
+  .deck {
+    padding: var(--fl-space-4);
+  }
+  .deck-track,
+  .deck-ruler,
+  .deck-head-rail {
+    grid-template-columns: 11ch minmax(0, 1fr);
+    gap: var(--fl-space-2);
+  }
+  .deck-tick:nth-child(2),
+  .deck-tick:nth-child(4) {
+    display: none;
+  }
+  .deck-legend {
+    margin-left: 0;
+  }
+}
+
+/* Docs on phones: a grid item's min-content is its widest code line; let the article shrink so code scrolls
+   inside its block instead of widening the page. */
+.doc > *,
+.article > section,
+.article > section > * {
+  min-width: 0;
+}
+.article {
+  grid-template-columns: minmax(0, 1fr);
+}
+.article > section {
+  grid-template-columns: minmax(0, 1fr);
 }

@@ -49,3 +49,14 @@ export function repoFacts(): RepoFacts {
   };
   return cached;
 }
+
+/** The released version: the collector package version is Fleet's version. */
+export function fleetVersion(): string {
+  const pkg = JSON.parse(readFileSync(path.join(REPO_ROOT, 'packages/collector/package.json'), 'utf8')) as {
+    version?: unknown;
+  };
+  if (typeof pkg.version !== 'string' || !/^\d+\.\d+\.\d+/.test(pkg.version)) {
+    throw new Error('packages/collector/package.json: missing or invalid "version"');
+  }
+  return pkg.version;
+}

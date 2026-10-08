@@ -202,6 +202,13 @@ export const HALYARD_TOKENS_CSS = `/*
     --fl-series-6: #6b6656;
     --fl-series-7: #2f7a5c;
     --fl-series-8: #8f5a2e;
+    /* model identity, darkened so dots and swatches hold 3:1 on every light surface (WCAG 1.4.11) */
+    --fl-model-opus: #c2501c;
+    --fl-model-sonnet: #1f7f8a;
+    --fl-model-haiku: #5d8f1c;
+    --fl-model-fable: #857a5c;
+    --fl-model-astra: #b4428f;
+    --fl-model-unknown: #767a73;
     --fl-elev-0: none;
     --fl-elev-1: 0 1px 2px rgba(24, 26, 22, 0.08);
     --fl-elev-2: 0 8px 24px rgba(24, 26, 22, 0.1);
@@ -264,6 +271,13 @@ export const HALYARD_TOKENS_CSS = `/*
   --fl-series-6: #6b6656;
   --fl-series-7: #2f7a5c;
   --fl-series-8: #8f5a2e;
+  /* model identity, darkened so dots and swatches hold 3:1 on every light surface (WCAG 1.4.11) */
+  --fl-model-opus: #c2501c;
+  --fl-model-sonnet: #1f7f8a;
+  --fl-model-haiku: #5d8f1c;
+  --fl-model-fable: #857a5c;
+  --fl-model-astra: #b4428f;
+  --fl-model-unknown: #767a73;
   --fl-elev-0: none;
   --fl-elev-1: 0 1px 2px rgba(24, 26, 22, 0.08);
   --fl-elev-2: 0 8px 24px rgba(24, 26, 22, 0.1);

@@ -1,3 +1,6 @@
+import { CodeBlock } from '@/components/CodeBlock';
+import { DocToc } from '@/components/DocToc';
+import { Icon } from '@/components/Icon';
 import { PageHead } from '@/components/PageHead';
 import { INSTALL_CMD, REPO_URL, pageMeta } from '@/lib/site';
 
@@ -48,10 +51,36 @@ const CONFIG = [
   ['allowedHosts', 'none', 'Extra Host names accepted in LAN mode, for example your-mac.tailnet.ts.net.'],
 ] as const;
 
+/** The setup path, in the order the page walks it: each step is one section below. */
+const PATH = [
+  ['install', 'Install', 'One command. The collector starts at login.'],
+  ['cli', 'Check', 'fleet doctor checks Node, transcripts, gh and the port.'],
+  ['phone', 'Phone', 'Reach the dashboard over Tailscale with your token.'],
+  ['notifications', 'Alerts', 'Get the five alert kinds on your phone with ntfy.'],
+] as const;
+
 export default function Docs() {
   return (
     <>
       <PageHead
+        aside={
+          <nav aria-label="Setup path">
+            <ol className="feature-index">
+              {PATH.map(([id, label, line], i) => (
+                <li key={id}>
+                  <a href={`#${id}`}>
+                    <span className="num">{String(i + 1).padStart(2, '0')}</span>
+                    <span>
+                      <b>{label}</b>
+                      <span>{line}</span>
+                    </span>
+                    <Icon name="chevron" />
+                  </a>
+                </li>
+              ))}
+            </ol>
+          </nav>
+        }
         label="Docs"
         title={
           <>
@@ -61,15 +90,7 @@ export default function Docs() {
         lead="Everything you need to install, configure and trust Fleet. Ten minutes, start to finish."
       />
       <div className="wrap page-body doc">
-        <nav className="toc" aria-label="On this page">
-          <ol>
-            {SECTIONS.map(([id, label]) => (
-              <li key={id}>
-                <a href={`#${id}`}>{label}</a>
-              </li>
-            ))}
-          </ol>
-        </nav>
+        <DocToc sections={SECTIONS} />
         <div className="article">
           <section id="install" aria-labelledby="install-h">
             <h2 id="install-h">Install</h2>
@@ -77,7 +98,7 @@ export default function Docs() {
               You need macOS and Node 20 or newer. Claude Code should already be writing transcripts to{' '}
               <code>~/.claude/projects</code>.
             </p>
-            <pre className="code">
+            <CodeBlock label="install commands">
               <code>
                 <span className="c"># install the collector and start it at login</span>
                 {'\n'}
@@ -86,7 +107,7 @@ export default function Docs() {
                 <span className="c"># check your setup, then open the dashboard</span>
                 {'\n'}fleet doctor{'\n'}fleet open
               </code>
-            </pre>
+            </CodeBlock>
             <p>
               Prefer source? <code>FLEET_FROM_GIT=1 bash scripts/install.sh</code> clones the repository,
               builds it and links the CLI. The installer never touches <code>~/.claude/settings.json</code>.
@@ -154,7 +175,7 @@ export default function Docs() {
               macOS notifications are on by default. For your phone, pick a hard-to-guess ntfy topic,
               subscribe to it in the ntfy app, and set it in the config:
             </p>
-            <pre className="code">
+            <CodeBlock label="notification config">
               <code>{`{
   "notify": {
     "macos": true,
@@ -162,7 +183,7 @@ export default function Docs() {
     "kinds": ["army.blocked", "session.waiting", "ci.failed"]
   }
 }`}</code>
-            </pre>
+            </CodeBlock>
             <p>
               Anyone who knows a public ntfy topic can read it. Each alert sends a title and a short body,
               such as the project and what it is waiting for. Self-host ntfy if that is too much.

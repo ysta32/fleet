@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { IconName } from '@fleet/ui';
 import type { ModelFamily, OrchTask } from '@fleet/shared';
@@ -6,19 +6,20 @@ import type { FleetView, Selection } from '../data/contract';
 import { Icon } from '../shell/Icon';
 import { Overnight } from './Overnight.jsx';
 import { Spend } from './Spend';
+import { DAG_NODE_H, DAG_NODE_W, dagEdgePaths, dagFit, dagFocusNode, dagVisibleHeight } from './dag';
 import {
   aggregateFleet,
-  alertKindLabel,
-  alertTitle,
   clockTime,
   matches,
   needsYou,
+  nowWorking,
   dagLayout,
   formatCost,
   formatCount,
   MODEL_FAMILIES,
   relativeTime,
   sortSessions,
+  timeTitle,
   totalTokens,
 } from './model';
 import type { SessionSortKey } from './model';
@@ -57,28 +58,64 @@ function ExternalLink({ url, children }: { url?: string; children: ReactNode }) 
 
 function TaskDag({ tasks }: { tasks: OrchTask[] }) {
   const layout = dagLayout(tasks);
-  const nodes = new Map(layout.nodes.map((node) => [node.task.id, node]));
+  const scroller = useRef<HTMLDivElement>(null);
+  const [viewport, setViewport] = useState(0);
+  const focus = dagFocusNode(layout);
+  const focusKey = focus ? `${focus.task.id}:${focus.task.state}` : '';
+  const fit = dagFit(layout, viewport, focus);
+  const [scrollLeft, setScrollLeft] = useState(0);
+  const frame = useRef(0);
+  const height = fit.scroll ? dagVisibleHeight(layout, fit.scale, scrollLeft, viewport) : fit.height;
+  useEffect(() => () => cancelAnimationFrame(frame.current), []);
+  // track the scroller's width: the graph scales to fit it, or scrolls when that would be too small
+  useEffect(() => {
+    const element = scroller.current;
+    if (!element) return;
+    const measure = () => setViewport(Math.round(element.clientWidth));
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [tasks.length]);
+  // bring the blocked (else running) task into view whenever it changes, snapped to column gaps
+  useEffect(() => {
+    const element = scroller.current;
+    if (!element || !viewport) return;
+    element.scrollTo({ left: fit.scrollLeft, behavior: 'auto' });
+    setScrollLeft(element.scrollLeft);
+    // keyed on the focus task, graph width and viewport only: a re-render with the same focus keeps the user's scroll
+  }, [focusKey, layout.width, viewport]);
   if (!tasks.length) return <p className="dashboard-empty">No tasks planned yet.</p>;
   return (
     <>
-      <div className="dashboard-dag" tabIndex={0} aria-label="Scrollable task dependency graph">
+      <div
+        ref={scroller}
+        className="dashboard-dag"
+        data-scroll={fit.scroll ? '1' : '0'}
+        // a scrolled graph is as tall as the rows in view, so a one-row stretch leaves no dead space
+        style={viewport && fit.scroll ? { height } : undefined}
+        onScroll={(event) => {
+          const element = event.currentTarget;
+          cancelAnimationFrame(frame.current);
+          frame.current = requestAnimationFrame(() => setScrollLeft(element.scrollLeft));
+        }}
+        tabIndex={fit.scroll ? 0 : undefined}
+        aria-label={fit.scroll ? 'Scrollable task dependency graph' : undefined}
+      >
         <svg
-          style={{ width: '100%', minWidth: layout.width * 0.75, maxWidth: layout.width, height: 'auto' }}
+          style={
+            viewport
+              ? { width: fit.width, height: fit.height }
+              : { width: '100%', maxWidth: layout.width, height: 'auto' }
+          }
           viewBox={`0 0 ${layout.width} ${layout.height}`}
           role="img"
           aria-label="Task dependencies, from left to right"
         >
-          {layout.edges.map((edge) => {
-            const from = nodes.get(edge.from)!;
-            const to = nodes.get(edge.to)!;
-            return (
-              <path
-                key={`${edge.from}:${edge.to}`}
-                className="dashboard-edge"
-                d={`M ${from.x + 170} ${from.y + 26} C ${from.x + 190} ${from.y + 26}, ${to.x - 20} ${to.y + 26}, ${to.x} ${to.y + 26}`}
-              />
-            );
-          })}
+          {dagEdgePaths(layout).map((edge) => (
+            <path key={`${edge.from}:${edge.to}`} className="dashboard-edge" d={edge.d} />
+          ))}
           {layout.nodes.map((node) => (
             <g
               key={node.task.id}
@@ -86,7 +123,7 @@ function TaskDag({ tasks }: { tasks: OrchTask[] }) {
               transform={`translate(${node.x},${node.y})`}
             >
               <title>{`${node.task.id}: ${node.task.slug} — ${node.task.state}${node.unresolved ? ' (cyclic dependency or downstream of a cycle)' : ''}`}</title>
-              <rect width="170" height="52" rx="6" />
+              <rect width={DAG_NODE_W} height={DAG_NODE_H} rx="6" />
               <text x="10" y="21">
                 {node.task.id} ·{' '}
                 {node.task.slug.length > 15 ? `${node.task.slug.slice(0, 14)}…` : node.task.slug}
@@ -270,6 +307,8 @@ export default function Dashboard({
   const snapshot = view.snapshot;
   if (!snapshot) return <DashboardSkeleton />;
   const now = view.mode === 'replay' ? view.replay.at : view.mode === 'demo' ? snapshot.generatedAt : clock;
+  /** synthetic fleet: empty states explain the demo instead of pointing at setup commands */
+  const demo = view.mode === 'demo' || snapshot.demo === true;
   const names = new Map(snapshot.projects.map((project) => [project.id, project.name]));
   const projectName = (id: string) => names.get(id) ?? id;
   const selected = (kind: NonNullable<Selection>['kind'], id: string) =>
@@ -291,17 +330,9 @@ export default function Dashboard({
     .filter((alert) => !alert.cleared && !dismissed.has(alert.id))
     .sort((a, b) => b.at - a.at);
   const urgent = needsYou(snapshot, dismissed);
-  const waiting = snapshot.sessions
-    .filter((session) => session.status === 'waiting')
-    .sort((a, b) => a.lastActivity - b.lastActivity);
-  const blocked = armies.filter(
-    (project) =>
-      project.orch!.phase === 'blocked' ||
-      project.orch!.blocked.length > 0 ||
-      project.orch!.tasks.some((task) => task.state === 'blocked'),
-  );
-  const working = totals.projects.filter((item) => item.working);
-  const workingAgents = snapshot.agents.filter((agent) => agent.status === 'working').length;
+  const nowWork = nowWorking(snapshot, now);
+  const working = nowWork.rows;
+  const workingAgents = nowWork.agents;
   const tokenTotal = totalTokens(totals.tokens);
   const events = [...view.events]
     .filter((event) => matches(query, event.label, projectName(event.projectId)))
@@ -349,7 +380,11 @@ export default function Dashboard({
                         {projectButton(item.projectId)}
                         <span>{item.title}</span>
                       </span>
-                      <time className="num" dateTime={new Date(item.at).toISOString()}>
+                      <time
+                        className="num"
+                        dateTime={new Date(item.at).toISOString()}
+                        title={timeTitle(item.at, now)}
+                      >
                         {relativeTime(item.at, now)}
                       </time>
                     </li>
@@ -378,11 +413,20 @@ export default function Dashboard({
           {snapshot.sessions.length > 0 && (
             <dl className="kpis">
               <div className="kpi kpi-hero">
-                <dt className="micro">Spend today</dt>
+                <dt className="micro">
+                  {view.mode === 'replay' ? `Spend by ${clockTime(now)}` : 'Spend today'}
+                </dt>
                 <dd className="numeral">{formatCost(totals.costToday)}</dd>
-                <dd className="kpi-note">
-                  {Math.abs(totals.costTotal - totals.costToday) >= 0.005
-                    ? `${formatCost(totals.costTotal)} across all ${snapshot.sessions.length} ${snapshot.sessions.length === 1 ? 'session' : 'sessions'}`
+                <dd
+                  className="kpi-note"
+                  title={
+                    totals.spend.earlierUsd >= 0.005
+                      ? 'Today counts sessions started since local midnight; earlier is sessions started before it'
+                      : undefined
+                  }
+                >
+                  {totals.spend.earlierUsd >= 0.005
+                    ? `${formatCost(totals.costToday)} today across ${totals.spend.todaySessions} ${totals.spend.todaySessions === 1 ? 'session' : 'sessions'} · ${formatCost(totals.spend.earlierUsd)} earlier`
                     : `Across ${snapshot.sessions.length} ${snapshot.sessions.length === 1 ? 'session' : 'sessions'}`}
                 </dd>
               </div>
@@ -423,11 +467,15 @@ export default function Dashboard({
 
           <section className="block">
             <h3 className="block-title">
-              Now working <span className="num count">{working.length}</span>
+              Now working{' '}
+              <span className="num count">
+                {nowWork.agents} {nowWork.agents === 1 ? 'agent' : 'agents'} · {nowWork.projects}{' '}
+                {nowWork.projects === 1 ? 'project' : 'projects'}
+              </span>
             </h3>
             {working.length ? (
               <ul className="rows">
-                {working.map(({ project, activeByModel, activeAgents }) => (
+                {working.map(({ project, activeByModel, activeAgents, reason }) => (
                   <li
                     key={project.id}
                     className="row row-working"
@@ -435,7 +483,16 @@ export default function Dashboard({
                   >
                     <span className="row-main">{projectButton(project.id)}</span>
                     <span className="num row-num">
-                      {activeAgents} <span className="unit">{activeAgents === 1 ? 'agent' : 'agents'}</span>
+                      {reason === 'agents' ? (
+                        <>
+                          {activeAgents}{' '}
+                          <span className="unit">{activeAgents === 1 ? 'agent' : 'agents'}</span>
+                        </>
+                      ) : (
+                        <span className="unit">
+                          {reason === 'session' ? 'session active' : 'army running'}
+                        </span>
+                      )}
                     </span>
                     <span className="dashboard-chips">
                       {MODEL_FAMILIES.filter((model) => activeByModel[model] > 0).map((model) => (
@@ -443,7 +500,9 @@ export default function Dashboard({
                           <span className="num"> {activeByModel[model]}</span>
                         </ModelChip>
                       ))}
-                      {project.orch && <span className="row-meta">army {project.orch.phase}</span>}
+                      {project.orch && reason !== 'army' && (
+                        <span className="row-meta">army {project.orch.phase}</span>
+                      )}
                     </span>
                   </li>
                 ))}
@@ -468,7 +527,7 @@ export default function Dashboard({
                   <time
                     className="num"
                     dateTime={new Date(event.ts).toISOString()}
-                    title={relativeTime(event.ts, now)}
+                    title={timeTitle(event.ts, now)}
                   >
                     {clockTime(event.ts)}
                   </time>
@@ -480,10 +539,24 @@ export default function Dashboard({
               ))}
             </ol>
             {!events.length && (
-              <Empty quiet icon="live" title={query ? `No events match “${query}”.` : 'No recent events.'}>
+              <Empty
+                quiet
+                icon="live"
+                title={
+                  query
+                    ? `No events match “${query}”.`
+                    : view.mode === 'replay'
+                      ? `Nothing logged before ${clockTime(now)}.`
+                      : 'No recent events.'
+                }
+              >
                 {query
                   ? 'Clear the search with Esc.'
-                  : 'Tool calls, merges and deploys stream in here as they happen.'}
+                  : view.mode === 'replay'
+                    ? 'The replay starts here. Press play or drag the playhead and events fill in.'
+                    : demo
+                      ? 'Synthetic tool calls, merges and deploys stream in here as the demo runs.'
+                      : 'Tool calls, merges and deploys stream in here as they happen.'}
               </Empty>
             )}
           </section>
@@ -583,7 +656,10 @@ export default function Dashboard({
                         {formatCost(session.costUsd)}
                       </td>
                       <td data-label="Last activity" className="numeric cell-time">
-                        <time dateTime={new Date(session.lastActivity).toISOString()}>
+                        <time
+                          dateTime={new Date(session.lastActivity).toISOString()}
+                          title={timeTitle(session.lastActivity, now)}
+                        >
                           {relativeTime(session.lastActivity, now)}
                         </time>
                       </td>
@@ -594,8 +670,10 @@ export default function Dashboard({
             </div>
           )}
           {!snapshot.sessions.length && (
-            <Empty icon="session" title="No sessions yet.">
-              Start Claude Code in any repo and it appears here within 2 seconds.
+            <Empty icon="session" title={demo ? 'The demo fleet is between sessions.' : 'No sessions yet.'}>
+              {demo
+                ? 'Synthetic sessions come and go as the demo runs. On your machine, a Claude Code session appears here within 2 seconds.'
+                : 'Start Claude Code in any repo and it appears here within 2 seconds.'}
             </Empty>
           )}
           {snapshot.sessions.length > 0 && !sessions.length && (
@@ -648,9 +726,10 @@ export default function Dashboard({
             );
           })}
           {!armies.length && (
-            <Empty icon="army" title="No armies running.">
-              An army appears when a repo has an orchestrator state folder. Its task graph, inflight agents
-              and blockers show here.
+            <Empty icon="army" title={demo ? 'No armies in the demo right now.' : 'No armies running.'}>
+              {demo
+                ? 'Synthetic armies come and go as the demo runs. Each shows its task graph, inflight agents and blockers here.'
+                : 'An army appears when a repo has an orchestrator state folder. Its task graph, inflight agents and blockers show here.'}
             </Empty>
           )}
         </>
@@ -681,8 +760,14 @@ export default function Dashboard({
               ))}
             </ul>
             {!snapshot.prs.length && (
-              <Empty quiet icon="merge" title="No pull requests.">
-                Fleet reads PRs and CI with your GitHub token. Run fleet doctor to check it.
+              <Empty
+                quiet
+                icon="merge"
+                title={demo ? 'No pull requests in the demo yet.' : 'No pull requests.'}
+              >
+                {demo
+                  ? 'The demo fleet has nothing open right now. On your machine, Fleet reads PRs and CI with your GitHub token.'
+                  : 'Fleet reads PRs and CI with your GitHub token. Run fleet doctor to check it.'}
               </Empty>
             )}
           </section>
@@ -699,13 +784,21 @@ export default function Dashboard({
                       </ExternalLink>
                     </span>
                     <span className="row-meta">{projectButton(release.projectId)}</span>
-                    <time className="num row-num" dateTime={new Date(release.publishedAt).toISOString()}>
+                    <time
+                      className="num row-num"
+                      dateTime={new Date(release.publishedAt).toISOString()}
+                      title={timeTitle(release.publishedAt, now)}
+                    >
                       {relativeTime(release.publishedAt, now)}
                     </time>
                   </li>
                 ))}
             </ul>
-            {!snapshot.releases.length && <p className="dashboard-empty quiet">No releases published yet.</p>}
+            {!snapshot.releases.length && (
+              <p className="dashboard-empty quiet">
+                {demo ? 'No releases in the demo yet.' : 'No releases published yet.'}
+              </p>
+            )}
           </section>
           <section className="block">
             <h3 className="block-title">Deploys</h3>
@@ -719,7 +812,11 @@ export default function Dashboard({
                       <span className="row-meta"> · {projectButton(deploy.projectId)}</span>
                     </span>
                     <span className={`dashboard-chip deploy-${deploy.state}`}>{deploy.state}</span>
-                    <time className="num row-num" dateTime={new Date(deploy.createdAt).toISOString()}>
+                    <time
+                      className="num row-num"
+                      dateTime={new Date(deploy.createdAt).toISOString()}
+                      title={timeTitle(deploy.createdAt, now)}
+                    >
                       {relativeTime(deploy.createdAt, now)}
                     </time>
                   </li>
@@ -727,7 +824,9 @@ export default function Dashboard({
             </ul>
             {!snapshot.deploys.length && (
               <p className="dashboard-empty quiet">
-                No deploys. Connect Vercel in the collector config to see them.
+                {demo
+                  ? 'No deploys in the demo yet.'
+                  : 'No deploys. Connect Vercel in the collector config to see them.'}
               </p>
             )}
           </section>
@@ -747,89 +846,73 @@ export default function Dashboard({
               </button>
             )}
           </PanelHead>
-          {blocked.length > 0 && (
-            <section className="block">
-              <h3 className="block-title">Blocked</h3>
-              {blocked.map((project) => (
-                <article className="blocked" key={project.id}>
-                  <h4>
-                    <Icon name="blocked" />
-                    {projectButton(project.id)} <span className="row-meta">army {project.orch!.phase}</span>
-                  </h4>
-                  <ul>
-                    {project.orch!.blocked.map((item, index) => (
-                      <li key={index}>{item}</li>
-                    ))}
-                    {project
-                      .orch!.tasks.filter((task) => task.state === 'blocked')
-                      .map((task) => (
-                        <li key={task.id}>
-                          <span className="num">{task.id}</span> · {task.slug}
-                        </li>
-                      ))}
-                  </ul>
-                </article>
-              ))}
-            </section>
-          )}
-          {waiting.length > 0 && (
-            <section className="block">
-              <h3 className="block-title">
-                Waiting on you <span className="num count">{waiting.length}</span>
-              </h3>
-              <ul className="dashboard-list rows">
-                {waiting.map((session) => (
-                  <li
-                    key={session.id}
-                    className="alert-row waiting-row"
-                    data-selected={selected('session', session.id)}
-                  >
-                    <Icon name="waiting" />
-                    <div className="alert-text">
-                      <button
-                        type="button"
-                        className="dashboard-link"
-                        aria-pressed={selected('session', session.id)}
-                        onClick={() => onSelect({ kind: 'session', id: session.id })}
-                      >
-                        {session.title ?? session.id}
-                      </button>
-                      <small className="row-meta">
-                        {projectButton(session.projectId)} · <span className="num">{session.model}</span> ·
-                        waiting{' '}
-                        <time dateTime={new Date(session.lastActivity).toISOString()}>
-                          {relativeTime(session.lastActivity, now)}
-                        </time>
-                      </small>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
           <section className="block">
             {urgent.length > 0 && (
               <h3 className="block-title">
-                Active <span className="num count">{alerts.length}</span>
+                Needs you <span className="num count">{urgent.length}</span>
               </h3>
             )}
             <ul className="dashboard-list rows">
-              {alerts.map((alert) => (
-                <li key={alert.id} className="alert-row">
-                  <Icon name="alert" />
+              {urgent.map((incident) => (
+                <li
+                  key={incident.id}
+                  className={`alert-row incident-row incident-${incident.kind}`}
+                  data-selected={incident.sessionId ? selected('session', incident.sessionId) : undefined}
+                >
+                  <Icon
+                    name={
+                      incident.kind === 'waiting'
+                        ? 'waiting'
+                        : incident.kind === 'blocked'
+                          ? 'blocked'
+                          : 'alert'
+                    }
+                  />
                   <div className="alert-text">
-                    <strong>{alertTitle(alert)}</strong>
-                    <p>{alert.body}</p>
+                    <strong>{incident.title}</strong>
+                    {incident.body && <p>{incident.body}</p>}
+                    {(incident.reasons.length > 1 || incident.reasons.some((reason) => reason.text)) && (
+                      <ul className="incident-reasons" aria-label="Reasons">
+                        {incident.reasons.map((reason) => (
+                          <li key={`${reason.label}:${reason.text ?? ''}`}>
+                            {reason.label}
+                            {reason.text ? <span className="row-meta"> · {reason.text}</span> : null}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                     <small className="row-meta">
-                      {projectButton(alert.projectId)} · {alertKindLabel(alert.kind)} ·{' '}
-                      <time dateTime={new Date(alert.at).toISOString()}>{relativeTime(alert.at, now)}</time>
+                      {projectButton(incident.projectId)}
+                      {incident.reasons.length === 1 &&
+                        !incident.reasons[0]!.text &&
+                        ` · ${incident.reasons[0]!.label}`}
+                      {incident.sessionId && (
+                        <>
+                          {' · '}
+                          <button
+                            type="button"
+                            className="dashboard-link"
+                            aria-pressed={selected('session', incident.sessionId)}
+                            onClick={() => onSelect({ kind: 'session', id: incident.sessionId! })}
+                          >
+                            {incident.sessionTitle ?? incident.sessionId}
+                          </button>
+                        </>
+                      )}
+                      {' · '}
+                      <time
+                        dateTime={new Date(incident.at).toISOString()}
+                        title={timeTitle(incident.at, now)}
+                      >
+                        {relativeTime(incident.at, now)}
+                      </time>
                     </small>
                   </div>
-                  {onDismissAlerts && (
+                  {onDismissAlerts && incident.alertIds.length > 0 && (
                     <button
                       type="button"
                       className="btn btn-quiet btn-sm"
-                      onClick={() => onDismissAlerts([alert.id])}
+                      onClick={() => onDismissAlerts(incident.alertIds)}
                     >
                       Clear
                     </button>
@@ -838,16 +921,10 @@ export default function Dashboard({
               ))}
             </ul>
             {!urgent.length && (
-              <div className="needs needs-calm">
-                <h2 className="needs-title">Nothing needs you.</h2>
-                <p className="needs-body">
-                  {lastAlert ? `Last alert ${relativeTime(lastAlert, now)}.` : 'No alerts recorded yet.'}{' '}
-                  Blocked agents, failed CI and spend spikes land here first.
-                </p>
-              </div>
-            )}
-            {!alerts.length && urgent.length > 0 && (
-              <p className="dashboard-empty quiet">No active alerts.</p>
+              <Empty quiet icon="check" title="Nothing needs you.">
+                {lastAlert ? `Last alert ${relativeTime(lastAlert, now)}.` : 'No alerts recorded yet.'}{' '}
+                Blocked agents, failed CI and spend spikes land here first.
+              </Empty>
             )}
           </section>
         </>

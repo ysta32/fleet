@@ -1,6 +1,6 @@
 import type { Digest, DigestTotals, ProjectActivity } from '@fleet/digest';
-import type { FleetEvent, FleetSnapshot, HistoryResponse } from '@fleet/shared';
-import demoDigest from '../../../digest/fixtures/demo-digest.json';
+import type { HistoryResponse } from '@fleet/shared';
+import { currentDemoFleet } from '../data/demoSource';
 
 export type OvernightProject = Pick<ProjectActivity, 'id' | 'name' | 'health' | 'summary'> & {
   mergedPRs: Pick<ProjectActivity['mergedPRs'][number], 'number' | 'title' | 'url' | 'at'>[];
@@ -124,89 +124,17 @@ export function summarizeDigest(digest: OvernightDigest) {
   };
 }
 
+/** Hours covered by the demo "night"; it always ends at the demo clock. */
+export const DEMO_NIGHT_HOURS = 8;
+
+/** The night ending now, summarized from the same synthetic fleet the harbour shows. */
 export function getDemoDigest(): OvernightDigest {
-  return parseDigest(demoDigest);
+  return parseDigest(currentDemoFleet().overnight(DEMO_NIGHT_HOURS));
 }
 
+/** Replay of that night: the fleet's own recorded history, so frames match the harbour and digest. */
 export function getDemoDigestHistory(): HistoryResponse {
-  const digest = getDemoDigest();
-  const from = Date.parse(digest.window.since);
-  const to = Date.parse(digest.window.until);
-  const events: FleetEvent[] = digest.projects
-    .flatMap((project) => [
-      ...project.mergedPRs.map((pr): FleetEvent => ({
-        id: `${project.id}:merge:${pr.number}`,
-        ts: Date.parse(pr.at),
-        projectId: project.id,
-        kind: 'merge',
-        severity: 'success',
-        label: `Merged #${pr.number}: ${pr.title}`.slice(0, 80),
-      })),
-      ...project.releases.map((release): FleetEvent => ({
-        id: `${project.id}:release:${release.tag}`,
-        ts: Date.parse(release.at),
-        projectId: project.id,
-        kind: 'release',
-        severity: 'success',
-        label: `Released ${release.tag}`.slice(0, 80),
-      })),
-      ...project.ciFailures.map((run): FleetEvent => ({
-        id: `${project.id}:ci:${run.runId}`,
-        ts: Date.parse(run.at),
-        projectId: project.id,
-        kind: 'ci',
-        severity: 'error',
-        label: `CI failed: ${run.workflow}`.slice(0, 80),
-      })),
-    ])
-    .filter((event) => event.ts >= from && event.ts <= to)
-    .sort((a, b) => a.ts - b.ts);
-  const frame = (at: number): FleetSnapshot => ({
-    version: 1,
-    generatedAt: at,
-    demo: true,
-    projects: digest.projects.map((project) => ({
-      id: project.id,
-      name: project.name,
-      path: '',
-      lastActivity: from,
-    })),
-    sessions: [],
-    agents: [],
-    deploys: [],
-    alerts: [],
-    prs: digest.projects.flatMap((project) =>
-      project.mergedPRs
-        .filter((pr) => Date.parse(pr.at) <= at)
-        .map((pr) => ({
-          projectId: project.id,
-          number: pr.number,
-          title: pr.title,
-          state: 'merged' as const,
-          ci: 'none' as const,
-          url: pr.url,
-          headRef: '',
-          updatedAt: Date.parse(pr.at),
-        })),
-    ),
-    releases: digest.projects.flatMap((project) =>
-      project.releases
-        .filter((release) => Date.parse(release.at) <= at)
-        .map((release) => ({
-          projectId: project.id,
-          tag: release.tag,
-          name: release.name,
-          url: release.url,
-          publishedAt: Date.parse(release.at),
-        })),
-    ),
-  });
-  return {
-    from,
-    to,
-    events,
-    frames: [...new Set([from, ...events.map((event) => event.ts), to])].map(frame),
-  };
+  return currentDemoFleet().history(DEMO_NIGHT_HOURS);
 }
 
 export async function fetchDigest(

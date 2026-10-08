@@ -410,7 +410,8 @@
   gap: var(--fl-space-3);
   padding: var(--fl-space-2) 0;
   border-bottom: var(--fl-hairline) solid var(--fl-border);
-  animation: land var(--fl-motion-land) both;
+  /* fade only: a translate on streaming rows reads as a gap under the header */
+  animation: fade-up var(--fl-dur-base) var(--fl-ease-out) both;
 }
 .log-row time {
   color: var(--fl-fg-subtle);
@@ -794,8 +795,15 @@
     radial-gradient(farthest-side at 100% 50%, var(--fl-scrim, rgb(0 0 0 / 0.35)), transparent) right / 12px
       100% no-repeat scroll;
   overflow-x: auto;
+  overflow-y: hidden;
   overscroll-behavior-x: contain;
   border-radius: var(--fl-radius-md);
+  transition: height var(--fl-dur-fast) var(--fl-ease-land);
+}
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-dag {
+    transition: none;
+  }
 }
 .dashboard-dag svg {
   display: block;
@@ -1066,4 +1074,29 @@
 .overnight-items a:hover {
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+/* an empty list must not add a grid gap above its empty state */
+.dashboard-list:empty {
+  display: none;
+}
+
+/* incidents: one row per thing that needs you, with every signal about it as a sub-reason */
+.incident-row > .fl-icon {
+  color: var(--fl-accent);
+}
+.incident-alert > .fl-icon {
+  color: var(--fl-warn);
+}
+.incident-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--fl-space-1) var(--fl-space-2);
+  margin-top: var(--fl-space-2);
+  font-size: var(--fl-text-xs);
+}
+.incident-reasons > li {
+  padding: 0 var(--fl-space-2);
+  border: var(--fl-hairline) solid var(--fl-border);
+  border-radius: var(--fl-radius-sm);
+  color: var(--fl-fg-muted);
 }

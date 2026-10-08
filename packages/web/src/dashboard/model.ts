@@ -1,4 +1,6 @@
+import { formatLocalTime, formatUtcTime, sessionSpend } from '@fleet/shared';
 import type {
+  Agent,
   Alert,
   AlertKind,
   FleetSnapshot,
@@ -56,14 +58,9 @@ export function relativeTime(at: number, now: number): string {
 }
 
 export function aggregateFleet(snapshot: FleetSnapshot, now: number) {
-  const day = new Date(now);
-  day.setHours(0, 0, 0, 0);
+  const spend = sessionSpend(snapshot.sessions, now);
   const tokens: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-  let costTotal = 0;
-  let costToday = 0;
   for (const session of snapshot.sessions) {
-    costTotal += session.costUsd;
-    if (session.startedAt >= day.getTime() && session.startedAt <= now) costToday += session.costUsd;
     for (const key of ['input', 'output', 'cacheRead', 'cacheWrite'] as const)
       tokens[key] += session.tokens[key];
   }
@@ -86,7 +83,57 @@ export function aggregateFleet(snapshot: FleetSnapshot, now: number) {
       project.orch?.phase === 'running';
     return { project, activeByModel, activeAgents, working };
   });
-  return { tokens, costTotal, costToday, projects };
+  return { tokens, costTotal: spend.totalUsd, costToday: spend.todayUsd, spend, projects };
+}
+
+export type WorkingRow = ReturnType<typeof aggregateFleet>['projects'][number] & {
+  /** why a project with no working agent still counts as working */
+  reason: 'agents' | 'session' | 'army';
+};
+
+/**
+ * The one selector behind "Now working": its rows and its header totals come from the same pass
+ * over the given snapshot (live, demo or replay playhead), so the header can never disagree with
+ * the rows. `agents` is the sum of the rows' working agents.
+ */
+export function nowWorking(
+  snapshot: FleetSnapshot,
+  now: number,
+): { rows: WorkingRow[]; agents: number; projects: number } {
+  const rows = aggregateFleet(snapshot, now)
+    .projects.filter((item) => item.working)
+    .map((item): WorkingRow => ({
+      ...item,
+      reason:
+        item.activeAgents > 0
+          ? 'agents'
+          : snapshot.sessions.some(
+                (session) => session.projectId === item.project.id && session.status === 'active',
+              )
+            ? 'session'
+            : 'army',
+    }));
+  return { rows, agents: rows.reduce((sum, row) => sum + row.activeAgents, 0), projects: rows.length };
+}
+
+/**
+ * Top-bar vitals. Live they read "Today"; in replay they read the playhead ("At 13:04") and count the
+ * working agents and the day's spend in the snapshot at that moment, using the same selectors as the
+ * Overview (nowWorking, sessionSpend), so the bar and the panel never disagree.
+ */
+export function headerVitals(
+  snapshot: FleetSnapshot,
+  at: number,
+  replay: boolean,
+): { label: string; title: string; working: number; costUsd: number } {
+  return {
+    label: replay ? `At ${clockTime(at)}` : 'Today',
+    title: replay
+      ? `Estimated spend for sessions started that day, as of ${clockTime(at)} local time`
+      : 'Estimated spend for sessions started today, local time',
+    working: nowWorking(snapshot, at).agents,
+    costUsd: sessionSpend(snapshot.sessions, at).todayUsd,
+  };
 }
 
 export type SessionSortKey =
@@ -185,70 +232,335 @@ export function dagLayout(tasks: readonly OrchTask[]): DagLayout {
   };
 }
 
-export interface NeedsYouItem {
+/** Why an incident needs the operator. State reasons come from the live snapshot; the rest are alerts. */
+export interface IncidentReason {
+  kind: AlertKind | 'waiting' | 'blocked';
+  /** short human label, e.g. "Waiting on you", "Army blocked" */
+  label: string;
+  /** extra context (an alert title that says more than its kind); never repeats the incident subject */
+  text?: string;
+  at: number;
+  alertId?: string;
+}
+
+/**
+ * One thing that needs the operator. Every signal about the same subject (project + task, else the
+ * waiting session, else the alert kind) folds into one incident, so a single blocked task never
+ * counts as several items.
+ */
+export interface Incident {
+  /** stable key: `${projectId}:${ref}` */
   id: string;
+  /** primary signal, for the icon: waiting beats blocked beats a bare alert */
   kind: 'alert' | 'blocked' | 'waiting';
   projectId: string;
+  /** task id as the army writes it (e.g. "t04") */
+  taskId?: string;
+  /** task slug, when the army knows the task */
+  taskSlug?: string;
+  /** the waiting session, if one is part of this incident */
+  sessionId?: string;
+  sessionTitle?: string;
   title: string;
+  /** alert body, only for incidents that are nothing but alerts (no task or session subject) */
+  body?: string;
+  /** distinct reasons, oldest first */
+  reasons: IncidentReason[];
+  /** oldest signal: the cost of delay grows with age */
   at: number;
-  /** alert ids that resolving this item clears */
+  /** alert ids that resolving this incident clears */
   alertIds: string[];
 }
 
-/** Everything that is waiting on the operator, oldest first (cost of delay grows with age). */
-export function needsYou(
-  snapshot: FleetSnapshot,
-  dismissed: ReadonlySet<string> = new Set(),
-): NeedsYouItem[] {
-  const items: NeedsYouItem[] = [];
-  for (const alert of snapshot.alerts) {
-    if (alert.cleared || dismissed.has(alert.id)) continue;
-    items.push({
-      id: `alert:${alert.id}`,
-      kind: 'alert',
-      projectId: alert.projectId,
-      title: alertTitle(alert),
-      at: alert.at,
-      alertIds: [alert.id],
-    });
-  }
-  for (const session of snapshot.sessions) {
-    if (session.status !== 'waiting') continue;
-    items.push({
-      id: `waiting:${session.id}`,
-      kind: 'waiting',
-      projectId: session.projectId,
-      title: `${session.title ?? 'Session'} is waiting on you`,
-      at: session.lastActivity,
-      alertIds: [],
-    });
-  }
+/** A needs-you item is an incident. */
+export type NeedsYouItem = Incident;
+
+/** Normalise task ids so "t04", "T4" and "04" name the same task. */
+export function taskKey(id: string): string {
+  const trimmed = id.trim().toLowerCase();
+  const numeric = /^t?0*(\d+)$/.exec(trimmed);
+  return numeric ? numeric[1]! : trimmed;
+}
+
+interface Draft {
+  id: string;
+  projectId: string;
+  ref: 'task' | 'session' | 'army' | 'alert' | 'kind';
+  taskId?: string;
+  taskSlug?: string;
+  sessionId?: string;
+  sessionTitle?: string;
+  /** every waiting session folded into this incident */
+  sessions: Set<string>;
+  reasons: IncidentReason[];
+  alerts: Alert[];
+  order: number;
+}
+
+/**
+ * Group everything that is waiting on the operator into incidents, oldest first.
+ * Sources: blocked army tasks (run.blocked and tasks in state "blocked", deduped by task id),
+ * waiting sessions (joined to the task their agent is on), and uncleared, undismissed alerts.
+ * An alert joins an incident only on a confident subject match: its structured taskId/sessionId,
+ * else (for army.blocked / session.waiting) exactly one live task named by an exact token in its
+ * text. Anything else stays its own incident, so clearing one incident never clears another's alerts.
+ */
+export function incidents(snapshot: FleetSnapshot, dismissed: ReadonlySet<string> = NONE): Incident[] {
+  // Snapshots are never mutated once published (live, demo, replay frames), so each one's incidents are
+  // computed once per dismissal state; replay re-reads every frame of the tape.
+  const key = snapshot.alerts
+    .filter((alert) => dismissed.has(alert.id))
+    .map((alert) => alert.id)
+    .join('\n');
+  const cached = INCIDENTS.get(snapshot);
+  if (cached?.key === key) return [...cached.list];
+  const list = computeIncidents(snapshot, dismissed);
+  INCIDENTS.set(snapshot, { key, list });
+  return [...list];
+}
+
+const NONE: ReadonlySet<string> = new Set();
+const INCIDENTS = new WeakMap<FleetSnapshot, { key: string; list: Incident[] }>();
+
+function computeIncidents(snapshot: FleetSnapshot, dismissed: ReadonlySet<string>): Incident[] {
+  const drafts = new Map<string, Draft>();
+  const draft = (id: string, projectId: string, ref: Draft['ref']): Draft => {
+    let entry = drafts.get(id);
+    if (!entry) {
+      entry = { id, projectId, ref, sessions: new Set(), reasons: [], alerts: [], order: drafts.size };
+      drafts.set(id, entry);
+    }
+    return entry;
+  };
+  const tasksByProject = new Map<string, Map<string, OrchTask>>();
   for (const project of snapshot.projects) {
     const run = project.orch;
     if (!run) continue;
-    const blockedTasks = run.tasks.filter((task) => task.state === 'blocked');
-    if (run.phase !== 'blocked' && !run.blocked.length && !blockedTasks.length) continue;
-    // an active army.blocked alert already represents this project
-    if (
-      items.some(
-        (item) =>
-          item.kind === 'alert' &&
-          item.projectId === project.id &&
-          snapshot.alerts.some((alert) => item.alertIds.includes(alert.id) && alert.kind === 'army.blocked'),
-      )
-    )
-      continue;
-    const count = run.blocked.length + blockedTasks.length;
-    items.push({
-      id: `blocked:${project.id}`,
-      kind: 'blocked',
-      projectId: project.id,
-      title: count ? `Army blocked on ${count} ${count === 1 ? 'item' : 'items'}` : 'Army blocked',
-      at: run.updatedAt,
-      alertIds: [],
+    const tasks = new Map(run.tasks.map((task) => [taskKey(task.id), task]));
+    tasksByProject.set(project.id, tasks);
+    const ids = [
+      ...run.blocked,
+      ...run.tasks.filter((task) => task.state === 'blocked').map((task) => task.id),
+    ];
+    const seen = new Set<string>();
+    for (const raw of ids) {
+      const key = taskKey(raw);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      const entry = draft(`${project.id}:task:${key}`, project.id, 'task');
+      const task = tasks.get(key);
+      entry.taskId = task?.id ?? raw.trim();
+      entry.taskSlug = task?.slug;
+      entry.reasons.push({ kind: 'blocked', label: 'Army blocked', at: run.updatedAt });
+    }
+    if (!seen.size && run.phase === 'blocked')
+      draft(`${project.id}:army`, project.id, 'army').reasons.push({
+        kind: 'blocked',
+        label: 'Army blocked',
+        at: run.updatedAt,
+      });
+  }
+  // index agents once: by their session, and by id for sessions that list their agents
+  const agentsBySession = new Map<string, Agent[]>();
+  const agentsById = new Map<string, Agent>();
+  for (const agent of snapshot.agents) {
+    agentsById.set(agent.id, agent);
+    if (!agent.sessionId) continue;
+    const list = agentsBySession.get(agent.sessionId);
+    if (list) list.push(agent);
+    else agentsBySession.set(agent.sessionId, [agent]);
+  }
+  for (const session of snapshot.sessions) {
+    if (session.status !== 'waiting') continue;
+    const agents = [...(agentsBySession.get(session.id) ?? [])];
+    for (const id of session.agentIds) {
+      const agent = agentsById.get(id);
+      if (agent && agent.sessionId !== session.id) agents.push(agent);
+    }
+    const waitingAgents = agents.filter((agent) => agent.status === 'waiting');
+    const onTask = new Set(
+      (waitingAgents.length ? waitingAgents : agents)
+        .map((agent) => agent.currentTask)
+        .filter((task): task is string => !!task)
+        .map(taskKey),
+    );
+    // An agent with no current task still waits on the army's one blocked task when the session runs on
+    // that army's branch (a wait raised before the task was dispatched).
+    const run = snapshot.projects.find((project) => project.id === session.projectId)?.orch;
+    const blockedKeys = run
+      ? [...new Set([...run.blocked, ...run.tasks.filter((t) => t.state === 'blocked').map((t) => t.id)])]
+          .map(taskKey)
+          .filter((key, index, keys) => key && keys.indexOf(key) === index)
+      : [];
+    const task =
+      onTask.size === 1
+        ? [...onTask][0]!
+        : !onTask.size && blockedKeys.length === 1 && !!session.gitBranch && session.gitBranch === run?.branch
+          ? blockedKeys[0]!
+          : undefined;
+    const entry = task
+      ? draft(`${session.projectId}:task:${task}`, session.projectId, 'task')
+      : draft(`${session.projectId}:session:${session.id}`, session.projectId, 'session');
+    if (task && !entry.taskId) {
+      const known = tasksByProject.get(session.projectId)?.get(task);
+      entry.taskId =
+        known?.id ??
+        (waitingAgents.length ? waitingAgents : agents).find(
+          (agent) => agent.currentTask && taskKey(agent.currentTask) === task,
+        )?.currentTask ??
+        task;
+      entry.taskSlug = known?.slug;
+    }
+    entry.sessions.add(session.id);
+    if (!entry.sessionId) {
+      entry.sessionId = session.id;
+      entry.sessionTitle = session.title;
+    }
+    entry.reasons.push({ kind: 'waiting', label: 'Waiting on you', at: session.lastActivity });
+  }
+  const live = [...drafts.values()];
+  const alertIncident = (alert: Alert): Draft => {
+    const projectId = alert.projectId;
+    const task = alert.taskId?.trim();
+    if (task) {
+      const key = taskKey(task);
+      const entry = draft(`${projectId}:task:${key}`, projectId, 'task');
+      if (!entry.taskId) {
+        const known = tasksByProject.get(projectId)?.get(key);
+        entry.taskId = known?.id ?? task;
+        entry.taskSlug = known?.slug;
+      }
+      return entry;
+    }
+    const sessionId = alert.sessionId;
+    if (sessionId) {
+      const holder = live.find((item) => item.projectId === projectId && item.sessions.has(sessionId));
+      if (holder) return holder;
+      const entry = draft(`${projectId}:session:${sessionId}`, projectId, 'session');
+      if (!entry.sessionId) {
+        entry.sessionId = sessionId;
+        entry.sessionTitle = snapshot.sessions.find((session) => session.id === sessionId)?.title;
+        entry.sessions.add(sessionId);
+      }
+      return entry;
+    }
+    if (alert.kind === 'army.blocked' || alert.kind === 'session.waiting') {
+      // exact tokens only: "t4" names task 4, never task 40
+      const words = new Set(
+        `${alert.title} ${alert.body}`
+          .split(/[^A-Za-z0-9_-]+/)
+          .filter(Boolean)
+          .map(taskKey),
+      );
+      const named = live.filter(
+        (item) => item.projectId === projectId && item.ref === 'task' && words.has(taskKey(item.taskId!)),
+      );
+      if (named.length === 1) return named[0]!;
+      return draft(`${projectId}:alert:${alert.id}`, projectId, 'alert');
+    }
+    // repeats of the same alert collapse; a different body (another PR, another deploy) is its own
+    return draft(`${projectId}:${alert.kind}:${alert.body.trim().toLowerCase()}`, projectId, 'kind');
+  };
+  for (const alert of snapshot.alerts) {
+    if (alert.cleared || dismissed.has(alert.id)) continue;
+    const entry = alertIncident(alert);
+    const label = alertKindLabel(alert.kind);
+    const title = alertTitle(alert);
+    entry.alerts.push(alert);
+    entry.reasons.push({
+      kind: alert.kind,
+      label,
+      ...(title !== label ? { text: title } : {}),
+      at: alert.at,
+      alertId: alert.id,
     });
   }
-  return items.sort((a, b) => a.at - b.at);
+  const out = [...drafts.values()].map((entry): Incident => {
+    const sorted = [...entry.reasons].sort((a, b) => a.at - b.at);
+    const reasons: IncidentReason[] = [];
+    for (const reason of sorted) {
+      const same = reasons.find((item) => item.label === reason.label && item.text === reason.text);
+      if (!same) reasons.push(reason);
+    }
+    const waiting = reasons.some((reason) => reason.kind === 'waiting' || reason.kind === 'session.waiting');
+    const blocked = reasons.some((reason) => reason.kind === 'blocked' || reason.kind === 'army.blocked');
+    const subject = entry.taskId
+      ? entry.taskSlug
+        ? `${entry.taskId} · ${entry.taskSlug}`
+        : `Task ${entry.taskId}`
+      : entry.ref === 'session'
+        ? (entry.sessionTitle ?? 'Session')
+        : undefined;
+    const latest = entry.alerts.reduce<Alert | undefined>(
+      (last, alert) => (!last || alert.at >= last.at ? alert : last),
+      undefined,
+    );
+    const title = subject
+      ? `${subject} ${waiting ? 'is waiting on you' : 'is blocked'}`
+      : entry.ref === 'army'
+        ? 'Army blocked'
+        : latest
+          ? alertTitle(latest)
+          : 'Needs you';
+    const incident: Incident = {
+      id: entry.id,
+      kind: waiting ? 'waiting' : blocked ? 'blocked' : 'alert',
+      projectId: entry.projectId,
+      title,
+      reasons,
+      at: sorted[0]!.at,
+      alertIds: entry.alerts.map((alert) => alert.id),
+    };
+    if (entry.taskId) incident.taskId = entry.taskId;
+    if (entry.taskSlug) incident.taskSlug = entry.taskSlug;
+    if (entry.sessionId) incident.sessionId = entry.sessionId;
+    if (entry.sessionTitle) incident.sessionTitle = entry.sessionTitle;
+    if (!subject && latest?.body.trim()) incident.body = latest.body.trim();
+    return incident;
+  });
+  const order = new Map([...drafts.values()].map((entry) => [entry.id, entry.order]));
+  return out.sort((a, b) => a.at - b.at || order.get(a.id)! - order.get(b.id)!);
+}
+
+/** Everything waiting on the operator, as incidents, oldest first. */
+export function needsYou(snapshot: FleetSnapshot, dismissed: ReadonlySet<string> = NONE): Incident[] {
+  return incidents(snapshot, dismissed);
+}
+
+/**
+ * The station's "needs you" count: this project's share of the same incidents() list the Overview,
+ * Alerts and the nav badge count, so one blocked task with its waiting coder reads as 1 everywhere and
+ * the stations add up to the Overview total. Pass the snapshot through `withDismissed` first so cleared
+ * alerts drop out here too.
+ */
+export function stationNeeds(snapshot: FleetSnapshot, projectId: string): number {
+  return incidentsByProject(snapshot).get(projectId) ?? 0;
+}
+
+/**
+ * Incidents per project (projects with none are absent): what gates and counts each station's
+ * "needs you" tag, so a CI-failure-only incident raises its station's tag like any other.
+ */
+export function incidentsByProject(snapshot: FleetSnapshot): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const incident of incidents(snapshot))
+    counts.set(incident.projectId, (counts.get(incident.projectId) ?? 0) + 1);
+  return counts;
+}
+
+/**
+ * The snapshot with the operator's dismissed alerts marked cleared, for views (the harbour) that read
+ * incidents without the dismissed set. Returns the same object when nothing changes.
+ */
+export function withDismissed(snapshot: FleetSnapshot, dismissed: ReadonlySet<string>): FleetSnapshot {
+  if (!dismissed.size || !snapshot.alerts.some((alert) => !alert.cleared && dismissed.has(alert.id)))
+    return snapshot;
+  return {
+    ...snapshot,
+    alerts: snapshot.alerts.map((alert) =>
+      !alert.cleared && dismissed.has(alert.id) ? { ...alert, cleared: true } : alert,
+    ),
+  };
 }
 
 export function matches(query: string, ...fields: (string | undefined)[]): boolean {
@@ -257,6 +569,12 @@ export function matches(query: string, ...fields: (string | undefined)[]): boole
   return fields.some((field) => field?.toLowerCase().includes(q));
 }
 
+/** Local 24h "HH:MM"; pair with `formatUtcTime` in a title for the UTC instant. */
 export function clockTime(at: number): string {
-  return new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  return formatLocalTime(at);
+}
+
+/** Tooltip for any shown time: local clock, how long ago, and the UTC instant. */
+export function timeTitle(at: number, now: number): string {
+  return `${clockTime(at)} local, ${relativeTime(at, now)} · ${formatUtcTime(at)}`;
 }

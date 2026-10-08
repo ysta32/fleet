@@ -102,17 +102,38 @@ export function layoutRadius(n: number): number {
   return 7 + 4.6 * Math.sqrt(n - 0.5) + 4;
 }
 
+/**
+ * Fitted camera direction (per unit of layout radius). ~36 degrees of elevation: steep enough that the
+ * ring layout fills the frame vertically (no band of empty sky above it), shallow enough to read as 3D.
+ */
+const FIT = { x: 0.1, y: 1.12, z: 1.5 } as const;
+
 /** Camera position that frames a layout of radius `r` (looking at the origin). */
 export function cameraFitPosition(r: number, out: Vec3 = vec3()): Vec3 {
-  out.x = r * 0.1;
-  out.y = r * 0.95;
-  out.z = r * 1.85;
+  out.x = r * FIT.x;
+  out.y = r * FIT.y;
+  out.z = r * FIT.z;
   return out;
 }
 
 /** Camera-to-target distance of the fitted framing for a layout radius `r`. */
 export function cameraFitDistance(r: number): number {
-  return r * Math.hypot(0.1, 0.95, 1.85);
+  return r * Math.hypot(FIT.x, FIT.y, FIT.z);
+}
+
+/** Selection focus never magnifies the fitted harbour framing by more than this (abstract blobs, label pile-ups). */
+export const FOCUS_MAX_ZOOM = 1.6;
+
+/**
+ * Camera-to-target distance when focusing a selection on a layout fitted at radius `fitted`. The zoom cap
+ * keeps the station and its neighbours in frame instead of dollying into a single mesh; the floor frames a
+ * whole station (a vessel orbits within it) even on a one-station harbour. Projects sit a little further
+ * out than vessels so the selected station reads with its ring.
+ */
+export function focusDistance(kind: 'project' | 'session' | 'agent', fitted: number): number {
+  const floor = kind === 'project' ? 13 : 11;
+  const fit = cameraFitDistance(Math.max(0, fitted));
+  return Math.max(floor, fit / FOCUS_MAX_ZOOM);
 }
 
 /**

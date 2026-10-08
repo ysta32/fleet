@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import type { Alert, AlertKind, FleetConfig, FleetEvent, FleetSnapshot } from '@fleet/shared';
+import type { Alert, AlertKind, FleetConfig, FleetEvent, FleetSnapshot, SessionStatus } from '@fleet/shared';
 
 export type NotifyExec = (cmd: string, args: string[]) => Promise<unknown> | unknown;
 export type NotifyFetch = (
@@ -57,8 +57,71 @@ export function alertKindOf(e: FleetEvent): AlertKind | undefined {
   }
 }
 
+/** Normalise task ids so "t04", "T4" and "04" name the same task. */
+function taskKey(id: string): string {
+  const trimmed = id.trim().toLowerCase();
+  const numeric = /^t?0*(\d+)$/.exec(trimmed);
+  return numeric ? numeric[1]! : trimmed;
+}
+
+/** What an alert-worthy event is about. */
+export interface IncidentSubject {
+  /** incident ref within the project: `task:<key>`, `agent:<id>`, `session:<id>` or `kind:<kind>` */
+  ref: string;
+  /** the task id as written by its source, when the event is about a task */
+  taskId?: string;
+}
+
+/**
+ * The task (directly, or via the agent/session that is on it), else the agent or session, else the
+ * alert kind for project-level events. Events about the same subject are one incident, whatever their
+ * kind: a blocked task and its waiting coder are one incident.
+ */
+export function incidentSubject(e: FleetEvent, kind: AlertKind, snap: FleetSnapshot): IncidentSubject {
+  if (e.taskId) return { ref: `task:${taskKey(e.taskId)}`, taskId: e.taskId };
+  if (e.agentId || e.sessionId) {
+    const agents = snap.agents.filter(
+      (a) => a.projectId === e.projectId && (e.agentId ? a.id === e.agentId : a.sessionId === e.sessionId),
+    );
+    const waiting = agents.filter((a) => a.status === 'waiting');
+    const onTask = (waiting.length ? waiting : agents).filter(
+      (a): a is typeof a & { currentTask: string } => !!a.currentTask,
+    );
+    const tasks = new Set(onTask.map((a) => taskKey(a.currentTask)));
+    if (tasks.size === 1) {
+      const key = [...tasks][0]!;
+      return { ref: `task:${key}`, taskId: onTask.find((a) => taskKey(a.currentTask) === key)!.currentTask };
+    }
+    return { ref: e.agentId ? `agent:${e.agentId}` : `session:${e.sessionId!}` };
+  }
+  return { ref: `kind:${kind}` };
+}
+
+/** Result of handling an alert-worthy event: the alert to store, and whether it was notified. */
+export interface NotifyResult {
+  alert: Alert;
+  /** true when this alert was delivered (macOS / ntfy) and should also go out as web push */
+  notify: boolean;
+  /** false when this is an already-stored alert being delivered late (it was rate limited) */
+  isNew: boolean;
+}
+
+interface OpenIncident {
+  /** when it was last notified */
+  at: number;
+  /** a high-priority alert has been notified for it */
+  high: boolean;
+  /** waiting sessions/agents holding it open */
+  holders: Set<string>;
+  /** a blocked task holds it open */
+  task: boolean;
+}
+
 export class Notifier {
-  private readonly seen = new Map<string, number>();
+  /** alert dedupe: identical alerts (kind + incident + holder) inside the window are dropped */
+  private readonly seen = new Map<string, { at: number; incident: string; alert: Alert; holder?: string }>();
+  /** delivery dedupe: one notification per incident transition */
+  private readonly open = new Map<string, OpenIncident>();
   private sent: number[] = [];
   private readonly exec: NotifyExec;
   private readonly fetchFn: NotifyFetch | undefined;
@@ -80,33 +143,112 @@ export class Notifier {
       deps.log ?? ((m, err) => console.error(`[notify] ${m}`, err instanceof Error ? err.message : ''));
   }
 
-  handle(e: FleetEvent, snap: FleetSnapshot): Alert | undefined {
+  /**
+   * Watch non-alert events for incidents ending, so the next one is a new transition that notifies
+   * (instead of waiting out the window): a task leaving "blocked" closes its incident; any later
+   * activity (or end) of a waiting session or agent releases its hold, closing the incident when
+   * nothing else holds it open.
+   */
+  observe(e: FleetEvent): void {
+    if (e.kind === 'task.state' && e.taskId && e.data?.state !== 'blocked') {
+      this.close(`${e.projectId}\u0000task:${taskKey(e.taskId)}`);
+      return;
+    }
+    const holders = new Set<string>();
+    if (e.agentId) holders.add(e.agentId);
+    if (e.sessionId && (e.kind === 'session.end' || !e.agentId || e.agentId === e.sessionId))
+      holders.add(e.sessionId);
+    if (holders.size) this.release(e.projectId, holders);
+  }
+
+  /**
+   * Session status as the daemon publishes it. Leaving "waiting" (to active, idle or ended) releases
+   * the session's hold even when the transcript emitted no event for it (a text-only reply).
+   */
+  sessionStatus(projectId: string, sessionId: string, status: SessionStatus): void {
+    if (status !== 'waiting') this.release(projectId, new Set([sessionId]));
+  }
+
+  handle(e: FleetEvent, snap: FleetSnapshot): NotifyResult | undefined {
     const kind = alertKindOf(e);
     if (!kind || !this.cfg.kinds.includes(kind)) return undefined;
 
     const now = this.now();
-    for (const [k, t] of this.seen) if (now - t >= DEDUPE_MS) this.seen.delete(k);
-    const ref = e.taskId ?? e.sessionId ?? '';
-    const key = `${kind}\u0000${e.projectId}\u0000${ref}`;
-    if (this.seen.has(key)) return undefined;
+    this.prune(now);
+    const subject = incidentSubject(e, kind, snap);
+    const incident = `${e.projectId}\u0000${subject.ref}`;
+    const holder = kind === 'session.waiting' ? (e.agentId ?? e.sessionId) : undefined;
+    // the parser emits session.waiting once per ended turn: a new one means the previous wait is over
+    if (holder) this.release(e.projectId, new Set([holder]));
+    const alertKey = `${kind}\u0000${incident}\u0000${holder ?? ''}`;
 
-    this.sent = this.sent.filter((t) => now - t < RATE_WINDOW_MS);
-    if (this.sent.length >= RATE_MAX) return undefined;
-    this.seen.set(key, now);
-    this.sent.push(now);
-
-    const project = snap.projects.find((p) => p.id === e.projectId)?.name ?? 'project';
     const meta = LABELS[kind];
-    const alert: Alert = {
-      id: `alert-${e.ts}-${this.seq++}`,
-      kind,
-      projectId: e.projectId,
-      title: meta.title,
-      body: project,
-      at: e.ts,
-    };
-    this.deliver(alert, meta);
-    return alert;
+    const existing = this.open.get(incident);
+    // a new incident notifies; so does a high-priority escalation of one notified at low priority
+    const eligible = !existing || (meta.high && !existing.high);
+    const prior = this.seen.get(alertKey);
+    // a stored repeat is dropped, unless its incident still owes a notification (e.g. rate limited)
+    if (prior && !eligible) return undefined;
+    this.sent = this.sent.filter((t) => now - t < RATE_WINDOW_MS);
+    const notify = eligible && this.sent.length < RATE_MAX;
+    if (prior && !notify) return undefined;
+
+    let alert: Alert;
+    if (prior) alert = prior.alert;
+    else {
+      const project = snap.projects.find((p) => p.id === e.projectId)?.name ?? 'project';
+      alert = {
+        id: `alert-${e.ts}-${this.seq++}`,
+        kind,
+        projectId: e.projectId,
+        title: meta.title,
+        body: project,
+        at: e.ts,
+      };
+      if (subject.taskId) alert.taskId = subject.taskId;
+      if (e.sessionId) alert.sessionId = e.sessionId;
+      this.seen.set(alertKey, { at: now, incident, alert, ...(holder ? { holder } : {}) });
+    }
+
+    const entry = notify
+      ? (existing ?? { at: now, high: false, holders: new Set<string>(), task: false })
+      : existing;
+    if (entry) {
+      if (holder) entry.holders.add(holder);
+      if (kind === 'army.blocked' && subject.taskId) entry.task = true;
+    }
+    if (notify) {
+      this.sent.push(now);
+      entry!.at = now;
+      entry!.high ||= meta.high;
+      this.open.set(incident, entry!);
+      this.deliver(alert, meta);
+    }
+    return { alert, notify, isNew: !prior };
+  }
+
+  /** Bound the state: everything older than the dedupe window is forgotten. */
+  private prune(now: number): void {
+    for (const [k, v] of this.seen) if (now - v.at >= DEDUPE_MS) this.seen.delete(k);
+    for (const [k, v] of this.open) if (now - v.at >= DEDUPE_MS) this.open.delete(k);
+  }
+
+  private close(incident: string): void {
+    this.open.delete(incident);
+    for (const [k, v] of this.seen) if (v.incident === incident) this.seen.delete(k);
+  }
+
+  private release(projectId: string, holders: ReadonlySet<string>): void {
+    if (!this.seen.size && !this.open.size) return;
+    const prefix = `${projectId}\u0000`;
+    for (const [k, v] of this.seen)
+      if (v.holder && holders.has(v.holder) && v.incident.startsWith(prefix)) this.seen.delete(k);
+    for (const [incident, entry] of this.open) {
+      if (!incident.startsWith(prefix)) continue;
+      let changed = false;
+      for (const h of holders) changed = entry.holders.delete(h) || changed;
+      if (changed && !entry.holders.size && !entry.task) this.close(incident);
+    }
   }
 
   private deliver(alert: Alert, meta: { tags: string; high: boolean }): void {

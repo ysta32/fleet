@@ -1,8 +1,9 @@
+import { Fragment } from 'react';
 import Link from 'next/link';
 import { Icon } from '@/components/Icon';
 import { OptionalSections } from '@/components/Optional';
 import { PageHead } from '@/components/PageHead';
-import { CostMath, InboxPreview, PhonePreview, SessionsPreview } from '@/components/Previews';
+import { CostMath, InboxPreview, PhonePreview, ReplayDeck, SessionsPreview } from '@/components/Previews';
 import { pageMeta } from '@/lib/site';
 
 export const metadata = pageMeta(
@@ -11,10 +12,46 @@ export const metadata = pageMeta(
   'The live 3D fleet, a needs-you inbox, per-session cost, GitHub status, replay and phone alerts. Everything Fleet does, shown with synthetic data.',
 );
 
+/** The page's sections in order: the hero index and each section's label read from this one list. */
+const FEATURES = [
+  { label: 'Live fleet', line: 'Every session as a vessel in one 3D harbour' },
+  { label: 'Needs you', line: 'What is waiting on you, longest wait first' },
+  { label: 'Sessions and cost', line: 'Tokens and dollars per session, priced per model' },
+  { label: 'Phone and alerts', line: 'macOS and ntfy alerts, to a topic you own' },
+  { label: 'GitHub and replay', line: 'PR and CI state, and a tape of the last hours' },
+] as const;
+/** The five alert kinds (config notify.kinds, all on by default) and what raises each one. */
+const ALERT_KINDS = [
+  ['session.waiting', 'An agent stopped to ask you something.'],
+  ['army.blocked', 'An army cannot go on without you.'],
+  ['army.done', 'An army finished its plan.'],
+  ['ci.failed', 'Checks failed on a pull request Fleet watches.'],
+  ['deploy.failed', 'A deployment failed.'],
+] as const;
+const featureId = (label: string) => `f-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+
 export default function Features() {
   return (
     <>
       <PageHead
+        aside={
+          <nav aria-label="On this page">
+            <ol className="feature-index">
+              {FEATURES.map((f, i) => (
+                <li key={f.label}>
+                  <a href={`#${featureId(f.label)}`}>
+                    <span className="num">{String(i + 1).padStart(2, '0')}</span>
+                    <span>
+                      <b>{f.label}</b>
+                      <span>{f.line}</span>
+                    </span>
+                    <Icon name="chevron" />
+                  </a>
+                </li>
+              ))}
+            </ol>
+          </nav>
+        }
         label="Features"
         title={
           <>
@@ -25,8 +62,7 @@ export default function Features() {
       />
       <div className="page-body">
         <Feature
-          n="01"
-          label="Live fleet"
+          label={FEATURES[0].label}
           title="A harbour you can read from across the room."
           body={[
             'Each Claude Code session is a vessel; subagents fly with their lead. Projects are stations, armies sit in formation, and tasks orbit as satellites.',
@@ -49,8 +85,7 @@ export default function Features() {
           </Link>
         </Feature>
         <Feature
-          n="02"
-          label="Needs you"
+          label={FEATURES[1].label}
           title="The agent that is waiting goes to the top."
           body={[
             'Waiting sessions, blocked armies, failed CI and failed deploys land in one list, oldest wait first.',
@@ -63,8 +98,7 @@ export default function Features() {
           </div>
         </Feature>
         <Feature
-          n="03"
-          label="Sessions and cost"
+          label={FEATURES[2].label}
           title="Tokens and dollars, per session, as they happen."
           body={[
             'Fleet reads token usage straight from the transcripts and prices it per model, including cache reads and writes.',
@@ -77,8 +111,7 @@ export default function Features() {
           </div>
         </Feature>
         <Feature
-          n="04"
-          label="Phone and alerts"
+          label={FEATURES[3].label}
           title="Leave the desk without losing the thread."
           body={[
             'Alerts go to macOS notifications and, if you set a topic, to ntfy on your phone. You choose which kinds: army finished, army blocked, session waiting, CI failed, deploy failed.',
@@ -86,17 +119,35 @@ export default function Features() {
           ]}
           flip
         >
-          <PhonePreview />
+          <div className="phone-pair">
+            <PhonePreview />
+            <div className="panel">
+              <span className="label">notify.kinds</span>
+              <dl className="keys" style={{ marginTop: 'var(--fl-space-4)' }}>
+                {ALERT_KINDS.map(([kind, what]) => (
+                  <Fragment key={kind}>
+                    <dt>
+                      <code>{kind}</code>
+                    </dt>
+                    <dd>{what}</dd>
+                  </Fragment>
+                ))}
+              </dl>
+              <p className="caption" style={{ marginTop: 'var(--fl-space-4)' }}>
+                One push per incident. macOS notifications are on by default; ntfy once you set a topic.
+              </p>
+            </div>
+          </div>
         </Feature>
         <Feature
-          n="05"
-          label="GitHub and replay"
+          label={FEATURES[4].label}
           title="Pull requests, CI and the last few hours, in place."
           body={[
             'With the gh CLI signed in, Fleet polls PR and CI state read-only and shows it next to the army that opened the PR.',
             'Replay scrubs back through recent history, so you can see what happened while you were away.',
           ]}
         >
+          <ReplayDeck />
           <div className="panel">
             <dl className="keys">
               <dt>
@@ -121,29 +172,26 @@ export default function Features() {
 }
 
 function Feature({
-  n,
   label,
   title,
   body,
   children,
   flip = false,
 }: {
-  n: string;
   label: string;
   title: string;
   body: string[];
   children: React.ReactNode;
   flip?: boolean;
 }) {
+  const id = featureId(label);
   return (
-    <section className="section" aria-labelledby={`f-${n}`} style={{ paddingBlock: 'var(--fl-space-9)' }}>
+    <section className="section" aria-labelledby={id}>
       <div className={flip ? 'wrap split split-rev' : 'wrap split'}>
         <div className="sticky-col" data-reveal>
-          <span className="label">
-            {n} · {label}
-          </span>
+          <span className="label sec-n">{label}</span>
           <h2
-            id={`f-${n}`}
+            id={id}
             className="h2"
             style={{ marginTop: 'var(--fl-space-4)', fontSize: 'var(--fl-text-2xl)' }}
           >

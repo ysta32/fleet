@@ -1,9 +1,10 @@
 // Static UI previews rendered at build time from the synthetic demo fleet (lib/demo.ts).
 import { Icon } from '@/components/Icon';
-import { costExample, demoPreview, fmtTok, fmtUsd, type InboxItem } from '@/lib/demo';
+import { LocalTime } from '@/components/LocalTime';
+import { costExample, demoPreview, fmtTok, fmtUsd, replayTape, type Incident } from '@/lib/demo';
 import type { IconName } from '@fleet/ui';
 
-const KIND_ICON: Record<InboxItem['kind'], { icon: IconName; tone: string }> = {
+const KIND_ICON: Record<Incident['kind'], { icon: IconName; tone: string }> = {
   'session.waiting': { icon: 'waiting', tone: 'status-accent' },
   'agent.waiting': { icon: 'waiting', tone: 'status-warn' },
   'army.blocked': { icon: 'blocked', tone: 'status-danger' },
@@ -35,7 +36,10 @@ export function InboxPreview({ limit = 3 }: { limit?: number }) {
                 <span className="who">
                   {item.title} · {item.project}
                 </span>
-                <span className="what">{item.detail}</span>
+                <span className="what">
+                  {item.detail}
+                  {item.also.length ? ` · ${item.also.join(' · ')}` : ''}
+                </span>
               </span>
               <span className="num" style={{ fontSize: 'var(--fl-text-xs)' }}>
                 {item.minutes}m
@@ -55,8 +59,11 @@ const STATUS_TONE: Record<string, string> = {
   ended: '',
 };
 
-export function SessionsPreview() {
+/** The sessions table, capped: waiting first, then live work, then the rest by cost. */
+export function SessionsPreview({ rows = 5 }: { rows?: number }) {
   const { sessions, totals } = demoPreview();
+  const shown = sessions.slice(0, rows);
+  const more = sessions.length - shown.length;
   return (
     <div>
       <div className="table-wrap">
@@ -65,7 +72,9 @@ export function SessionsPreview() {
           <thead>
             <tr>
               <th scope="col">Project</th>
-              <th scope="col">Model</th>
+              <th scope="col" className="col-model">
+                Model
+              </th>
               <th scope="col">State</th>
               <th scope="col" className="r">
                 Tokens
@@ -76,10 +85,10 @@ export function SessionsPreview() {
             </tr>
           </thead>
           <tbody>
-            {sessions.map((s) => (
+            {shown.map((s) => (
               <tr key={s.id}>
                 <td>{s.project}</td>
-                <td>
+                <td className="col-model">
                   <span
                     className="dot"
                     style={{ background: `var(--fl-model-${s.model})` }}
@@ -96,6 +105,11 @@ export function SessionsPreview() {
             ))}
           </tbody>
         </table>
+        {more > 0 ? (
+          <p className="table-more mono">
+            +{more} more {more === 1 ? 'session' : 'sessions'}, ended or idle
+          </p>
+        ) : null}
       </div>
       <p className="caption mono">
         {totals.working}/{totals.agents} agents working · {totals.projects} projects · {fmtUsd(totals.cost)}{' '}
@@ -120,6 +134,35 @@ export function CostMath() {
       <div className="math-row math-total">
         <span>one session, {ex.modelId}</span>
         <span>{fmtUsd(ex.total)}</span>
+      </div>
+      <div className="math-share" aria-hidden="true">
+        {ex.lines.map((l) => (
+          <span key={l.label} data-part={l.label} style={{ flexGrow: l.usd }} />
+        ))}
+      </div>
+      <ul className="math-legend">
+        {ex.lines.map((l) => (
+          <li key={l.label} data-part={l.label}>
+            {l.label} <b>{Math.round((l.usd / ex.total) * 100)}%</b>
+          </li>
+        ))}
+      </ul>
+      <div className="math-alt">
+        <span className="label">Same tokens, other models</span>
+        {ex.alternatives.map((m) => {
+          const top = Math.max(...ex.alternatives.map((x) => x.usd));
+          return (
+            <div
+              className="math-alt-row"
+              key={m.label}
+              data-current={m.modelId === ex.modelId ? '' : undefined}
+            >
+              <span>{m.label}</span>
+              <span className="math-alt-bar" style={{ ['--w' as string]: `${(m.usd / top) * 100}%` }} />
+              <span>{fmtUsd(m.usd)}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -159,27 +202,128 @@ export function TerminalWall() {
   );
 }
 
+/**
+ * A phone lock screen: the clock, then Fleet's ntfy pushes newest first. One push per incident, so a waiting
+ * session, its blocked army and the agent behind them arrive as one notification, not three.
+ */
 export function PhonePreview() {
-  const { inbox } = demoPreview();
-  const top = inbox[0];
+  const { inbox, snapshot } = demoPreview();
+  // The inbox is sorted longest wait first; a lock screen shows the newest push on top.
+  const stack = [...inbox].sort((a, b) => a.minutes - b.minutes).slice(0, 3);
   return (
-    <div className="phone" aria-label="Phone notification preview, synthetic data" role="img">
+    <div className="phone" aria-label="Phone lock screen with Fleet alerts, synthetic data" role="img">
       <div className="phone-screen">
-        <span className="label" style={{ textAlign: 'center' }}>
-          22:54
-        </span>
-        <div className="notif">
-          <span className="label">ntfy · Fleet · now</span>
-          <strong>{top ? `${top.title} · ${top.project}` : 'Nothing needs you'}</strong>
-          <span style={{ color: 'var(--fl-fg-muted)' }}>
-            {top ? `${top.detail}. Idle ${top.minutes}m.` : ''}
-          </span>
+        <span className="phone-notch" aria-hidden="true" />
+        <div className="phone-clock">
+          <LocalTime className="phone-date" at={snapshot.generatedAt} style="date" />
+          <LocalTime className="phone-time" at={snapshot.generatedAt} style="time" />
         </div>
-        <div className="notif" style={{ opacity: 0.6 }}>
-          <span className="label">ntfy · Fleet · 12m ago</span>
-          <span>Army finished · aurora-api</span>
-        </div>
+        <ol className="phone-stack">
+          {stack.length === 0 ? (
+            <li className="notif">
+              <span className="notif-app">Fleet</span>
+              <strong>Nothing needs you</strong>
+            </li>
+          ) : (
+            stack.map((item, i) => (
+              <li className="notif" key={item.id} data-depth={i}>
+                <span className="notif-app">
+                  <span className="notif-icon" aria-hidden="true" />
+                  ntfy · Fleet
+                  <span className="notif-when">{item.minutes}m ago</span>
+                </span>
+                <strong>
+                  {item.title} · {item.project}
+                </strong>
+                <span className="notif-body">
+                  {item.detail}
+                  {item.also.length ? ` · ${item.also.join(' · ')}` : ''}
+                </span>
+              </li>
+            ))
+          )}
+        </ol>
       </div>
     </div>
+  );
+}
+
+/**
+ * Replay as a tape deck: the demo world's last hours, one track per project, with the playhead part-way
+ * through the night. A still built from the same synthetic world, not a recording of a real session.
+ */
+export function ReplayDeck() {
+  const tape = replayTape();
+  const head = 0.64;
+  const hours = Math.round((tape.until - tape.since) / 3_600_000);
+  const ticks = Array.from({ length: 5 }, (_, i) => tape.since + ((tape.until - tape.since) * i) / 4);
+  const at = tape.since + (tape.until - tape.since) * head;
+  const marks = tape.tracks.reduce((n, t) => n + t.marks.length, 0);
+  return (
+    <figure
+      className="deck"
+      role="img"
+      aria-label={`Replay of the demo fleet's last ${hours} hours: ${tape.tracks.length} projects, ${marks} events, playhead part-way through`}
+    >
+      <div className="deck-top" aria-hidden="true">
+        <span className="label">
+          <span className="deck-rec" /> Replay · last {hours}h
+        </span>
+        <span className="deck-speeds">
+          {['1×', '4×', '16×', '60×'].map((s) => (
+            <span key={s} data-on={s === '16×' ? '' : undefined}>
+              {s}
+            </span>
+          ))}
+        </span>
+      </div>
+      <div className="deck-tape" aria-hidden="true">
+        {tape.tracks.map((t) => (
+          <div className="deck-track" key={t.project}>
+            <span className="deck-name">{t.project}</span>
+            <span className="deck-lane">
+              {t.wait ? (
+                <span
+                  className="deck-wait"
+                  style={{ left: `${t.wait.from * 100}%`, width: `${(t.wait.to - t.wait.from) * 100}%` }}
+                />
+              ) : null}
+              {t.marks.map((m, i) => (
+                <span key={i} className="deck-mark" data-kind={m.kind} style={{ left: `${m.x * 100}%` }} />
+              ))}
+            </span>
+          </div>
+        ))}
+        <div className="deck-ruler">
+          <span />
+          <span className="deck-lane">
+            {ticks.map((t) => (
+              <LocalTime key={t} at={t} className="deck-tick" style="time" />
+            ))}
+          </span>
+        </div>
+        <div className="deck-head-rail">
+          <span />
+          <span className="deck-lane">
+            <span className="deck-head" style={{ ['--head' as string]: String(head) }}>
+              <LocalTime at={at} className="deck-head-time" style="time" />
+            </span>
+          </span>
+        </div>
+      </div>
+      <div className="deck-transport" aria-hidden="true">
+        <span className="deck-btn">
+          <Icon name="chevron" />
+        </span>
+        <span className="deck-btn deck-play" />
+        <span className="deck-btn deck-fwd">
+          <Icon name="chevron" />
+        </span>
+        <span className="deck-legend">
+          <i data-kind="merge" /> merged <i data-kind="ci" /> CI failed <i data-kind="release" /> release{' '}
+          <i data-kind="wait" /> waiting on you
+        </span>
+      </div>
+    </figure>
   );
 }

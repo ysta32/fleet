@@ -64,7 +64,13 @@ const light = {
   'series-8': '#8f5a2e',
   skeleton: '#e6e2d6',
   'skeleton-shine': '#f0ece2',
-  ...model,
+  // darker model identities so dots and swatches hold 3:1 on light surfaces (mirrors tokens.css)
+  'model-opus': '#c2501c',
+  'model-sonnet': '#1f7f8a',
+  'model-haiku': '#5d8f1c',
+  'model-fable': '#857a5c',
+  'model-astra': '#b4428f',
+  'model-unknown': '#767a73',
 } as const satisfies Record<keyof typeof dark, string>;
 
 export type PaletteKey = keyof typeof dark;

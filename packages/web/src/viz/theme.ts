@@ -29,6 +29,14 @@ export interface VizTheme {
   gridSection: string;
   /** body colour of station cores / pillars */
   coreBody: string;
+  /**
+   * Hairline instruments (rings, dials, tethers): opacity multiplier and ceiling. Paper needs ink lines
+   * far denser than light-on-ink (no bloom, no additive glow), capped near 55% so they stay hairlines.
+   */
+  lineGain: number;
+  lineCap: number;
+  /** fog distance multiplier: paper fogs to cream, which reads as washed out rather than as depth */
+  fogScale: number;
   model: Record<ModelFamily, string>;
   task: Record<OrchTaskState, string>;
   /** HDR multiplier per task state; only live states exceed the bloom threshold (dark only) */
@@ -70,9 +78,12 @@ function build(name: ThemeName): VizTheme {
     warn: p.warn,
     danger: p.danger,
     info: p.info,
-    gridCell: dark ? '#141716' : '#e7e2d6',
-    gridSection: dark ? '#1f2320' : '#d6d0c1',
-    coreBody: dark ? '#141210' : '#f6f3ec',
+    gridCell: dark ? '#141716' : '#ddd5c3',
+    gridSection: dark ? '#1f2320' : '#c4baa3',
+    coreBody: dark ? '#141210' : '#e9e3d4',
+    lineGain: dark ? 1 : 3,
+    lineCap: dark ? 1 : 0.55,
+    fogScale: dark ? 1 : 1.6,
     model: {
       opus: p['model-opus'],
       sonnet: p['model-sonnet'],

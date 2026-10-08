@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import fixture from '../../../digest/fixtures/demo-digest.json';
+import { currentDemoFleet } from '../data/demoSource';
 import {
+  DEMO_NIGHT_HOURS,
   fetchDigest,
   getDemoDigest,
   getDemoDigestHistory,
@@ -23,7 +25,22 @@ describe('overnight digest', () => {
     expect(model.projects[0].health).toBe('red');
     expect(model.projects.at(-1)?.health).toBe('quiet');
     expect(digest.projects.map((project) => project.id)).toEqual(before);
-    expect(getDemoDigest()).toEqual(digest);
+  });
+
+  it('builds the demo digest from the same synthetic fleet as the harbour, ending now', () => {
+    const fleet = currentDemoFleet();
+    const snapshot = fleet.snapshot();
+    const digest = getDemoDigest();
+    const model = summarizeDigest(digest);
+    expect(model.to).toBe(snapshot.generatedAt);
+    expect(model.to - model.from).toBe(DEMO_NIGHT_HOURS * 3_600_000);
+    expect(digest.projects.map((project) => project.name).sort()).toEqual(
+      snapshot.projects.map((project) => project.name).sort(),
+    );
+    expect(digest.totals.projectsActive).toBe(snapshot.projects.length);
+    const waiting = snapshot.sessions.filter((session) => session.status === 'waiting');
+    expect(waiting).toHaveLength(1);
+    expect(digest.projects.find((project) => project.id === waiting[0]!.projectId)?.health).toBe('red');
   });
 
   it('keeps merged PRs and CI failures from the fixture', () => {
@@ -45,19 +62,18 @@ describe('overnight digest', () => {
     expect(digest.projects[0].releases).toEqual([release]);
   });
 
-  it('builds synthetic replay in the exact fixture window without future merges', () => {
+  it('replays the demo night from the fleet history, ending at the live demo clock', () => {
     const history = getDemoDigestHistory();
-    expect(history.from).toBe(Date.parse(fixture.window.since));
-    expect(history.to).toBe(Date.parse(fixture.window.until));
-    expect(history.events).toHaveLength(15);
+    const snapshot = currentDemoFleet().snapshot();
+    expect(history.to).toBe(snapshot.generatedAt);
+    expect(history.to - history.from).toBe(DEMO_NIGHT_HOURS * 3_600_000);
+    expect(history.frames.at(-1)).toEqual(snapshot);
+    expect(history.events.length).toBeGreaterThan(0);
     expect(history.events.map((event) => event.ts)).toEqual(
       history.events.map((event) => event.ts).sort((a, b) => a - b),
     );
-    expect(history.frames[0].prs).toHaveLength(0);
-    expect(history.frames.at(-1)?.prs).toHaveLength(12);
     for (const frame of history.frames) {
       expect(frame.demo).toBe(true);
-      expect(frame.projects.every((project) => project.path === '')).toBe(true);
       expect(frame.prs.every((pr) => pr.updatedAt <= frame.generatedAt)).toBe(true);
     }
   });

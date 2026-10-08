@@ -1,8 +1,8 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Selection } from './data/contract';
 import type { DashboardTab } from './dashboard/Dashboard';
-import { TABS } from './shell/tabs';
-import { formatCost, needsYou } from './dashboard/model';
+import { PHONE_PRIMARY, TABS } from './shell/tabs';
+import { formatCost, headerVitals, needsYou, withDismissed } from './dashboard/model';
 import { useFleet } from './data/useFleet';
 import { Dashboard, FleetScene } from './shell/slots';
 import { ReplayBar, REPLAY_WINDOWS } from './shell/ReplayBar';
@@ -15,7 +15,9 @@ import { HelpOverlay } from './shell/HelpOverlay';
 import { StatusBanner } from './shell/StatusBanner';
 import { TokenGate } from './shell/TokenGate';
 import { Onboarding } from './shell/Onboarding';
-import { SelectionCard } from './shell/SelectionCard';
+import { SelectionCard, selectionShown } from './shell/SelectionCard';
+import { MoreSheet } from './shell/MoreSheet';
+import { PhoneAlerts } from './push/PhoneAlerts';
 import { useConnection } from './shell/connection';
 import { modeOf } from './shell/mode';
 import { useShareUrl } from './shell/share';
@@ -50,7 +52,7 @@ function Shell() {
   const [selection, setSelection] = useState<Selection>(null);
   const [tab, setTab] = useState<DashboardTab>('overview');
   const [query, setQuery] = useState('');
-  const [layer, setLayer] = useState<'palette' | 'help' | null>(null);
+  const [layer, setLayer] = useState<'palette' | 'help' | 'push' | 'more' | null>(null);
   const [sheet, setSheet] = useState(false);
   const [dismissed, setDismissed] = useState(readDismissed);
   const search = useRef<HTMLInputElement>(null);
@@ -76,16 +78,25 @@ function Shell() {
   const snapshot = view.snapshot;
   const now = view.mode === 'live' ? Date.now() : (snapshot?.generatedAt ?? Date.now());
   const urgent = useMemo(() => (snapshot ? needsYou(snapshot, dismissed) : []), [snapshot, dismissed]);
-  const working = snapshot?.agents.filter((agent) => agent.status === 'working').length ?? 0;
-  const startOfDay = new Date(snapshot?.generatedAt ?? Date.now());
-  startOfDay.setHours(0, 0, 0, 0);
-  const costToday =
-    snapshot?.sessions
-      .filter((session) => session.startedAt >= startOfDay.getTime())
-      .reduce((total, session) => total + session.costUsd, 0) ?? 0;
+  const vitals = snapshot
+    ? headerVitals(
+        snapshot,
+        view.mode === 'replay' ? view.replay.at : snapshot.generatedAt,
+        view.mode === 'replay',
+      )
+    : null;
+  const working = vitals?.working ?? 0;
+  // the harbour reads incidents off its snapshot: cleared alerts must drop out there as well
+  const sceneSnapshot = useMemo(
+    () => (snapshot ? withDismissed(snapshot, dismissed) : snapshot),
+    [snapshot, dismissed],
+  );
+  const sceneView = sceneSnapshot === snapshot ? view : { ...view, snapshot: sceneSnapshot };
   const firstRun = !!snapshot && snapshot.sessions.length === 0 && snapshot.projects.length === 0;
 
   const go = useCallback((next: DashboardTab) => {
+    // navigating anywhere closes the selection drawer so the new section is never hidden under it
+    setSelection(null);
     setTab(next);
     setSheet(true);
     inspector.current?.scrollTo({ top: 0 });
@@ -230,6 +241,14 @@ function Shell() {
             run: linkHint,
           },
       {
+        id: 'push',
+        group: 'Commands',
+        label: 'Phone alerts',
+        meta: 'notify this device',
+        icon: 'bell',
+        run: () => setLayer('push'),
+      },
+      {
         id: 'help',
         group: 'Commands',
         label: 'Keyboard shortcuts',
@@ -256,6 +275,7 @@ function Shell() {
           label: session.title ?? session.id,
           meta: `${names.get(session.projectId) ?? session.projectId} · ${session.model}`,
           icon: 'session',
+          activeAt: session.lastActivity,
           run: () => setSelection({ kind: 'session', id: session.id }),
         });
       for (const agent of snapshot.agents)
@@ -314,7 +334,7 @@ function Shell() {
           }
         >
           <i aria-hidden="true" />
-          {pill.label}
+          <span className="mode-label">{pill.label}</span>
         </span>
         <div className="search" role="search">
           <Icon name="search" />
@@ -339,9 +359,9 @@ function Shell() {
               <span className="unit">{working === 1 ? 'agent' : 'agents'}</span>
             </dd>
           </div>
-          <div title="Estimated spend for sessions started today, local time">
-            <dt>Today</dt>
-            <dd>{formatCost(costToday)}</dd>
+          <div title={vitals?.title ?? 'Estimated spend for sessions started today, local time'}>
+            <dt>{vitals?.label ?? 'Today'}</dt>
+            <dd>{formatCost(vitals?.costUsd ?? 0)}</dd>
           </div>
         </dl>
         <div className="bar-actions">
@@ -402,7 +422,7 @@ function Shell() {
             <button
               key={entry.id}
               type="button"
-              className="rail-item"
+              className={`rail-item${PHONE_PRIMARY.includes(entry.id) ? '' : ' rail-secondary'}`}
               aria-current={tab === entry.id ? 'page' : undefined}
               onClick={() => go(entry.id)}
               title={`${entry.label} (G ${entry.key.toUpperCase()})`}
@@ -417,6 +437,25 @@ function Shell() {
             </button>
           );
         })}
+        <button
+          type="button"
+          className={`rail-item rail-more${PHONE_PRIMARY.includes(tab) ? '' : ' is-current'}`}
+          aria-haspopup="dialog"
+          aria-expanded={layer === 'more'}
+          onClick={() => setLayer('more')}
+        >
+          <span className="more-dots" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+          </span>
+          <span className="rail-label">
+            More
+            {!PHONE_PRIMARY.includes(tab) && (
+              <span className="sr-only">, current: {TABS.find((entry) => entry.id === tab)?.label}</span>
+            )}
+          </span>
+        </button>
       </nav>
 
       <main className="stage" aria-label="Fleet view">
@@ -434,13 +473,18 @@ function Shell() {
         >
           <Suspense fallback={null}>
             <div className="scene-slot">
-              <FleetScene view={view} selection={selection} onSelect={setSelection} />
+              <FleetScene
+                view={sceneView}
+                selection={selection}
+                onSelect={setSelection}
+                detailCard={!selectionShown(snapshot, selection)}
+              />
             </div>
           </Suspense>
         </ErrorBoundary>
         {firstRun && <Onboarding />}
         {snapshot && !firstRun && (
-          <div className="stage-hud" aria-hidden="true">
+          <div className="stage-hud" aria-hidden="true" data-fl-overlay>
             <span className="micro">Harbour</span>
             <span className="hud-meta">
               {snapshot.projects.length} {snapshot.projects.length === 1 ? 'project' : 'projects'} ·{' '}
@@ -448,7 +492,7 @@ function Shell() {
             </span>
           </div>
         )}
-        <ReplayBar view={view} />
+        <ReplayBar view={view} dismissed={dismissed} />
       </main>
 
       <aside className="inspector" id="inspector" ref={inspector} aria-label="Dashboard" tabIndex={-1}>
@@ -461,12 +505,6 @@ function Shell() {
         >
           <i aria-hidden="true" />
         </button>
-        <SelectionCard
-          snapshot={snapshot}
-          selection={selection}
-          now={now}
-          onClose={() => setSelection(null)}
-        />
         <ErrorBoundary area="The dashboard" fallbackHint="The harbour view keeps updating.">
           <Suspense fallback={null}>
             <Dashboard
@@ -483,8 +521,25 @@ function Shell() {
         </ErrorBoundary>
       </aside>
 
+      <SelectionCard
+        snapshot={snapshot}
+        selection={selection}
+        events={view.events}
+        now={view.mode === 'replay' ? view.replay.at : now}
+        onClose={() => setSelection(null)}
+      />
+
       {layer === 'palette' && <CommandPalette items={paletteItems} onClose={() => setLayer(null)} />}
-      {layer === 'help' && <HelpOverlay onClose={() => setLayer(null)} />}
+      {layer === 'help' && <HelpOverlay demo={view.mode === 'demo'} onClose={() => setLayer(null)} />}
+      {layer === 'push' && <PhoneAlerts demo={view.mode === 'demo'} onClose={() => setLayer(null)} />}
+      {layer === 'more' && (
+        <MoreSheet
+          current={tab}
+          onGo={go}
+          onPhoneAlerts={() => setLayer('push')}
+          onClose={() => setLayer(null)}
+        />
+      )}
     </div>
   );
 }

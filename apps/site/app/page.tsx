@@ -5,7 +5,8 @@ import { InstallCommand } from '@/components/InstallCommand';
 import { CostMath, InboxPreview, PhonePreview, SessionsPreview, TerminalWall } from '@/components/Previews';
 import { OptionalSections } from '@/components/Optional';
 import { demoPreview } from '@/lib/demo';
-import { repoFacts } from '@/lib/repo';
+import { readChangelog } from '@/lib/changelog';
+import { fleetVersion, repoFacts } from '@/lib/repo';
 import { INSTALL_CMD, REPO_URL, pageMeta } from '@/lib/site';
 
 export const metadata = pageMeta(
@@ -17,32 +18,39 @@ export const metadata = pageMeta(
 export default function Home() {
   const facts = repoFacts();
   const { totals } = demoPreview();
+  const version = fleetVersion();
+  const release = readChangelog().find((r) => r.version === version);
   return (
     <>
       {/* 1. Hook */}
       <section className="hero grain" aria-labelledby="hero-title">
         <div className="hero-stage">
-          <FleetStage posterAlt="A night harbour of glowing vessels: a synthetic fleet of Claude Code agents grouped by project" />
+          <FleetStage
+            signal
+            posterAlt="A night harbour of glowing vessels: a synthetic fleet of Claude Code agents grouped by project, one station raising an orange signal"
+          />
         </div>
         <div className="hero-horizon" aria-hidden="true" />
         <div className="hero-shade" aria-hidden="true" />
         <div className="wrap hero-copy">
-          <p className="label">Local mission control for Claude Code</p>
-          <h1 id="hero-title" className="display display-xl">
-            Your agents, <em>at a glance.</em>
-          </h1>
-          <p className="lead">
-            Fleet turns every Claude Code session on your machine into one live harbour. When an agent stops
-            to wait for you, its signal goes up, here and on your phone.
+          <p className="label" data-fl-overlay>
+            Local mission control for Claude Code
           </p>
-          <div className="hero-actions">
+          <h1 id="hero-title" className="display display-xl" data-fl-overlay>
+            One of your agents is <em className="hero-sync">waiting on you.</em>
+          </h1>
+          <p className="lead" data-fl-overlay>
+            Fleet watches every Claude Code session on your Mac and raises one signal, here and on your phone,
+            the moment an agent stops for you.
+          </p>
+          <div className="hero-actions" data-fl-overlay>
             <InstallCommand cmd={INSTALL_CMD} />
             <Link className="link-arrow" href="/demo">
               Open the live demo <Icon name="chevron" />
             </Link>
           </div>
         </div>
-        <div className="wrap hero-meta">
+        <div className="wrap hero-meta" data-fl-overlay>
           <span className="label">
             <span className="live-dot" aria-hidden="true" />
             Real WebGL render · synthetic fleet
@@ -59,7 +67,7 @@ export default function Home() {
         <div className="wrap split">
           <div className="sticky-col" data-reveal>
             <div className="label-row">
-              <span className="label">01 · The problem</span>
+              <span className="label sec-n">The problem</span>
             </div>
             <h2 id="problem-title" className="h2" style={{ marginTop: 'var(--fl-space-5)' }}>
               Twelve terminals. One has been waiting <em>forty minutes</em>.
@@ -86,12 +94,16 @@ export default function Home() {
         <div className="wrap">
           <div className="section-head" data-reveal>
             <div className="label-row">
-              <span className="label">02 · The product</span>
+              <span className="label sec-n">The product</span>
               <span className="rule" />
             </div>
             <h2 id="product-title" className="h2" style={{ maxWidth: '18ch' }}>
               One harbour. Every agent. One signal when it matters.
             </h2>
+            <p className="lead">
+              Sessions become vessels, projects become stations, and the one agent that needs you is the only
+              thing in orange.
+            </p>
           </div>
           <div className="bento">
             <article className="panel" data-reveal>
@@ -103,7 +115,7 @@ export default function Home() {
                   last tool call.
                 </p>
               </div>
-              <div className="media" style={{ flex: 1, minHeight: 280 }}>
+              <div className="media media-fixed">
                 <img
                   src="/poster/fleet-close-1280.webp"
                   alt="Close view of the Fleet 3D scene: vessels around project stations, one glowing orange"
@@ -142,18 +154,21 @@ export default function Home() {
       {/* 4. Proof */}
       <section className="section grain" aria-labelledby="proof-title">
         <div className="wrap">
-          <div className="section-head" data-reveal>
-            <div className="label-row">
-              <span className="label">03 · Proof</span>
-              <span className="rule" />
+          <div className="head-split">
+            <div className="section-head" data-reveal>
+              <div className="label-row">
+                <span className="label sec-n">Proof</span>
+                <span className="rule" />
+              </div>
+              <h2 id="proof-title" className="h2" style={{ maxWidth: '20ch' }}>
+                No logos, no quotes. Read the code.
+              </h2>
+              <p className="lead">
+                Fleet is new and built by one person. These numbers come from the repository at build time, so
+                they cannot be inflated.
+              </p>
             </div>
-            <h2 id="proof-title" className="h2" style={{ maxWidth: '20ch' }}>
-              No logos, no quotes. Read the code.
-            </h2>
-            <p className="lead">
-              Fleet is new and built by one person. These numbers come from the repository at build time, so
-              they cannot be inflated.
-            </p>
+            {release ? <ReleaseCard version={version} date={release.date} groups={release.groups} /> : null}
           </div>
           <div className="facts" data-reveal>
             <div className="fact">
@@ -192,12 +207,16 @@ export default function Home() {
         <div className="wrap">
           <div className="section-head" data-reveal>
             <div className="label-row">
-              <span className="label">04 · Under the hood</span>
+              <span className="label sec-n">Under the hood</span>
               <span className="rule" />
             </div>
             <h2 id="depth-title" className="h2" style={{ maxWidth: '18ch' }}>
               Local first. Private by default. Honest about cost.
             </h2>
+            <p className="lead">
+              One read-only daemon, bound to your own machine. No account, no telemetry, nothing to sign up
+              for.
+            </p>
           </div>
           <div className="depth">
             <article className="panel" data-reveal>
@@ -262,29 +281,64 @@ export default function Home() {
 
       {/* 6. Action */}
       <section className="action grain" aria-labelledby="action-title">
-        <div className="wrap" style={{ display: 'grid', gap: 'var(--fl-space-7)' }}>
+        <div className="wrap action-grid">
           <div className="label-row">
-            <span className="label">05 · Start</span>
+            <span className="label sec-n">Start</span>
             <span className="rule" />
           </div>
-          <h2 id="action-title" className="display display-xl" style={{ maxWidth: '12ch' }}>
+          <h2 id="action-title" className="display display-xl">
             Raise the signal <em>tonight.</em>
           </h2>
-          <p className="lead">
-            Node 20 and macOS. One command installs the collector and starts it at login.
-          </p>
-          <InstallCommand cmd={INSTALL_CMD} />
-          <div className="action-links">
-            <Link className="link-arrow" href="/docs">
-              Read the docs <Icon name="chevron" />
-            </Link>
-            <a className="link-arrow" href={REPO_URL}>
-              Star on GitHub <Icon name="external" />
-            </a>
+          <div className="action-body">
+            <p className="lead">
+              Node 20 and macOS. One command installs the collector and starts it at login.
+            </p>
+            <InstallCommand cmd={INSTALL_CMD} />
+            <div className="action-links">
+              <Link className="link-arrow" href="/docs">
+                Read the docs <Icon name="chevron" />
+              </Link>
+              <a className="link-arrow" href={REPO_URL}>
+                Star on GitHub <Icon name="external" />
+              </a>
+            </div>
           </div>
         </div>
       </section>
     </>
+  );
+}
+
+/** The current release, read from CHANGELOG.md: tag, date and how many entries each heading carries. */
+function ReleaseCard({
+  version,
+  date,
+  groups,
+}: {
+  version: string;
+  date: string | null;
+  groups: { heading: string; items: string[] }[];
+}) {
+  return (
+    <aside className="release-card" data-reveal aria-label={`Release v${version}`}>
+      <div className="label-row">
+        <span className="label">Latest release</span>
+        <span className="rule" />
+        <span className="label">{date ?? 'unreleased'}</span>
+      </div>
+      <span className="release-tag">v{version}</span>
+      <ul className="release-counts">
+        {groups.map((g) => (
+          <li key={g.heading}>
+            <span className="num">{String(g.items.length).padStart(2, '0')}</span>
+            <span>{g.heading.toLowerCase()}</span>
+          </li>
+        ))}
+      </ul>
+      <Link className="link-arrow" href="/changelog">
+        Read the release notes <Icon name="chevron" />
+      </Link>
+    </aside>
   );
 }
 

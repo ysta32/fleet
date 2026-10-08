@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { renderToString } from 'react-dom/server';
 import type { SpendSummary } from '@fleet/shared';
 import { burnTint, DEMO_SUMMARY, SpendSiteSection, SpendTab } from './index.js';
-import { money, monthModel, niceTicks, sharePercents, tickLabel } from './format.js';
+import { money, monthModel, stampLocal, monthTicks, niceTicks, sharePercents, tickLabel } from './format.js';
 import { SPEND_CSS } from './styles.js';
 
 const FABRICATED = [/9x/i, /\$29\b/, /\$750\b/, /testimonial/i, /\b\d[\d,]*\+? (users|developers|teams)\b/i];
@@ -232,5 +232,57 @@ describe('round-3 contract details', () => {
     for (const k of ['01 Forecast', '02 Split', '03 Savings', 'Run it on your own month.', 'Example data'])
       expect(h).toContain(k);
     noClaims(h);
+  });
+});
+
+describe('monthTicks', () => {
+  it('marks the 8th and 22nd as narrow-hidden alternates', () => {
+    expect(monthTicks(31)).toEqual([
+      { day: 1, alt: false },
+      { day: 8, alt: true },
+      { day: 15, alt: false },
+      { day: 22, alt: true },
+      { day: 31, alt: false },
+    ]);
+  });
+  it('leaves only 1, 15 and month end when alternates hide, so Oct 1 and Oct 8 never collide', () => {
+    expect(
+      monthTicks(30)
+        .filter((tick) => !tick.alt)
+        .map((tick) => tick.day),
+    ).toEqual([1, 15, 30]);
+  });
+  it('drops a weekly tick too close to the month end and handles tiny spans', () => {
+    expect(monthTicks(24).map((tick) => tick.day)).toEqual([1, 8, 15, 24]);
+    expect(monthTicks(1)).toEqual([{ day: 1, alt: false }]);
+  });
+  it('renders the alternates with data-alt in the hero chart', () => {
+    const html = renderToString(<SpendTab summary={DEMO_SUMMARY} />);
+    expect(html).toMatch(/data-alt="true"[^>]*>[A-Z][a-z]{2}(<!-- -->)? (<!-- -->)?8</);
+  });
+});
+
+describe('one clock and one numeral face (r1-7, N6)', () => {
+  it('stamps "Updated" in local time and keeps UTC for the tooltip only', () => {
+    const at = DEMO_SUMMARY.generatedAt;
+    const html = renderToString(<SpendTab summary={DEMO_SUMMARY} />).replace(/<!-- -->/g, '');
+    const d = new Date(at);
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    expect(stampLocal(at)).toMatch(new RegExp(`^[A-Z][a-z]{2} ${d.getDate()}, ${hh}:${mm}$`));
+    expect(html).toContain(`Updated ${stampLocal(at)}`);
+    // the visible text never says UTC; the title attribute does
+    const visible = html.replace(/<[^>]*>/g, ' ');
+    expect(visible).not.toMatch(/\bUTC\b/);
+    expect(html).toMatch(/title="[^"]*UTC"/);
+  });
+  it('returns an empty stamp for an invalid time', () => {
+    expect(stampLocal(Number.NaN)).toBe('');
+  });
+  it('sets the pace sentence in the mono face with tabular numerals', () => {
+    const rule = SPEND_CSS.match(/\.fls-hero-line\{[^}]*\}/)?.[0] ?? '';
+    expect(rule).toContain('IBM Plex Mono');
+    expect(rule).toContain('tabular-nums');
+    expect(rule).not.toContain('Instrument Serif');
   });
 });

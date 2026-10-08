@@ -435,6 +435,56 @@ describe('runDaemon restart from history', () => {
   });
 });
 
+describe('runDaemon waiting notifications through the real parser', () => {
+  it('notifies the next waiting turn after a text-only reply that emitted no event', async () => {
+    const root = path.join(tmp, 'text-reply');
+    const proj = path.join(root, 'proj');
+    const claude = path.join(root, 'claude');
+    await mkdir(proj, { recursive: true });
+    const dir = path.join(claude, 'synthetic-text');
+    await mkdir(dir, { recursive: true });
+    const file = path.join(dir, 'sess-text.jsonl');
+    // timestamps sit well in the past so every ended turn is already past WAITING_AFTER_MS
+    const base = Date.now() - 300_000;
+    await writeFile(file, userLine(base, proj) + '\n');
+    const execCalls: string[][] = [];
+    const d = await runDaemon(
+      config({ claudeProjectsDir: claude, notify: { macos: true, ntfyUrl: '', kinds: ['session.waiting'] } }),
+      {
+        dataDir: path.join(root, 'data'),
+        tickMs: 100,
+        tailPollMs: 50,
+        notifierDeps: { platform: 'darwin', exec: (_c, args) => void execCalls.push(args) },
+      },
+    );
+    const status = async () =>
+      (await getJson<FleetSnapshot>(d.port, '/api/snapshot')).sessions.find((x) => x.id === 'sess-text')
+        ?.status;
+    try {
+      await waitFor(async () => ((await status()) === 'idle' ? true : undefined));
+      // turn 1 ends: waiting, notified
+      await appendFile(
+        file,
+        assistantLine(base + 10_000, proj, 'm1', [{ type: 'text', text: 'a' }], 'end_turn') + '\n',
+      );
+      await waitFor(async () => (execCalls.length === 1 ? true : undefined));
+      // a plain-text reply: no event, only a status change
+      await appendFile(file, userLine(base + 20_000, proj) + '\n');
+      await waitFor(async () => ((await status()) !== 'waiting' ? true : undefined));
+      // turn 2 ends with text only: a new waiting turn notifies again
+      await appendFile(
+        file,
+        assistantLine(base + 30_000, proj, 'm2', [{ type: 'text', text: 'b' }], 'end_turn') + '\n',
+      );
+      await waitFor(async () => (execCalls.length === 2 ? true : undefined));
+      const snap = await getJson<FleetSnapshot>(d.port, '/api/snapshot');
+      expect(snap.alerts.filter((a) => a.kind === 'session.waiting')).toHaveLength(2);
+    } finally {
+      await d.close();
+    }
+  });
+});
+
 describe('runDaemon with fleet-spend (fake module via the loader seam)', () => {
   it('caches /api/spend for the TTL, runs one scan at a time and puts the brief in the snapshot', async () => {
     const calls = { summary: 0, brief: 0, active: 0, maxActive: 0 };

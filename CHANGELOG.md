@@ -4,6 +4,38 @@ All notable changes to Fleet are recorded here. The format follows [Keep a Chang
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-08
+
+The redesign release: one signal per incident, a demo world that reads like a real night, and a site built around it.
+
+### Added
+
+- Replay tape deck in the 3D view: scrub, play and step through the last 12 hours, with the camera returning home on deselect.
+- Light harbour palette for the 3D view.
+- Incidents: alerts, waiting sessions and blocked army tasks for the same task are grouped into one incident with sub-reasons. The station badges, Overview, Alerts list, nav badge and timeline notches all read the same incident list.
+- `createDemoWorld()` and the local-time helpers (`formatLocalTime`, `formatUtcTime`, `localStartOfDay`, `sessionSpend`) in `@fleet/shared`, so the app and the site render the same synthetic world.
+- Armies view: dependency edges routed as bundled lanes that never overlap; the graph scales to fit or scrolls by whole columns to the blocked or running task.
+- Station labels are laid out together each frame: stations that need you are always labelled, labels avoid each other and the overlays, and leader lines end at the label's edge.
+- The live timeline shows the same density bars and incident notches as replay, and the replay header shows spend and agents at the playhead.
+- Phone: a "More" sheet in navigation, bottom-anchored phone alerts sheet and recents first in the command palette.
+- Site: a problem-first hero whose signal is the waiting station in the live scene, a replay deck on the features page, a docs rail with copy buttons and a live 404.
+
+### Changed
+
+- The collector sends one notification per incident, and sends again when a waiting incident escalates to blocked or when the incident reopens. Every distinct alert is still stored.
+- The demo world runs at a realistic pace: about 24 PRs and $40 a night, with 3 to 5 needs-you incidents, fictional project titles and no "Synthetic" prefixes. The demo disclosure stays in the app chrome.
+- All times in the app and site are local, with UTC in the tooltip. Today's spend comes from one source everywhere.
+- The session drawer is a proper dialog: focus is trapped, the camera stops at 1.6x and keeps the target clear of overlays, and the timeline is ordered oldest first and grouped by task.
+- Site hero: the camera holds the waiting station in frame, the poster renders server-side and is preloaded, and digest times are formatted in the visitor's own time zone.
+- Spend at phone width: fixed-width figures, no colliding date ticks and an AA-contrast budget label.
+- The site install box shows the full command and copies it exactly; the product table shows five rows with a fixed-ratio preview.
+
+### Fixed
+
+- In demo mode the phone alerts switch is simulated and never asks for notification permission or changes a real push subscription.
+- Push: coalescing happens only after delivery, and subscriptions answering 403 are pruned.
+- Inflight ids no longer start with a hyphen.
+
 ## [1.0.0] - 2026-10-07
 
 First public release.

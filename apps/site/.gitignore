@@ -6,3 +6,4 @@ public/island/
 *.tsbuildinfo
 lib/brand.generated.ts
 lib/spend.generated.tsx
+lib/world.generated.json

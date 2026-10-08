@@ -139,7 +139,9 @@ describe('Dashboard', () => {
     expect(html).toContain('Since you left');
     expect(html).toContain('>Synthetic<');
     expect(html).toContain('Replay the night');
-    expect(html).toContain('5 need attention');
+    // The demo night comes from the same synthetic fleet: one army is waiting on you at load.
+    expect(html).toMatch(/\d+ need attention/);
+    expect(html).toMatch(/needs? you/);
   });
   it('registers both panels in the shared rail, palette and hotkey tab list', () => {
     expect(TABS).toContainEqual({ id: 'overnight', label: 'Overnight', icon: 'moon', key: 'n' });
@@ -252,6 +254,49 @@ describe('Dashboard', () => {
     expect(html).toContain('Waiting on you');
     expect(html).toContain('Synthetic session');
     expect(html).not.toContain('Nothing needs you.');
+  });
+  it('counts one blocked task, its waiting session and its alert as one incident everywhere', () => {
+    const base = fixture();
+    const snapshot: FleetSnapshot = {
+      ...base.snapshot!,
+      projects: base.snapshot!.projects.map((project) => ({
+        ...project,
+        orch: { ...project.orch!, blocked: ['01'] },
+      })),
+      alerts: base.snapshot!.alerts.map((alert) => ({ ...alert, taskId: '01' })),
+      sessions: base.snapshot!.sessions.map((session) => ({
+        ...session,
+        status: 'waiting' as const,
+        agentIds: ['coder'],
+      })),
+      agents: [
+        {
+          id: 'coder',
+          sessionId: 'session',
+          projectId: 'demo',
+          role: 'coder',
+          model: 'opus',
+          label: 'coder t01',
+          status: 'waiting',
+          currentTask: 't01',
+          location: { kind: 'project', projectId: 'demo' },
+          tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          startedAt: now,
+          lastActivity: now,
+        },
+      ],
+    };
+    const view = { ...base, snapshot };
+    const overview = render('overview', view);
+    expect(overview).toContain('1 item is waiting on you.');
+    expect(overview).toContain('01 · synthetic-task is waiting on you');
+    const alerts = render('alerts', view);
+    expect(alerts.match(/class="alert-row incident-row/g)).toHaveLength(1);
+    expect(alerts).toContain('1 waiting on you');
+    expect(alerts).toContain('Army blocked');
+    expect(alerts).toContain('Waiting on you');
+    expect(alerts).toContain('Synthetic alert');
+    expect(alerts.match(/synthetic-task/g)).toHaveLength(1);
   });
   it('shows the calm empty state only when nothing needs the operator', () => {
     const base = fixture();

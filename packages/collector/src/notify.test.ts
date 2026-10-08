@@ -26,6 +26,20 @@ const snap = (name = 'demo'): FleetSnapshot => ({
   deploys: [],
   alerts: [],
 });
+const coder = (session: string, task: string): FleetSnapshot['agents'][number] => ({
+  id: session,
+  sessionId: session,
+  projectId: 'p1',
+  role: 'lead',
+  model: 'opus',
+  label: 'synthetic',
+  status: 'waiting',
+  currentTask: task,
+  location: { kind: 'project', projectId: 'p1' },
+  tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  startedAt: 0,
+  lastActivity: 0,
+});
 let n = 0;
 const ev = (kind: FleetEvent['kind'], o: Partial<FleetEvent> = {}): FleetEvent => ({
   id: `${n}-${n++}`,
@@ -45,12 +59,14 @@ const setup = (c = cfg(), now = () => 1000) => {
 describe('Notifier', () => {
   it('maps events to alert kinds', () => {
     const { n: nt } = setup();
-    expect(nt.handle(ev('army.done'), snap())?.kind).toBe('army.done');
-    expect(nt.handle(ev('blocked'), snap())?.kind).toBe('army.blocked');
-    expect(nt.handle(ev('ci', { severity: 'error' }), snap())?.kind).toBe('ci.failed');
+    expect(nt.handle(ev('army.done'), snap())?.alert.kind).toBe('army.done');
+    expect(nt.handle(ev('blocked'), snap())?.alert.kind).toBe('army.blocked');
+    expect(nt.handle(ev('ci', { severity: 'error' }), snap())?.alert.kind).toBe('ci.failed');
     expect(nt.handle(ev('ci', { severity: 'success' }), snap())).toBeUndefined();
-    expect(nt.handle(ev('session.waiting'), snap())?.kind).toBe('session.waiting');
-    expect(nt.handle(ev('failure', { data: { source: 'deploy' } }), snap())?.kind).toBe('deploy.failed');
+    expect(nt.handle(ev('session.waiting'), snap())?.alert.kind).toBe('session.waiting');
+    expect(nt.handle(ev('failure', { data: { source: 'deploy' } }), snap())?.alert.kind).toBe(
+      'deploy.failed',
+    );
     expect(nt.handle(ev('failure', { data: { source: 'test' } }), snap())).toBeUndefined();
     expect(nt.handle(ev('agent.tool'), snap())).toBeUndefined();
   });
@@ -73,13 +89,137 @@ describe('Notifier', () => {
     expect(nt.handle(ev('blocked', { taskId: '04' }), snap())).toBeDefined();
   });
 
-  it('rate limits to 6 per minute', () => {
+  it('notifies once per incident but stores every distinct alert, escalating waiting to blocked', () => {
+    const s = snap();
+    s.agents = [coder('sess', 't04')];
+    const { n: nt, exec, fetch } = setup();
+    const waiting = nt.handle(ev('session.waiting', { sessionId: 'sess', agentId: 'sess' }), s);
+    expect(waiting).toMatchObject({
+      notify: true,
+      alert: { kind: 'session.waiting', taskId: 't04', sessionId: 'sess' },
+    });
+    // blocked is high priority: it escalates past the low-priority waiting notification once
+    const blocked = nt.handle(ev('blocked', { taskId: '04' }), s);
+    expect(blocked).toMatchObject({ notify: true, alert: { kind: 'army.blocked', taskId: '04' } });
+    expect(exec).toHaveBeenCalledTimes(2);
+    // a second blocked alert for the same task is a repeat: not stored, not notified
+    expect(nt.handle(ev('blocked', { taskId: 't04' }), s)).toBeUndefined();
+    // a different session waiting on the same blocked task is stored but not notified
+    s.agents.push(coder('other', 't04'));
+    expect(nt.handle(ev('session.waiting', { sessionId: 'other', agentId: 'other' }), s)).toMatchObject({
+      notify: false,
+      alert: { kind: 'session.waiting', sessionId: 'other' },
+    });
+    expect(exec).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    // a different task, another project, or a project-level event are separate incidents
+    expect(nt.handle(ev('blocked', { taskId: '05' }), s)?.notify).toBe(true);
+    expect(nt.handle(ev('blocked', { taskId: '04', projectId: 'p2' }), s)?.notify).toBe(true);
+    expect(nt.handle(ev('army.done'), s)?.notify).toBe(true);
+  });
+
+  it('does not re-notify blocked after blocked, nor a low-priority wait after blocked', () => {
+    const s = snap();
+    s.agents = [coder('sess', 't04')];
+    const { n: nt, exec } = setup();
+    expect(nt.handle(ev('blocked', { taskId: '04' }), s)?.notify).toBe(true);
+    expect(nt.handle(ev('session.waiting', { sessionId: 'sess', agentId: 'sess' }), s)?.notify).toBe(false);
+    expect(exec).toHaveBeenCalledTimes(1);
+  });
+
+  it('notifies again when a blocked task unblocks and blocks again', () => {
+    const { n: nt } = setup();
+    expect(nt.handle(ev('blocked', { taskId: 't04' }), snap())?.notify).toBe(true);
+    nt.observe(ev('task.state', { taskId: '04', data: { state: 'blocked' } }));
+    expect(nt.handle(ev('blocked', { taskId: '04' }), snap())).toBeUndefined();
+    nt.observe(ev('task.state', { taskId: '04', projectId: 'p2', data: { state: 'running' } }));
+    expect(nt.handle(ev('blocked', { taskId: '04' }), snap())).toBeUndefined();
+    nt.observe(ev('task.state', { taskId: 't04', data: { state: 'running' } }));
+    expect(nt.handle(ev('blocked', { taskId: '04' }), snap())?.notify).toBe(true);
+  });
+
+  it('closes a waiting incident when its session recovers or ends, so the next wait notifies', () => {
+    const s = snap();
+    s.agents = [coder('a', 't04'), coder('b', 't04')];
+    const { n: nt, exec } = setup();
+    expect(nt.handle(ev('session.waiting', { sessionId: 'a', agentId: 'a' }), s)?.notify).toBe(true);
+    // a's own subagent working does not release a's wait
+    nt.observe(ev('agent.tool', { sessionId: 'a', agentId: 'a:sub' }));
+    expect(nt.handle(ev('session.waiting', { sessionId: 'b', agentId: 'b' }), s)?.notify).toBe(false);
+    // both sessions recover: the incident is over
+    nt.observe(ev('agent.tool', { sessionId: 'a', agentId: 'a' }));
+    nt.observe(ev('session.end', { sessionId: 'b', agentId: 'b' }));
+    // a different session waiting on the same task is a new transition
+    s.agents.push(coder('c', 't04'));
+    expect(nt.handle(ev('session.waiting', { sessionId: 'c', agentId: 'c' }), s)?.notify).toBe(true);
+    nt.observe(ev('session.end', { sessionId: 'c' }));
+    // the same session waiting again on a later turn is too
+    expect(nt.handle(ev('session.waiting', { sessionId: 'a', agentId: 'a' }), s)?.notify).toBe(true);
+    expect(exec).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps a task incident open while the task is still blocked, even after the waiting session recovers', () => {
+    const s = snap();
+    s.agents = [coder('a', 't04'), coder('b', 't04')];
+    const { n: nt } = setup();
+    expect(nt.handle(ev('blocked', { taskId: '04' }), s)?.notify).toBe(true);
+    expect(nt.handle(ev('session.waiting', { sessionId: 'a', agentId: 'a' }), s)?.notify).toBe(false);
+    nt.observe(ev('agent.tool', { sessionId: 'a', agentId: 'a' }));
+    expect(nt.handle(ev('session.waiting', { sessionId: 'b', agentId: 'b' }), s)?.notify).toBe(false);
+    nt.observe(ev('task.state', { taskId: '04', data: { state: 'running' } }));
+    expect(nt.handle(ev('session.waiting', { sessionId: 'b', agentId: 'b' }), s)?.notify).toBe(true);
+  });
+
+  it('rate limits notifications to 6 per minute but still stores the alerts', () => {
     let t = 0;
-    const { n: nt } = setup(cfg(), () => t);
+    const { n: nt, exec } = setup(cfg(), () => t);
     const got = Array.from({ length: 8 }, (_, i) => nt.handle(ev('blocked', { taskId: `t${i}` }), snap()));
-    expect(got.filter(Boolean)).toHaveLength(6);
+    expect(got.every(Boolean)).toBe(true);
+    expect(got.filter((r) => r?.notify)).toHaveLength(6);
+    expect(exec).toHaveBeenCalledTimes(6);
     t = 61_000;
-    expect(nt.handle(ev('blocked', { taskId: 'later' }), snap())).toBeDefined();
+    expect(nt.handle(ev('blocked', { taskId: 'later' }), snap())?.notify).toBe(true);
+  });
+
+  it('notifies a rate-limited incident on its next event once the limit allows, without re-storing it', () => {
+    let t = 0;
+    const { n: nt, exec } = setup(cfg(), () => t);
+    for (let i = 0; i < 6; i++)
+      expect(nt.handle(ev('blocked', { taskId: `t${i}` }), snap())?.notify).toBe(true);
+    const limited = nt.handle(ev('blocked', { taskId: 't9' }), snap());
+    expect(limited).toMatchObject({ notify: false, isNew: true });
+    // still limited: the repeat is neither stored again nor notified
+    t = 30_000;
+    expect(nt.handle(ev('blocked', { taskId: 't9' }), snap())).toBeUndefined();
+    t = 61_000;
+    const late = nt.handle(ev('blocked', { taskId: 't9' }), snap());
+    expect(late).toMatchObject({ notify: true, isNew: false });
+    expect(late!.alert.id).toBe(limited!.alert.id);
+    expect(exec).toHaveBeenCalledTimes(7);
+    // once notified it is an ordinary repeat again
+    expect(nt.handle(ev('blocked', { taskId: 't9' }), snap())).toBeUndefined();
+  });
+
+  it('releases a waiting hold when the published session status leaves waiting (text-only reply)', () => {
+    const s = snap();
+    s.agents = [coder('a', 't04'), coder('b', 't04')];
+    const { n: nt, exec } = setup();
+    expect(nt.handle(ev('session.waiting', { sessionId: 'a', agentId: 'a' }), s)?.notify).toBe(true);
+    nt.sessionStatus('p1', 'a', 'waiting');
+    nt.sessionStatus('p2', 'a', 'active');
+    expect(nt.handle(ev('session.waiting', { sessionId: 'b', agentId: 'b' }), s)?.notify).toBe(false);
+    nt.sessionStatus('p1', 'a', 'active');
+    nt.sessionStatus('p1', 'b', 'idle');
+    s.agents.push(coder('c', 't04'));
+    expect(nt.handle(ev('session.waiting', { sessionId: 'c', agentId: 'c' }), s)?.notify).toBe(true);
+    expect(exec).toHaveBeenCalledTimes(2);
+  });
+
+  it('treats a new waiting turn from the same session as a new transition', () => {
+    const { n: nt, exec } = setup();
+    expect(nt.handle(ev('session.waiting', { sessionId: 'a', agentId: 'a' }), snap())?.notify).toBe(true);
+    expect(nt.handle(ev('session.waiting', { sessionId: 'a', agentId: 'a' }), snap())?.notify).toBe(true);
+    expect(exec).toHaveBeenCalledTimes(2);
   });
 
   it('escapes AppleScript strings so quotes cannot break out', () => {

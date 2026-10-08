@@ -1,3 +1,4 @@
+import { formatLocalTime } from '@fleet/shared';
 import type { SpendBucket, SpendSummary } from '@fleet/shared';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -62,16 +63,29 @@ export function monthShort(m: number): string {
   return MONTHS[m - 1] ?? '';
 }
 
+/**
+ * X-axis day ticks for a month chart: 1, 8, 15, 22 and the last day. The 8th and 22nd are `alt` (hidden
+ * on narrow charts, where they collide with their neighbours), and a weekly tick closer than 4 days to the
+ * month end is dropped so the end label never overlaps it.
+ */
+export function monthTicks(days: number): { day: number; alt: boolean }[] {
+  const n = Math.max(1, Math.floor(days));
+  const ticks = [1, 8, 15, 22]
+    .filter((day) => day === 1 || n - day >= 4)
+    .map((day) => ({ day, alt: day === 8 || day === 22 }));
+  if (n > 1) ticks.push({ day: n, alt: false });
+  return ticks;
+}
+
 export function daysInMonth(y: number, m: number): number {
   return new Date(Date.UTC(y, m, 0)).getUTCDate();
 }
 
-/** HH:MM UTC, deterministic across server and client. */
-export function timeUtc(ms: number): string {
+/** "Oct 8, 17:31" in the viewer's local time zone (the stamp's UTC form goes in a tooltip). */
+export function stampLocal(ms: number): string {
   const d = new Date(ms);
-  const hh = String(d.getUTCHours()).padStart(2, '0');
-  const mm = String(d.getUTCMinutes()).padStart(2, '0');
-  return `${monthShort(d.getUTCMonth() + 1)} ${d.getUTCDate()}, ${hh}:${mm} UTC`;
+  if (!Number.isFinite(d.getTime())) return '';
+  return `${monthShort(d.getMonth() + 1)} ${d.getDate()}, ${formatLocalTime(ms)}`;
 }
 
 export function totalTokens(b: SpendBucket): number {

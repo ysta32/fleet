@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import type { RefObject } from 'react';
 
 const FOCUSABLE =
@@ -57,4 +57,79 @@ export function useModal(dialog: RefObject<HTMLElement>, overlay: RefObject<HTML
       if (previous && document.contains(previous)) previous.focus();
     };
   }, [dialog, overlay]);
+}
+
+/** Live `matchMedia` result; false where matchMedia is unavailable (SSR, old test DOMs). */
+export function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia?.(query).matches === true,
+  );
+  useEffect(() => {
+    const list = typeof window !== 'undefined' ? window.matchMedia?.(query) : undefined;
+    if (!list) return;
+    const update = () => setMatches(list.matches);
+    update();
+    list.addEventListener('change', update);
+    return () => list.removeEventListener('change', update);
+  }, [query]);
+  return matches;
+}
+
+/**
+ * Elements a drawer should make inert: every sibling when it is modal (phone sheet), otherwise
+ * only the siblings it covers. Already-inert elements belong to another layer and are left alone.
+ */
+export function drawerInertTargets(
+  drawer: Element,
+  modal: boolean,
+  covers: (element: Element) => boolean,
+): Element[] {
+  const parent = drawer.parentElement;
+  if (!parent) return [];
+  return Array.from(parent.children).filter(
+    (child) => child !== drawer && !child.hasAttribute('inert') && (modal || covers(child)),
+  );
+}
+
+/**
+ * Focus behaviour for a drawer that floats over the layout: focus moves to `initial` when it
+ * opens and returns to the invoking element when it closes; whatever it covers is inert; when
+ * `modal` is true every sibling is inert and Tab is trapped inside.
+ */
+export function useDrawer(
+  drawer: RefObject<HTMLElement>,
+  initial: RefObject<HTMLElement>,
+  modal: boolean,
+  covers: (element: Element) => boolean,
+) {
+  // Declared first so its cleanup (un-inerting) runs before focus is restored below.
+  useEffect(() => {
+    const node = drawer.current;
+    if (!node) return;
+    const inerted = drawerInertTargets(node, modal, covers);
+    for (const element of inerted) element.setAttribute('inert', '');
+    const keydown = (event: KeyboardEvent) => {
+      if (!modal || event.key !== 'Tab') return;
+      const items = Array.from(node.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+        (element) => element.getClientRects().length > 0,
+      );
+      const target = wrapFocus(items, document.activeElement, event.shiftKey);
+      if (target) {
+        event.preventDefault();
+        target.focus();
+      } else if (!items.length) event.preventDefault();
+    };
+    document.addEventListener('keydown', keydown, true);
+    return () => {
+      document.removeEventListener('keydown', keydown, true);
+      for (const element of inerted) element.removeAttribute('inert');
+    };
+  }, [drawer, modal, covers]);
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    initial.current?.focus({ preventScroll: true });
+    return () => {
+      if (previous && previous !== document.body && document.contains(previous)) previous.focus();
+    };
+  }, [drawer, initial]);
 }

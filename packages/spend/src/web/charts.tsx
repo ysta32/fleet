@@ -7,6 +7,7 @@ import {
   money,
   moneyWhole,
   monthShort,
+  monthTicks,
   niceTicks,
   pct,
   sharePercents,
@@ -169,7 +170,7 @@ export function HeroChart({ m }: { m: MonthModel }) {
   const band = `${X(m.today)},${Y(mtd)} ${X(m.days)},${Y(m.hi)} ${X(m.days)},${Y(m.lo)}`;
   const mon = monthShort(m.month);
   const projected = (d: number) => mtd + ((m.forecast - mtd) * (d - m.today)) / Math.max(1, m.days - m.today);
-  const xTicks = [1, 8, 15, 22, m.days].filter((d, i, a) => d <= m.days && a.indexOf(d) === i);
+  const xTicks = monthTicks(m.days);
   const crossLabel =
     m.crossDay !== null
       ? `${m.crossIsActual ? 'Passed' : 'Crosses'} ${moneyWhole(m.budget ?? 0)} budget ${m.crossIsActual ? '' : '~'}${mon} ${Math.ceil(m.crossDay)}`
@@ -263,7 +264,7 @@ export function HeroChart({ m }: { m: MonthModel }) {
                 />
                 <span
                   className="fls-callout fls-num fls-late"
-                  data-edge={crossX > 80 ? 'end' : crossX < 20 ? 'start' : undefined}
+                  data-edge={crossX < 25 ? 'start' : undefined}
                   style={{ left: `${crossX}%`, top: `${Y(m.budget)}%` }}
                 >
                   {crossLabel}
@@ -283,9 +284,9 @@ export function HeroChart({ m }: { m: MonthModel }) {
         )}
       </HoverChart>
       <div className="fls-xaxis fls-num" aria-hidden="true">
-        {xTicks.map((d) => (
-          <span key={d} style={{ left: `${X(d)}%` }}>
-            {mon} {d}
+        {xTicks.map(({ day, alt }) => (
+          <span key={day} data-alt={alt || undefined} style={{ left: `${X(day)}%` }}>
+            {mon} {day}
           </span>
         ))}
       </div>

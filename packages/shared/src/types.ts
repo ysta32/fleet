@@ -175,6 +175,10 @@ export interface Alert {
   title: string;
   body: string;
   at: number;
+  /** the task this alert is about, as the army writes it (e.g. "t04"), when the source knows it */
+  taskId?: string;
+  /** the session this alert is about, when the source knows it */
+  sessionId?: string;
   /** cleared alerts stay for history but are hidden in the UI */
   cleared?: boolean;
 }

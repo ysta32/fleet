@@ -8,6 +8,7 @@ import { Icon } from '@/components/Icon';
 import { MobileMenu, NavLinks } from '@/components/NavLinks';
 import { RevealObserver } from '@/components/Reveal';
 import { THEME_BOOT, ThemeToggle } from '@/components/ThemeToggle';
+import { fleetVersion } from '@/lib/repo';
 import { FOOTER, REPO_URL, SITE_URL } from '@/lib/site';
 
 const display = Instrument_Serif({
@@ -69,7 +70,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <a className="skip" href="#main">
           Skip to content
         </a>
-        <header className="nav">
+        <header className="nav" data-fl-overlay>
           <div className="wrap">
             <Link href="/" className="brand" aria-label="Fleet home">
               <Wordmark className="wordmark" />
@@ -119,7 +120,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </div>
             <div className="footer-base">
               <span>MIT License. No warranty. No telemetry.</span>
-              <span className="mono">v0.x · synthetic data on this site</span>
+              <span className="mono">
+                <Link href="/changelog">v{fleetVersion()}</Link> · synthetic data on this site
+              </span>
             </div>
           </div>
         </footer>

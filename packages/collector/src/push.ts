@@ -73,6 +73,7 @@ export class PushManager {
   private keys?: webPush.VapidKeys;
   private subscriptions?: webPush.PushSubscription[];
   private readonly sent = new Map<string, number>();
+  private readonly sending = new Set<string>();
 
   constructor(
     dataDir: string,
@@ -172,31 +173,42 @@ export class PushManager {
     const tag = `${clean.kind}:${clean.projectId}`;
     const now = this.now();
     for (const [key, at] of this.sent) if (now - at >= COALESCE_MS) this.sent.delete(key);
-    if (this.sent.has(tag)) return;
-    this.sent.set(tag, now);
-    const payload = JSON.stringify({ title: clean.title, body: clean.body, tag, url: '/' });
-    const { subscriptions, keys } = await this.exclusive(async () => {
-      await this.init();
-      return { subscriptions: [...this.subscriptions!], keys: this.keys! };
-    });
-    await Promise.all(
-      subscriptions.map(async (sub) => {
-        try {
-          await webPush.sendNotification(sub, payload, {
-            vapidDetails: { subject: 'https://github.com/ysta32/fleet', ...keys },
-            TTL: 300,
-            timeout: 10_000,
-          });
-        } catch (err) {
-          const status = (err as { statusCode?: number } | null)?.statusCode;
-          if (status !== 404 && status !== 410) throw new Error('push delivery failed');
-          await this.exclusive(async () => {
-            const next = this.subscriptions!.filter((s) => s !== sub);
-            await this.write('subs.json', next);
-            this.subscriptions = next;
-          });
-        }
-      }),
-    );
+    if (this.sent.has(tag) || this.sending.has(tag)) return;
+    this.sending.add(tag);
+    try {
+      const payload = JSON.stringify({ title: clean.title, body: clean.body, tag, url: '/' });
+      const { subscriptions, keys } = await this.exclusive(async () => {
+        await this.init();
+        return { subscriptions: [...this.subscriptions!], keys: this.keys! };
+      });
+      if (subscriptions.length === 0) this.sent.set(tag, this.now());
+      const results = await Promise.allSettled(
+        subscriptions.map(async (sub) => {
+          try {
+            await webPush.sendNotification(sub, payload, {
+              vapidDetails: { subject: 'https://github.com/ysta32/fleet', ...keys },
+              TTL: 300,
+              timeout: 10_000,
+            });
+            if (!this.sent.has(tag)) this.sent.set(tag, this.now());
+          } catch (err) {
+            const status = (err as { statusCode?: number } | null)?.statusCode;
+            if (status !== 403 && status !== 404 && status !== 410) {
+              throw new Error('push delivery failed');
+            }
+            await this.exclusive(async () => {
+              const next = this.subscriptions!.filter((s) => s !== sub);
+              await this.write('subs.json', next);
+              this.subscriptions = next;
+            });
+          }
+        }),
+      );
+      if (results.some((result) => result.status === 'rejected')) {
+        throw new Error('push delivery failed');
+      }
+    } finally {
+      this.sending.delete(tag);
+    }
   }
 }

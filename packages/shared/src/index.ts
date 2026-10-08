@@ -4,3 +4,5 @@ export * from './pricing.js';
 export * from './sanitize.js';
 export * from './ids.js';
 export * from './demo.js';
+export * from './demoSpend.js';
+export * from './time.js';

@@ -51,6 +51,12 @@ const TEXT = [
   ['info', 4.5, 'status text'],
   ['fg-subtle', 4.5, 'meta text, placeholders, disabled'],
   ['focus', 3, 'focus ring (non-text, 1.4.11)'],
+  ['model-opus', 3, 'model dot (non-text, 1.4.11)'],
+  ['model-sonnet', 3, 'model dot (non-text, 1.4.11)'],
+  ['model-haiku', 3, 'model dot (non-text, 1.4.11)'],
+  ['model-fable', 3, 'model dot (non-text, 1.4.11)'],
+  ['model-astra', 3, 'model dot (non-text, 1.4.11)'],
+  ['model-unknown', 3, 'model dot (non-text, 1.4.11)'],
 ];
 
 const rows = [];

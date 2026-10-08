@@ -1,7 +1,8 @@
 import { useState } from 'react';
+import { formatLocalTime, formatUtcTime } from '@fleet/shared';
 import type { SpendSource, SpendSummary } from '@fleet/shared';
 import { Breakdown, DailyBars, HeroChart, ModelMix, toolName } from './charts.js';
-import { money, moneyWhole, monthModel, monthName, monthShort, timeUtc } from './format.js';
+import { money, moneyWhole, monthModel, monthName, monthShort, stampLocal } from './format.js';
 import { Icon } from './icons.js';
 import type { IconName } from './icons.js';
 import { SPEND_CSS } from './styles.js';
@@ -278,29 +279,6 @@ function Dashboard({ s }: { s: SpendSummary }) {
 
   return (
     <div className="fls-stack">
-      <div className="fls-meta" style={{ justifyContent: 'flex-end' }}>
-        <span className="fls-chip" data-tint={tint} title={`Burn rate: ${tint}`}>
-          <span className="fls-dot" aria-hidden="true" />
-          <span className="fls-chip-label">
-            Burn <span className="fls-num">{money(s.burnUsdPerHour)}/h</span>, {tint}
-          </span>
-        </span>
-        {partial && (
-          <a
-            className="fls-badge fls-badge-warn"
-            href="#fls-src-h"
-            title={`${missing.map((x) => toolName(x.source)).join(', ')} not connected; totals exclude ${missing.length === 1 ? 'it' : 'them'}.`}
-          >
-            Partial, {okCount} of {s.sources.length} sources
-          </a>
-        )}
-        <span className="fls-badge">Estimated</span>
-        <span className="fls-chip">
-          <Icon name="clock" small />
-          <span className="fls-num">Updated {timeUtc(s.generatedAt)}</span>
-        </span>
-      </div>
-
       <section className="fls-hero" aria-labelledby="fls-hero-h">
         <div className="fls-hero-top">
           <div>
@@ -317,7 +295,10 @@ function Dashboard({ s }: { s: SpendSummary }) {
               )}
             </span>
             <p className="fls-hero-line">
-              On pace for <span className="fls-num">{moneyWhole(m.forecast)}</span> by {mon} {m.days}
+              On pace for <span className="fls-num">{moneyWhole(m.forecast)}</span> by{' '}
+              <span className="fls-num">
+                {mon} {m.days}
+              </span>
               {budget !== null ? (
                 forecastOver ? (
                   <>
@@ -336,6 +317,28 @@ function Dashboard({ s }: { s: SpendSummary }) {
                 '.'
               )}
             </p>
+            <div className="fls-meta fls-hero-meta">
+              <span className="fls-chip" data-tint={tint} title={`Burn rate: ${tint}`}>
+                <span className="fls-dot" aria-hidden="true" />
+                <span className="fls-chip-label">
+                  Burn <span className="fls-num">{money(s.burnUsdPerHour)}/h</span>, {tint}
+                </span>
+              </span>
+              {partial && (
+                <a
+                  className="fls-badge fls-badge-warn"
+                  href="#fls-src-h"
+                  title={`${missing.map((x) => toolName(x.source)).join(', ')} not connected; totals exclude ${missing.length === 1 ? 'it' : 'them'}.`}
+                >
+                  Partial, {okCount} of {s.sources.length} sources
+                </a>
+              )}
+              <span className="fls-badge">Estimated</span>
+              <span className="fls-chip" title={formatUtcTime(s.generatedAt)}>
+                <Icon name="clock" small />
+                <span className="fls-num">Updated {stampLocal(s.generatedAt)}</span>
+              </span>
+            </div>
           </div>
           <ul className="fls-legend" aria-label="Legend">
             <li style={{ color: 'var(--fl-accent, #ff6a2b)' }}>
@@ -364,7 +367,13 @@ function Dashboard({ s }: { s: SpendSummary }) {
       <div className="fls-kpis">
         <Kpi label="Today" value={money(s.todayUsd)}>
           <span className="fls-kpi-sub">
-            {mon} {m.today}, through {timeUtc(s.generatedAt).split(', ')[1]}
+            {mon} {m.today} · updated{' '}
+            <time
+              dateTime={Number.isFinite(s.generatedAt) ? new Date(s.generatedAt).toISOString() : undefined}
+              title={formatUtcTime(s.generatedAt)}
+            >
+              {formatLocalTime(s.generatedAt)}
+            </time>
           </span>
         </Kpi>
         <Kpi

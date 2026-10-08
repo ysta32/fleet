@@ -1,5 +1,6 @@
 import { PageHead } from '@/components/PageHead';
 import { readChangelog } from '@/lib/changelog';
+import { fleetVersion } from '@/lib/repo';
 import { REPO_URL, pageMeta } from '@/lib/site';
 
 export const metadata = pageMeta(
@@ -21,7 +22,8 @@ function Inline({ text }: { text: string }) {
 }
 
 export default function Changelog() {
-  const releases = readChangelog();
+  // An empty [Unreleased] stub has nothing to show; any section with entries is kept.
+  const releases = readChangelog().filter((r) => r.intro.length > 0 || r.groups.length > 0);
   return (
     <>
       <PageHead
@@ -31,8 +33,8 @@ export default function Changelog() {
           <>
             Generated at build time from <a href={`${REPO_URL}/blob/main/CHANGELOG.md`}>CHANGELOG.md</a>.{' '}
             {releases.some((r) => r.date)
-              ? 'Newest first.'
-              : 'Fleet is in v0.x development and has not published a release yet.'}
+              ? `Newest first. Current release: v${fleetVersion()}.`
+              : 'No release has been published yet.'}
           </>
         }
       />
@@ -42,7 +44,7 @@ export default function Changelog() {
           <article className="release" key={r.version} aria-labelledby={`v-${r.version}`}>
             <div className="release-meta">
               <h2 id={`v-${r.version}`} className="h3">
-                {r.version}
+                {/^\d/.test(r.version) ? `v${r.version}` : r.version}
               </h2>
               <span className="label">{r.date ?? 'Not yet released'}</span>
             </div>
