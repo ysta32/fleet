@@ -94,8 +94,11 @@ export function niceTicks(max: number, target = 4): { max: number; ticks: number
 /** Axis label sized to the step: whole dollars for steps >= $1, otherwise enough decimals to tell ticks apart. */
 export function tickLabel(v: number, step: number): string {
   let decimals = 0;
-  while (decimals < 6 && Math.abs(step * 10 ** decimals - Math.round(step * 10 ** decimals)) > 1e-9)
-    decimals++;
+  // up to 20 decimals (Intl's limit): sub-micro-dollar steps still get distinct labels
+  for (; decimals < 20; decimals++) {
+    const x = step * 10 ** decimals;
+    if (Math.round(x) !== 0 && Math.abs(x - Math.round(x)) <= 1e-6 * x) break;
+  }
   if (decimals === 0) return moneyWhole(v);
   return `$${v.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
 }
@@ -142,10 +145,12 @@ export interface MonthModel {
  */
 export function monthModel(s: SpendSummary): MonthModel {
   const last = s.daily.length ? parseDay(s.daily[s.daily.length - 1]!.key) : null;
-  const ms = new Date(s.monthStart);
-  // monthStart is local midnight on the 1st: read it in local time, or UTC+ zones land in the previous month.
-  const year = last?.y ?? ms.getFullYear();
-  const month = last?.m ?? ms.getMonth() + 1;
+  // monthStart is the producer's local midnight on the 1st. Every UTC offset is within -12h..+14h, so
+  // monthStart + 1 day read in UTC always lands on the 1st or 2nd of the right month: deterministic on
+  // server and client regardless of either one's time zone (no hydration drift).
+  const ms = new Date(s.monthStart + 86_400_000);
+  const year = last?.y ?? ms.getUTCFullYear();
+  const month = last?.m ?? ms.getUTCMonth() + 1;
   const prefix = `${year}-${String(month).padStart(2, '0')}-`;
   const days = daysInMonth(year, month);
   const today = Math.max(1, last && last.y === year && last.m === month ? last.d : 1);

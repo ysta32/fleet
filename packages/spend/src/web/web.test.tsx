@@ -174,6 +174,20 @@ describe('styles and helpers', () => {
     expect(m.month).toBe(10);
     expect(m.year).toBe(2026);
   });
+
+  it('monthModel month is time-zone independent when daily is empty', () => {
+    // local midnight Oct 1 in Asia/Tokyo (UTC+9), Pacific/Kiritimati (+14) and Pacific/Pago_Pago (-11)
+    for (const start of [Date.UTC(2026, 8, 30, 15), Date.UTC(2026, 8, 30, 10), Date.UTC(2026, 9, 1, 11)]) {
+      const m = monthModel({ ...DEMO_SUMMARY, daily: [], monthStart: start });
+      expect([m.year, m.month]).toEqual([2026, 10]);
+    }
+  });
+
+  it('tick labels stay distinct for sub-micro-dollar peaks', () => {
+    const { ticks, step } = niceTicks(0.0000002);
+    const labels = ticks.map((v) => tickLabel(v, step));
+    expect(new Set(labels).size).toBe(labels.length);
+  });
 });
 
 describe('round-3 contract details', () => {
