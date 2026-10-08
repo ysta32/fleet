@@ -17,6 +17,8 @@ export interface ReplayControls {
   seek(at: number): void;
   setPlaying(p: boolean): void;
   setSpeed(s: number): void;
+  /** the loaded history while replaying (timeline ticks and notches); null/absent when live */
+  history?: HistoryResponse | null;
   /** load an arbitrary history (e.g. the overnight window) and enter replay mode */
   load(h: HistoryResponse): void;
   exit(): void;
