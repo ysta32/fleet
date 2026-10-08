@@ -32,8 +32,21 @@ First public release.
 - The collector is read-only and binds 127.0.0.1 unless `lan` is set. Loopback needs no token; other clients need the access token and a valid Host header (DNS-rebinding defence).
 - Non-loopback clients and push payloads receive a redacted snapshot with opaque project and agent identifiers. Transcript-derived text is withheld unless `shareContent` is enabled.
 - Hardened HTML rendering in the digest against script injection.
+- Token exchange: remote browsers trade the token for an HttpOnly, SameSite=Strict cookie. API routes never accept `?token=`. A token link only mints the cookie on a top-level same-origin page load and then redirects it off the URL. `fleet token` prints the token separately from the URL.
+- Paths are canonicalized before routing, so slash, dot-segment and encoded variants can't reach the API through the shell.
+- Failed remote logins on any route share a per-client rate limit. Loopback is never limited, and requests with `X-Forwarded-For` or `Forwarded` are always treated as remote.
+- Remote redaction also withholds tool targets, agent labels, task slugs, PR titles and branches, release names and deploy environments.
+- The config file is tightened to 0600 on load (never through a symlink). VAPID keys and push subscriptions are stored 0600 in a 0700 directory.
+- The installer clones from git by default (the npm package isn't published yet) and is wrapped so a truncated download runs nothing.
+- The web app no longer reads a token from localStorage and clears any left by pre-release builds.
+- The CI privacy guard runs as its own job and scans every tracked file for real home paths and credential shapes.
 
 ### Fixed
 
 - Spend summary no longer lingers after leaving demo mode.
 - Web Push VAPID subject uses an https URL, because Apple's push service rejects a localhost mailto.
+- The installer copies the freshly built dashboard into the collector, so new installs and upgrades no longer ship stale assets.
+- Deploy-failure alerts reach notifications and push.
+- `fleet-spend` declares its runtime dependency on `@fleet/shared`. Spend budget alerts and the menu-bar app follow custom `FLEET_PORT` and `FLEET_CONFIG` settings.
+- Visualizer station tags stay inside the canvas, and the legend no longer covers the first-run setup steps.
+- Phone alerts: notification clicks open same-origin paths only, a failed subscribe is rolled back, and unsubscribe errors are reported.

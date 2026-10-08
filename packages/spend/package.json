@@ -35,7 +35,7 @@
     }
   },
   "dependencies": {
-    "@fleet/shared": "0.1.0"
+    "@fleet/shared": "1.0.0"
   },
   "devDependencies": {
     "@types/react": "18.3.12",
