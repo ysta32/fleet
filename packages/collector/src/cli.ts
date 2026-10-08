@@ -115,6 +115,19 @@ async function doctor(): Promise<number> {
   return exitCode(lines);
 }
 
+/** Port from an existing config file, read without creating or rewriting anything. */
+function configuredPort(path: string): number | undefined {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    const port = (parsed as { port?: unknown } | null)?.port;
+    return typeof port === 'number' && Number.isInteger(port) && port >= 0 && port <= 65535
+      ? port
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function envPort(): number | undefined {
   const v = process.env.FLEET_PORT;
   if (v === undefined || v === '') return undefined;
@@ -138,7 +151,7 @@ async function installCmd(args: string[]): Promise<number> {
   const home = process.env.HOME || osHomedir();
   if (dryRun) {
     // a dry run must not create the config or token either
-    const port = envPort() ?? defaultConfig().port;
+    const port = envPort() ?? configuredPort(configPath()) ?? defaultConfig().port;
     const plan = planInstall(opts, { home });
     console.log(`Dry run. Nothing was written and launchctl was not called.`);
     console.log(`Plist path: ${plan.path}`);

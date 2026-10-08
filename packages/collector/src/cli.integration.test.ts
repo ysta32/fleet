@@ -79,6 +79,20 @@ describe('fleet install --dry-run', () => {
     expect(r.out).toContain('http://127.0.0.1:4561/');
   });
 
+  it('uses the configured port, with FLEET_PORT taking precedence, and leaves the config untouched', () => {
+    const home = tempHome();
+    const cfgPath = join(home, '.config', 'fleet', 'config.json');
+    mkdirSync(dirname(cfgPath), { recursive: true });
+    const body = JSON.stringify({ port: 4581 });
+    writeFileSync(cfgPath, body);
+    const r = run(home, ['install', '--dry-run']);
+    expect(r.out).toContain('http://127.0.0.1:4581/');
+    expect(run(home, ['install', '--dry-run'], { FLEET_PORT: '4582' }).out).toContain(
+      'http://127.0.0.1:4582/',
+    );
+    expect(readFileSync(cfgPath, 'utf8')).toBe(body);
+  });
+
   it('rejects unknown options with exit 2', () => {
     expect(run(tempHome(), ['install', '--wat']).code).toBe(2);
   });

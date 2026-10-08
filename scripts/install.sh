@@ -32,9 +32,11 @@ fi
 
 build_checkout() {
   local dir="$1"
+  local fresh_deps="${2:-0}"
   [ -f "$dir/packages/collector/package.json" ] || fail "$dir is not a Fleet checkout. Point FLEET_FROM at the repo root."
   cd "$dir"
-  if [ ! -d node_modules ]; then
+  # a cloned checkout may have changed, so always sync its dependencies; a local checkout keeps its own
+  if [ "$fresh_deps" = "1" ] || [ ! -d node_modules ]; then
     npm ci --no-audit --no-fund
   fi
   npm run build --workspaces --if-present
@@ -51,7 +53,7 @@ elif [ "${FLEET_FROM_GIT:-0}" = "1" ]; then
     mkdir -p "$(dirname "$SRC_DIR")"
     git clone --depth 1 "$REPO_URL" "$SRC_DIR"
   fi
-  build_checkout "$SRC_DIR"
+  build_checkout "$SRC_DIR" 1
 else
   "${npm_global[@]}" "$PACKAGE"
 fi
