@@ -15,12 +15,11 @@ jobs:
           if git ls-files | grep -E '\.jsonl$' | grep -v '^packages/shared/fixtures/'; then echo "jsonl outside fixtures"; exit 1; fi
           if git ls-files | grep -E '(^|/)\.env'; then echo ".env committed"; exit 1; fi
           # real home paths: only synthetic user names are allowed (code, fixtures and markdown)
-          if git grep -nE '/Users/[^/ ]+/' -- ':!.github/**' | grep -vE '/Users/(synthetic|someone|private|you|example|me|x)/'; then echo "real user path"; exit 1; fi
+          if git grep -noE '/Users/[^/ "]+/' -- ':!.github/**' | grep -vE ':/Users/(synthetic|someone|private|you|example|me|x)/$'; then echo "real user path"; exit 1; fi
           # credential shapes; test fixtures may contain fake ones
           if git grep -nE 'sk-ant-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|BEGIN [A-Z ]*PRIVATE KEY' -- ':!*.test.ts' ':!.github/**'; then echo "possible secret"; exit 1; fi
   build-test:
     needs: privacy-guard
-    runs-on: ubuntu-latest
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
