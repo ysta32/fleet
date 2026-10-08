@@ -21,19 +21,29 @@ describe('modelFamily', () => {
 
 describe('estimateCostUsd', () => {
   it.each([
-    ['claude-opus-4', 15, 75],
-    ['claude-sonnet-4', 3, 15],
-    ['claude-haiku-4', 1, 5],
-    ['claude-fable', 15, 75],
-    ['gpt-6', 1.25, 10],
-    ['codex-mini', 1.25, 10],
-    ['astra', 1.25, 10],
-    ['unrecognized', 3, 15],
-    [undefined, 3, 15],
-  ] as const)('prices each token category for %s', (id, input, output) => {
+    ['claude-opus-4', 15, 75, 1.5],
+    ['claude-opus-4-1-20250805', 15, 75, 1.5],
+    ['claude-opus-4-5-20251101', 5, 25, 0.5],
+    ['claude-opus-4-7', 5, 25, 0.5],
+    ['claude-opus-4-7[1m]', 5, 25, 0.5],
+    ['claude-opus-5-5', 4, 20, 0.2],
+    ['claude-opus-4-9', 5, 25, 0.5],
+    ['claude-opus', 5, 25, 0.5],
+    ['claude-sonnet-4', 3, 15, 0.3],
+    ['claude-sonnet-5-5', 2, 10, 0.2],
+    ['claude-haiku-4', 1, 5, 0.1],
+    ['claude-haiku-4-5', 1, 5, 0.1],
+    ['claude-fable', 10, 50, 1],
+    ['claude-fable-5-1', 10, 50, 0.25],
+    ['gpt-6', 1.25, 10, 0.125],
+    ['codex-mini', 1.25, 10, 0.125],
+    ['astra', 1.25, 10, 0.125],
+    ['unrecognized', 3, 15, 0.3],
+    [undefined, 3, 15, 0.3],
+  ] as const)('prices each token category for %s', (id, input, output, cacheRead) => {
     expect(estimateCostUsd(id, { ...ZERO_TOKENS, input: 1_000_000 })).toBe(input);
     expect(estimateCostUsd(id, { ...ZERO_TOKENS, output: 1_000_000 })).toBe(output);
-    expect(estimateCostUsd(id, { ...ZERO_TOKENS, cacheRead: 1_000_000 })).toBeCloseTo(input * 0.1);
+    expect(estimateCostUsd(id, { ...ZERO_TOKENS, cacheRead: 1_000_000 })).toBeCloseTo(cacheRead);
     expect(estimateCostUsd(id, { ...ZERO_TOKENS, cacheWrite: 1_000_000 })).toBeCloseTo(input * 1.25);
     expect(estimateCostUsd(id, ZERO_TOKENS)).toBe(0);
   });
