@@ -341,8 +341,8 @@ const SERIF = `'Instrument Serif',Georgia,'Times New Roman',serif`;
 const SANS = `'Schibsted Grotesk',-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif`;
 const MONO = `'IBM Plex Mono',Menlo,Consolas,'Courier New',monospace`;
 
-/** Halyard light values (packages/ui/tokens.css), borders pre-blended onto surface-1. */
-const L = {
+/** Halyard light values (packages/ui/tokens.css), borders pre-blended onto surface-1. Drift-tested. */
+export const EMAIL_LIGHT = {
   bg: '#f3f0e8',
   surface: '#fbf9f4',
   surface3: '#ece8dd',
@@ -350,16 +350,16 @@ const L = {
   lineStrong: '#cdccc8',
   fg: '#181a16',
   muted: '#55574f',
-  subtle: '#85877d',
-  accent: '#e2511a',
-  danger: '#d1283a',
-  warn: '#a86d00',
-  success: '#3d8a2a',
-  agents: '#e2511a',
+  subtle: '#64665c',
+  accent: '#b5400e',
+  danger: '#c42637',
+  warn: '#8e5c00',
+  success: '#347524',
+  agents: '#1f7f8a',
 };
 
 /** Halyard dark values, used only inside the dark-mode style block. */
-const D = {
+export const EMAIL_DARK = {
   bg: '#0b0d0c',
   surface: '#121514',
   surface3: '#20251f',
@@ -367,13 +367,16 @@ const D = {
   lineStrong: '#393a36',
   fg: '#ece7da',
   muted: '#a7a596',
-  subtle: '#6f7069',
+  subtle: '#8a8b82',
   accent: '#ff6a2b',
   danger: '#ff5964',
   warn: '#f5b83d',
   success: '#9be564',
-  agents: '#ff6a2b',
+  agents: '#7fd1d9',
 };
+
+const L = EMAIL_LIGHT;
+const D = EMAIL_DARK;
 
 const HEALTH_COLOR: Record<ProjectHealth, keyof typeof L> = {
   red: 'danger',
@@ -615,7 +618,7 @@ export function renderEmailHtml(d: Digest, opts: { siteUrl?: string } = {}): str
       ? `<p class="ovn-fg" style="margin:0 0 6px 0;font-family:${SANS};font-size:15px;line-height:22px;color:${L.fg}">No merges, commits, releases or deploys in the window.</p>`
       : '';
     const names = quiet.length
-      ? `<p class="ovn-muted" style="margin:0;font-family:${SANS};font-size:14px;line-height:22px;color:${L.muted}"><span style="font-family:${MONO}">○</span>&nbsp; No activity: ${quiet.map((project) => `<span style="white-space:nowrap">${esc(project.name)}</span>`).join(', ')}.</p>`
+      ? `<p class="ovn-muted" style="margin:0;font-family:${SANS};font-size:14px;line-height:22px;color:${L.muted}"><span style="font-family:${MONO}">○</span>&nbsp; No activity: ${quiet.map((project) => `<span style="overflow-wrap:anywhere;word-break:break-word">${esc(project.name)}</span>`).join(', ')}.</p>`
       : '';
     sections.push(
       `${sectionLabel(++n, 'Quiet')}<tr><td class="ovn-px" style="padding:0 40px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td class="ovn-line" style="padding:12px 0 0 0;border-top:1px solid ${L.lineStrong}">${lead}${names}</td></tr></table></td></tr>`,

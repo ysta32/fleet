@@ -308,3 +308,36 @@ describe('markdown and plain text structure', () => {
     expect(text).not.toContain('idle<x> — quiet');
   });
 });
+
+describe('email palette drift', () => {
+  it('hard-coded email colours match the synced Halyard tokens (light and dark)', async () => {
+    const { HALYARD_TOKENS_CSS } = await import('../src/render/halyard.generated.js');
+    const { EMAIL_LIGHT, EMAIL_DARK } = await import('../src/render/text.js');
+    const block = (sel: RegExp) => {
+      const m = sel.exec(HALYARD_TOKENS_CSS);
+      if (!m) throw new Error(`no token block ${sel}`);
+      const body = HALYARD_TOKENS_CSS.slice(m.index, HALYARD_TOKENS_CSS.indexOf('}', m.index));
+      return (name: string) =>
+        new RegExp(`--fl-${name}:\\s*(#[0-9a-f]{6})`, 'i').exec(body)?.[1]?.toLowerCase();
+    };
+    const dark = block(/:root\[data-theme='dark'\] \{/);
+    const light = block(/:root\[data-theme='light'\] \{/);
+    const map = {
+      bg: 'bg',
+      surface: 'surface-1',
+      surface3: 'surface-3',
+      fg: 'fg',
+      muted: 'fg-muted',
+      subtle: 'fg-subtle',
+      accent: 'accent',
+      danger: 'danger',
+      warn: 'warn',
+      success: 'success',
+      agents: 'series-2',
+    } as const;
+    for (const [k, token] of Object.entries(map)) {
+      expect([k, EMAIL_LIGHT[k as keyof typeof EMAIL_LIGHT]]).toEqual([k, light(token)]);
+      expect([k, EMAIL_DARK[k as keyof typeof EMAIL_DARK]]).toEqual([k, dark(token)]);
+    }
+  });
+});
