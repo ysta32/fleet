@@ -112,3 +112,27 @@ switches to ink on white.
 - **2026-10-07, round 3:** a failure under a minute old read "0m ago", so it now reads "just
   now"; the dateline separators indented oddly when wrapping on phones, so they now apply only
   from 640px.
+- **2026-10-07, round 4 (all 7 scenarios × page/archive/email × light/dark × 360/768/1280/1920, 168 shots via
+  `npm run visual`):** the ground rendered mid-grey (`#3b3c3c`) instead of ink. Halyard's `--fl-grain` tile is 55%
+  noise meant for its own layer, but the page painted it directly. Grain now sits on `.ovn-root::before` at
+  `--fl-grain-opacity` with `mix-blend-mode: overlay`, so the measured ground is `#0b0d0c` dark and `#f3f0e8` light.
+  The harness 360 shots were laid out at ~500px and cropped (headless Chrome clamps the window), so narrow widths now
+  render in an exact-width iframe. Headless Chrome 154 also never exits after `--screenshot`, so the harness accepts
+  a finished, size-stable PNG and kills the process group (24 min → 30 s per scenario).
+- **2026-10-07, round 5:** the masthead trend wrapped under the date as an orphaned block at 360/768, so below 1080px
+  it is a full-width row with a one-line caption. Seven stats split 5 + 2 at 768, so from 640px the grid is 4
+  columns (4 + 3). The agents lane bars stayed 64px across a 600px row, so they now fill the row until the rail
+  appears. The partial-data notice clipped at 360, so it now wraps. In the email, a deploy with no commit message was
+  titled just "main", so it now reads "Production deploy (main)".
+- **2026-10-07, round 6:** the email "light" shots were dark because email dark mode follows the OS scheme, not
+  `[data-theme]`, so the harness pins the media query per theme. First-run shots never showed the first-edition state
+  because the harness passed no edition, so it now passes the index length (No. 001 vs No. 014). At 360 the trend
+  caption still wrapped beside the sparkline, so the trend row now wraps the caption under it.
+- **2026-10-07, round 7:** archive rows at 640–1079px truncated headlines to about 20 characters because the stats
+  shared the row, so the stats now sit under the headline until 1080px. The latest-card trend caption stacked into 3
+  narrow lines, so it is now wider.
+- **2026-10-07, round 8 (verification):** all 168 shots re-checked. Index rows read in full at 768, rough-night
+  hierarchy (red rule, red needs-you rule, +9 more) holds at 1280, and the email light and dark both use Halyard
+  values (contrast ≥ 4.5:1 for text, drift-tested). The baseline was committed from this round. Known limitation:
+  the harness has no stored history, so page shots show "1 of 14 nights". Real archives show the full trend (see
+  the archive shot).

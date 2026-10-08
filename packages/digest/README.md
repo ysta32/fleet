@@ -3,7 +3,15 @@
 Overnight scans your GitHub repos and Vercel deployments and writes one calm morning digest of everything that
 shipped while you slept, including what your AI agents did.
 
-![Overnight screenshot](docs/screenshot.png)
+![Overnight, dark theme at 1280px: the headline, what needs you, the night in numbers and agents vs you](docs/screenshot.png)
+
+| Phone, light                                                                 | Email                                                                  | Archive                                                                   |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| ![Digest page at 360px in the light theme](docs/screenshot-mobile-light.png) | ![Digest email at 768px in the light theme](docs/screenshot-email.png) | ![Archive index at 1280px in the dark theme](docs/screenshot-archive.png) |
+
+All screenshots use the synthetic `acme-dev` demo data (`src/demo/scenarios.ts`); no real repositories appear.
+Visual regression: `npm run build && npm run visual` compares 168 shots (7 scenarios × page, archive and email ×
+light and dark × 360/768/1280/1920) against `test/visual/baseline/`. See [DESIGN.md](DESIGN.md).
 
 ## What it shows
 

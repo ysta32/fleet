@@ -1,6 +1,6 @@
 {
   "name": "@fleet/digest",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Overnight \u2014 Fleet's morning digest of everything that shipped across your repos and deploys.",
   "type": "module",
   "license": "MIT",
