@@ -1,9 +1,9 @@
-import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { IngestContext, SpendConfig } from '../contracts.js';
-import { claudeCacheSize, clearClaudeCache, ingestClaudeCode } from './claude.js';
+import { claudeCacheSize, claudeParseCount, clearClaudeCache, ingestClaudeCode } from './claude.js';
 
 let tmp: string;
 beforeEach(async () => {
@@ -169,27 +169,23 @@ describe('ingestClaudeCode', () => {
 });
 
 describe('ingestClaudeCode file cache', () => {
-  it('reuses parsed rows for unchanged files and re-reads on size or mtime change', async () => {
+  it('reuses parsed rows for unchanged files and re-reads on size, mtime or ctime change', async () => {
     const p = await put('a/s.jsonl', [line({ usage: { input_tokens: 1, output_tokens: 1 } })]);
-    const first = await ingestClaudeCode(ctx(join(tmp, 'p')));
-    expect(first.records[0]!.tokens.output).toBe(1);
+    const n0 = claudeParseCount();
+    expect((await ingestClaudeCode(ctx(join(tmp, 'p')))).records[0]!.tokens.output).toBe(1);
+    expect((await ingestClaudeCode(ctx(join(tmp, 'p')))).records[0]!.tokens.output).toBe(1);
+    expect(claudeParseCount() - n0).toBe(1); // second scan served from cache
 
-    // same size and mtime: served from cache (proves no re-read)
-    await writeFile(p, line({ usage: { input_tokens: 1, output_tokens: 7 } }) + '\n');
+    // same size, mtime restored: ctime still changes, so the new content is read
     const t = new Date('2026-10-01T00:00:00Z');
     await utimes(p, t, t);
     await ingestClaudeCode(ctx(join(tmp, 'p')));
     await writeFile(p, line({ usage: { input_tokens: 1, output_tokens: 8 } }) + '\n');
     await utimes(p, t, t);
-    expect((await ingestClaudeCode(ctx(join(tmp, 'p')))).records[0]!.tokens.output).toBe(7);
-
-    // mtime change: re-read
-    await utimes(p, new Date('2026-10-02T00:00:00Z'), new Date('2026-10-02T00:00:00Z'));
     expect((await ingestClaudeCode(ctx(join(tmp, 'p')))).records[0]!.tokens.output).toBe(8);
 
     // size change: re-read
     await writeFile(p, line({ usage: { input_tokens: 1, output_tokens: 12345 } }) + '\n');
-    await utimes(p, new Date('2026-10-02T00:00:00Z'), new Date('2026-10-02T00:00:00Z'));
     expect((await ingestClaudeCode(ctx(join(tmp, 'p')))).records[0]!.tokens.output).toBe(12345);
   });
 
@@ -221,5 +217,20 @@ describe('ingestClaudeCode file cache', () => {
     const r = await ingestClaudeCode(ctx(join(tmp, 'p')));
     expect(r.status).toBe('missing');
     expect(claudeCacheSize()).toBe(0);
+  });
+
+  it('counts a file as unreadable on a warm scan after its permissions are revoked', async () => {
+    if (process.getuid?.() === 0) return; // root ignores file modes
+    const p = await put('a/s.jsonl', [line()]);
+    expect((await ingestClaudeCode(ctx(join(tmp, 'p')))).records).toHaveLength(1);
+    await chmod(p, 0o000);
+    try {
+      const r = await ingestClaudeCode(ctx(join(tmp, 'p')));
+      expect(r.records).toHaveLength(0);
+      expect(r.note).toBe('1 file(s) unreadable');
+      expect(claudeCacheSize()).toBe(0);
+    } finally {
+      await chmod(p, 0o644);
+    }
   });
 });

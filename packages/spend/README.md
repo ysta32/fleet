@@ -24,22 +24,22 @@ npx fleet-spend budget set 200
 
 ## Commands
 
-| Command                             | What it does                                                                                      |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `fleet-spend`                       | Summary: month to date, today, forecast vs budget, burn rate, top repos and models, tips, sources |
-| `fleet-spend where [--by DIM]`      | Spend grouped by `repo`, `model`, `session`, `army`, `task`, `day`, `branch`, or `source`         |
-| `fleet-spend where --limit N`       | Show only the top N rows                                                                          |
-| `fleet-spend tips`                  | Savings tips, each with a dollar estimate                                                         |
-| `fleet-spend budget set <usd>`      | Save the monthly budget to the config file                                                        |
-| `fleet-spend budget clear`          | Remove the budget                                                                                 |
+| Command                             | What it does                                                                                             |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `fleet-spend`                       | Summary: month to date, today, forecast vs budget, burn rate, top repos and models, tips, sources        |
+| `fleet-spend where [--by DIM]`      | Spend grouped by `repo`, `model`, `session`, `army`, `task`, `day`, `branch`, or `source`                |
+| `fleet-spend where --limit N`       | Show only the top N rows                                                                                 |
+| `fleet-spend tips`                  | Savings tips, each with a dollar estimate                                                                |
+| `fleet-spend budget set <usd>`      | Save the monthly budget to the config file                                                               |
+| `fleet-spend budget clear`          | Remove the budget                                                                                        |
 | `fleet-spend check`                 | Exit 0 under warn thresholds, 1 past a warn threshold or forecast over budget, 2 over budget, 3 on error |
-| `fleet-spend json`                  | Full `SpendSummary` as JSON                                                                       |
-| `fleet-spend brief`                 | Compact `SpendBrief` as JSON                                                                      |
-| `fleet-spend watch [--interval 60]` | Collect every N seconds and send alerts; one status line per cycle. Ctrl-C exits                  |
-| `fleet-spend serve [--port 4917]`   | Local dashboard on 127.0.0.1; port must be 4500-4999                                              |
-| `--json`                            | On summary, where, and tips: print JSON                                                           |
-| `--no-color`, `--ascii`             | Disable ANSI color; use ASCII instead of Unicode glyphs                                           |
-| `--help`, `--version`, `--debug`    | Help, version, stack traces on error                                                              |
+| `fleet-spend json`                  | Full `SpendSummary` as JSON                                                                              |
+| `fleet-spend brief`                 | Compact `SpendBrief` as JSON                                                                             |
+| `fleet-spend watch [--interval 60]` | Collect every N seconds and send alerts; one status line per cycle. Ctrl-C exits                         |
+| `fleet-spend serve [--port 4917]`   | Local dashboard on 127.0.0.1; port must be 4500-4999                                                     |
+| `--json`                            | On summary, where, and tips: print JSON                                                                  |
+| `--no-color`, `--ascii`             | Disable ANSI color; use ASCII instead of Unicode glyphs                                                  |
+| `--help`, `--version`, `--debug`    | Help, version, stack traces on error                                                                     |
 
 Color is used only when stdout is a terminal and `NO_COLOR` is unset. When `where` is piped, it prints tab-separated values.
 

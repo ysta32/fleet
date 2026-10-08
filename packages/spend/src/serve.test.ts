@@ -35,7 +35,8 @@ function get(s: RunningServer, path: string, host = `127.0.0.1:${s.port}`, metho
   return new Promise<{ status: number; body: string; headers: Record<string, unknown> }>(
     (resolve, reject) => {
       const req = request(
-        { host: '127.0.0.1', port: s.port, path, method, headers: { Host: host } },
+        // agent: false: no pooled keep-alive socket from an earlier test's (closed) server on the same port
+        { host: '127.0.0.1', port: s.port, path, method, headers: { Host: host }, agent: false },
         (res) => {
           let body = '';
           res.setEncoding('utf8');
@@ -68,7 +69,14 @@ describe('serve', () => {
   });
 
   it('accepts the whole 4500-4999 range', () => {
-    expect([4499, 4500, 4585, 4917, 4999, 5000].map(validPort)).toEqual([false, true, true, true, true, false]);
+    expect([4499, 4500, 4585, 4917, 4999, 5000].map(validPort)).toEqual([
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+    ]);
   });
 
   it('serves JSON, the page, guards Host, and caches for 30s', async () => {

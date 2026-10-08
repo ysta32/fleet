@@ -12,6 +12,7 @@ const WT_RE = /^(.*)\/\.orch\/wt\/([^/]+)(?:\/|$)/;
 interface FileStat {
   path: string;
   mtimeMs: number;
+  ctimeMs: number;
   size: number;
 }
 
@@ -29,7 +30,8 @@ async function walk(dir: string, since: number, out: FileStat[]): Promise<void> 
     } else if (e.isFile() && e.name.endsWith('.jsonl')) {
       try {
         const st = await stat(p);
-        if (st.mtimeMs >= since) out.push({ path: p, mtimeMs: st.mtimeMs, size: st.size });
+        if (st.mtimeMs >= since)
+          out.push({ path: p, mtimeMs: st.mtimeMs, ctimeMs: st.ctimeMs, size: st.size });
       } catch {
         /* unreadable file: skip */
       }
@@ -131,13 +133,12 @@ function attribute(row: Row, memo: Map<string, string>): UsageRecord {
   return rec;
 }
 
-
 /**
- * Per-process cache of parsed rows, keyed by file path and invalidated by mtime or size. Long-lived hosts
+ * Per-process cache of parsed rows, keyed by file path and invalidated by mtime, ctime (also bumped by chmod) or size. Long-lived hosts
  * (the Fleet daemon, `watch`, `serve`) rescan every ~30s; unchanged session logs are not re-read.
  * Only usage metadata is held (never prompt text); files that leave the scan window are evicted.
  */
-const fileCache = new Map<string, { mtimeMs: number; size: number; rows: Row[] }>();
+const fileCache = new Map<string, { mtimeMs: number; ctimeMs: number; size: number; rows: Row[] }>();
 
 /** Test hook: drop the parsed-file cache. */
 export function clearClaudeCache(): void {
@@ -149,21 +150,33 @@ export function claudeCacheSize(): number {
   return fileCache.size;
 }
 
-async function parseFile(path: string): Promise<Row[]> {
+let parses = 0;
+/** Test hook: how many files have been parsed (cache misses) in this process. */
+export function claudeParseCount(): number {
+  return parses;
+}
+
+/** Parse one log. On a read error the rows parsed so far are kept and `failed` is set (the result is not cached). */
+async function parseFile(path: string): Promise<{ rows: Row[]; failed: boolean }> {
+  parses++;
   const rows: Row[] = [];
-  const rl = createInterface({ input: createReadStream(path, { encoding: 'utf8' }), crlfDelay: Infinity });
-  for await (const raw of rl) {
-    if (!raw.includes('"assistant"')) continue;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      continue;
+  try {
+    const rl = createInterface({ input: createReadStream(path, { encoding: 'utf8' }), crlfDelay: Infinity });
+    for await (const raw of rl) {
+      if (!raw.includes('"assistant"')) continue;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        continue;
+      }
+      const r = toRecord(parsed);
+      if (r) rows.push(r);
     }
-    const r = toRecord(parsed);
-    if (r) rows.push(r);
+  } catch {
+    return { rows, failed: true };
   }
-  return rows;
+  return { rows, failed: false };
 }
 
 export const ingestClaudeCode: Ingester = async (ctx: IngestContext): Promise<IngestResult> => {
@@ -185,18 +198,16 @@ export const ingestClaudeCode: Ingester = async (ctx: IngestContext): Promise<In
   let errors = 0;
   for (const f of files) {
     seen.add(f.path);
-    let parsed = fileCache.get(f.path);
-    if (!parsed || parsed.mtimeMs !== f.mtimeMs || parsed.size !== f.size) {
-      try {
-        parsed = { mtimeMs: f.mtimeMs, size: f.size, rows: await parseFile(f.path) };
-        fileCache.set(f.path, parsed);
-      } catch {
+    let rows = fileCache.get(f.path);
+    if (!rows || rows.mtimeMs !== f.mtimeMs || rows.ctimeMs !== f.ctimeMs || rows.size !== f.size) {
+      const res = await parseFile(f.path);
+      rows = { mtimeMs: f.mtimeMs, ctimeMs: f.ctimeMs, size: f.size, rows: res.rows };
+      if (res.failed) {
         fileCache.delete(f.path);
         errors++;
-        continue;
-      }
+      } else fileCache.set(f.path, rows);
     }
-    for (const r of parsed.rows) {
+    for (const r of rows.rows) {
       if (r.key) {
         byKey.delete(r.key); // keep LAST occurrence
         byKey.set(r.key, attribute(r, memo));
