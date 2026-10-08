@@ -181,6 +181,47 @@ describe('Notifier', () => {
     expect(nt.handle(ev('blocked', { taskId: 'later' }), snap())?.notify).toBe(true);
   });
 
+  it('notifies a rate-limited incident on its next event once the limit allows, without re-storing it', () => {
+    let t = 0;
+    const { n: nt, exec } = setup(cfg(), () => t);
+    for (let i = 0; i < 6; i++)
+      expect(nt.handle(ev('blocked', { taskId: `t${i}` }), snap())?.notify).toBe(true);
+    const limited = nt.handle(ev('blocked', { taskId: 't9' }), snap());
+    expect(limited).toMatchObject({ notify: false, isNew: true });
+    // still limited: the repeat is neither stored again nor notified
+    t = 30_000;
+    expect(nt.handle(ev('blocked', { taskId: 't9' }), snap())).toBeUndefined();
+    t = 61_000;
+    const late = nt.handle(ev('blocked', { taskId: 't9' }), snap());
+    expect(late).toMatchObject({ notify: true, isNew: false });
+    expect(late!.alert.id).toBe(limited!.alert.id);
+    expect(exec).toHaveBeenCalledTimes(7);
+    // once notified it is an ordinary repeat again
+    expect(nt.handle(ev('blocked', { taskId: 't9' }), snap())).toBeUndefined();
+  });
+
+  it('releases a waiting hold when the published session status leaves waiting (text-only reply)', () => {
+    const s = snap();
+    s.agents = [coder('a', 't04'), coder('b', 't04')];
+    const { n: nt, exec } = setup();
+    expect(nt.handle(ev('session.waiting', { sessionId: 'a', agentId: 'a' }), s)?.notify).toBe(true);
+    nt.sessionStatus('p1', 'a', 'waiting');
+    nt.sessionStatus('p2', 'a', 'active');
+    expect(nt.handle(ev('session.waiting', { sessionId: 'b', agentId: 'b' }), s)?.notify).toBe(false);
+    nt.sessionStatus('p1', 'a', 'active');
+    nt.sessionStatus('p1', 'b', 'idle');
+    s.agents.push(coder('c', 't04'));
+    expect(nt.handle(ev('session.waiting', { sessionId: 'c', agentId: 'c' }), s)?.notify).toBe(true);
+    expect(exec).toHaveBeenCalledTimes(2);
+  });
+
+  it('treats a new waiting turn from the same session as a new transition', () => {
+    const { n: nt, exec } = setup();
+    expect(nt.handle(ev('session.waiting', { sessionId: 'a', agentId: 'a' }), snap())?.notify).toBe(true);
+    expect(nt.handle(ev('session.waiting', { sessionId: 'a', agentId: 'a' }), snap())?.notify).toBe(true);
+    expect(exec).toHaveBeenCalledTimes(2);
+  });
+
   it('escapes AppleScript strings so quotes cannot break out', () => {
     expect(appleScriptString('a"b\\c\nd')).toBe('"a\\"b\\\\c d"');
     const { n: nt, exec } = setup();

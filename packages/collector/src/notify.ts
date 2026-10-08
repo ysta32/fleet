@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import type { Alert, AlertKind, FleetConfig, FleetEvent, FleetSnapshot } from '@fleet/shared';
+import type { Alert, AlertKind, FleetConfig, FleetEvent, FleetSnapshot, SessionStatus } from '@fleet/shared';
 
 export type NotifyExec = (cmd: string, args: string[]) => Promise<unknown> | unknown;
 export type NotifyFetch = (
@@ -102,6 +102,8 @@ export interface NotifyResult {
   alert: Alert;
   /** true when this alert was delivered (macOS / ntfy) and should also go out as web push */
   notify: boolean;
+  /** false when this is an already-stored alert being delivered late (it was rate limited) */
+  isNew: boolean;
 }
 
 interface OpenIncident {
@@ -117,7 +119,7 @@ interface OpenIncident {
 
 export class Notifier {
   /** alert dedupe: identical alerts (kind + incident + holder) inside the window are dropped */
-  private readonly seen = new Map<string, { at: number; incident: string; holder?: string }>();
+  private readonly seen = new Map<string, { at: number; incident: string; alert: Alert; holder?: string }>();
   /** delivery dedupe: one notification per incident transition */
   private readonly open = new Map<string, OpenIncident>();
   private sent: number[] = [];
@@ -152,7 +154,6 @@ export class Notifier {
       this.close(`${e.projectId}\u0000task:${taskKey(e.taskId)}`);
       return;
     }
-    if (!this.seen.size && !this.open.size) return;
     const holders = new Set<string>();
     if (e.agentId) holders.add(e.agentId);
     if (e.sessionId && (e.kind === 'session.end' || !e.agentId || e.agentId === e.sessionId))
@@ -160,52 +161,76 @@ export class Notifier {
     if (holders.size) this.release(e.projectId, holders);
   }
 
+  /**
+   * Session status as the daemon publishes it. Leaving "waiting" (to active, idle or ended) releases
+   * the session's hold even when the transcript emitted no event for it (a text-only reply).
+   */
+  sessionStatus(projectId: string, sessionId: string, status: SessionStatus): void {
+    if (status !== 'waiting') this.release(projectId, new Set([sessionId]));
+  }
+
   handle(e: FleetEvent, snap: FleetSnapshot): NotifyResult | undefined {
     const kind = alertKindOf(e);
     if (!kind || !this.cfg.kinds.includes(kind)) return undefined;
 
     const now = this.now();
-    for (const [k, v] of this.seen) if (now - v.at >= DEDUPE_MS) this.seen.delete(k);
-    for (const [k, v] of this.open) if (now - v.at >= DEDUPE_MS) this.open.delete(k);
+    this.prune(now);
     const subject = incidentSubject(e, kind, snap);
     const incident = `${e.projectId}\u0000${subject.ref}`;
     const holder = kind === 'session.waiting' ? (e.agentId ?? e.sessionId) : undefined;
+    // the parser emits session.waiting once per ended turn: a new one means the previous wait is over
+    if (holder) this.release(e.projectId, new Set([holder]));
     const alertKey = `${kind}\u0000${incident}\u0000${holder ?? ''}`;
-    if (this.seen.has(alertKey)) return undefined;
-    this.seen.set(alertKey, { at: now, incident, ...(holder ? { holder } : {}) });
 
     const meta = LABELS[kind];
     const existing = this.open.get(incident);
-    const holds = (entry: OpenIncident) => {
+    // a new incident notifies; so does a high-priority escalation of one notified at low priority
+    const eligible = !existing || (meta.high && !existing.high);
+    const prior = this.seen.get(alertKey);
+    // a stored repeat is dropped, unless its incident still owes a notification (e.g. rate limited)
+    if (prior && !eligible) return undefined;
+    this.sent = this.sent.filter((t) => now - t < RATE_WINDOW_MS);
+    const notify = eligible && this.sent.length < RATE_MAX;
+    if (prior && !notify) return undefined;
+
+    let alert: Alert;
+    if (prior) alert = prior.alert;
+    else {
+      const project = snap.projects.find((p) => p.id === e.projectId)?.name ?? 'project';
+      alert = {
+        id: `alert-${e.ts}-${this.seq++}`,
+        kind,
+        projectId: e.projectId,
+        title: meta.title,
+        body: project,
+        at: e.ts,
+      };
+      if (subject.taskId) alert.taskId = subject.taskId;
+      if (e.sessionId) alert.sessionId = e.sessionId;
+      this.seen.set(alertKey, { at: now, incident, alert, ...(holder ? { holder } : {}) });
+    }
+
+    const entry = notify
+      ? (existing ?? { at: now, high: false, holders: new Set<string>(), task: false })
+      : existing;
+    if (entry) {
       if (holder) entry.holders.add(holder);
       if (kind === 'army.blocked' && subject.taskId) entry.task = true;
-    };
-    // a new incident notifies; so does a high-priority escalation of one notified at low priority
-    let notify = !existing || (meta.high && !existing.high);
-    this.sent = this.sent.filter((t) => now - t < RATE_WINDOW_MS);
-    if (notify && this.sent.length >= RATE_MAX) notify = false;
+    }
     if (notify) {
       this.sent.push(now);
-      const entry: OpenIncident = existing ?? { at: now, high: false, holders: new Set(), task: false };
-      entry.at = now;
-      entry.high ||= meta.high;
-      holds(entry);
-      this.open.set(incident, entry);
-    } else if (existing) holds(existing);
+      entry!.at = now;
+      entry!.high ||= meta.high;
+      this.open.set(incident, entry!);
+      this.deliver(alert, meta);
+    }
+    return { alert, notify, isNew: !prior };
+  }
 
-    const project = snap.projects.find((p) => p.id === e.projectId)?.name ?? 'project';
-    const alert: Alert = {
-      id: `alert-${e.ts}-${this.seq++}`,
-      kind,
-      projectId: e.projectId,
-      title: meta.title,
-      body: project,
-      at: e.ts,
-    };
-    if (subject.taskId) alert.taskId = subject.taskId;
-    if (e.sessionId) alert.sessionId = e.sessionId;
-    if (notify) this.deliver(alert, meta);
-    return { alert, notify };
+  /** Bound the state: everything older than the dedupe window is forgotten. */
+  private prune(now: number): void {
+    for (const [k, v] of this.seen) if (now - v.at >= DEDUPE_MS) this.seen.delete(k);
+    for (const [k, v] of this.open) if (now - v.at >= DEDUPE_MS) this.open.delete(k);
   }
 
   private close(incident: string): void {
@@ -214,6 +239,7 @@ export class Notifier {
   }
 
   private release(projectId: string, holders: ReadonlySet<string>): void {
+    if (!this.seen.size && !this.open.size) return;
     const prefix = `${projectId}\u0000`;
     for (const [k, v] of this.seen)
       if (v.holder && holders.has(v.holder) && v.incident.startsWith(prefix)) this.seen.delete(k);

@@ -301,7 +301,7 @@ async function runReal(cfg: FleetConfig, opts: DaemonOptions): Promise<Daemon> {
     if (Date.now() - e.ts > NOTIFY_MAX_AGE_MS) return;
     const result = notifier.handle(e, store.snapshot());
     if (result) {
-      store.addAlert(result.alert);
+      if (result.isNew) store.addAlert(result.alert);
       if (result.notify)
         void push.send(result.alert, store.snapshot()).catch(() => log('push delivery failed'));
     }
@@ -375,6 +375,8 @@ async function runReal(cfg: FleetConfig, opts: DaemonOptions): Promise<Daemon> {
         agents.push({ ...a, sessionId: sid, projectId, location: { ...a.location, projectId } });
       }
     }
+    // a text-only reply leaves "waiting" without any event: the published status is the signal
+    notifier.sessionStatus(projectId, sid, s.status);
     const sj = JSON.stringify(s);
     if (sessionJson.get(sid) !== sj) {
       sessionJson.set(sid, sj);
