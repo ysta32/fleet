@@ -37,7 +37,7 @@ export function PhoneAlerts({ onClose, demo = false }: { onClose(): void; demo?:
           </button>
         </header>
         <div className="help-push">
-          <PushToggle titled={false} />
+          <PushToggle titled={false} demo={demo} />
         </div>
         {demo && <p className="phone-alerts-note">In demo mode, alerts are simulated.</p>}
       </div>

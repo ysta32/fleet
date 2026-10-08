@@ -523,7 +523,7 @@ function Shell() {
       />
 
       {layer === 'palette' && <CommandPalette items={paletteItems} onClose={() => setLayer(null)} />}
-      {layer === 'help' && <HelpOverlay onClose={() => setLayer(null)} />}
+      {layer === 'help' && <HelpOverlay demo={view.mode === 'demo'} onClose={() => setLayer(null)} />}
       {layer === 'push' && <PhoneAlerts demo={view.mode === 'demo'} onClose={() => setLayer(null)} />}
       {layer === 'more' && (
         <MoreSheet

@@ -33,6 +33,20 @@ export function roundedPath(points: readonly Point[], radius = CORNER): string {
   return `${d} L ${last[0]} ${last[1]}`;
 }
 
+/** Bus lanes stay inside this band of the 40-unit column gutter, clear of the skip-edge entry at 28. */
+const BUS_FIRST = 6;
+const BUS_LAST = 22;
+const BUS_STEP = 5;
+
+/**
+ * Gutter offset of the vertical bus for source `slot` of `count` sources in one column: every source gets
+ * its own lane (5 apart, compressed evenly to fit the band when a column has many sources).
+ */
+export function busOffset(slot: number, count: number): number {
+  const step = count > 1 ? Math.min(BUS_STEP, (BUS_LAST - BUS_FIRST) / (count - 1)) : 0;
+  return BUS_FIRST + Math.min(Math.max(0, slot), Math.max(0, count - 1)) * step;
+}
+
 /**
  * Orthogonal, bundled edge routes. Every edge leaves its source on one trunk into the column gutter,
  * runs along that source's own vertical bus, then enters the target from the left; edges from one source
@@ -62,7 +76,7 @@ export function dagEdgePaths(layout: DagLayout): { from: string; to: string; d: 
     const startY = from.y + DAG_NODE_H / 2;
     const endY = to.y + DAG_NODE_H / 2;
     const startX = from.x + DAG_NODE_W;
-    const bus = startX + 10 + ((slots.get(edge.from) ?? 0) % 4) * 5;
+    const bus = startX + busOffset(slots.get(edge.from) ?? 0, used.get(from.layer) ?? 1);
     let points: Point[];
     if (to.x <= startX) {
       // back edge (cycle) or same column: loop out right, then come back in above the target

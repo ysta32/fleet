@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type { OrchTask } from '@fleet/shared';
 import { dagLayout } from './model';
-import { DAG_NODE_H, DAG_NODE_W, dagEdgePaths, dagFocusNode, dagScrollLeft, roundedPath } from './dag';
+import {
+  DAG_NODE_H,
+  DAG_NODE_W,
+  busOffset,
+  dagEdgePaths,
+  dagFocusNode,
+  dagScrollLeft,
+  roundedPath,
+} from './dag';
 
 const task = (id: string, depends: string[] = [], state: OrchTask['state'] = 'queued'): OrchTask => ({
   id,
@@ -37,6 +45,27 @@ describe('dagEdgePaths', () => {
     const layout = dagLayout([task('a'), task('b'), task('c', ['a']), task('d', ['b'])]);
     const buses = dagEdgePaths(layout).map((route) => Number(route.d.split(' L ')[1].split(' ')[0]));
     expect(new Set(buses).size).toBe(2);
+  });
+  it('gives every source in a column its own bus, even past four sources', () => {
+    // five sources in column 0; s0 feeds the bottom target, s4 the top one (crossing buses)
+    const sources = ['s0', 's1', 's2', 's3', 's4'].map((id) => task(id));
+    const targets = ['t0', 't1', 't2', 't3', 't4'].map((id, i) => task(id, [`s${4 - i}`]));
+    const layout = dagLayout([...sources, ...targets]);
+    const busOf = new Map<string, number>();
+    for (const route of dagEdgePaths(layout))
+      busOf.set(route.from, Number(route.d.split(' L ')[1].split(' ')[0]));
+    expect(busOf.size).toBe(5);
+    expect(new Set(busOf.values()).size).toBe(5);
+  });
+  it('keeps bus lanes distinct and inside the gutter band for any column size', () => {
+    for (const count of [1, 2, 4, 5, 9, 20]) {
+      const offsets = Array.from({ length: count }, (_, slot) => busOffset(slot, count));
+      expect(new Set(offsets).size).toBe(count);
+      for (const offset of offsets) {
+        expect(offset).toBeGreaterThanOrEqual(6);
+        expect(offset).toBeLessThanOrEqual(22);
+      }
+    }
   });
   it('never runs a straight segment through a node box', () => {
     const tasks = [
