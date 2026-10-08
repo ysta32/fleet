@@ -215,70 +215,239 @@ export function dagLayout(tasks: readonly OrchTask[]): DagLayout {
   };
 }
 
-export interface NeedsYouItem {
+/** Why an incident needs the operator. State reasons come from the live snapshot; the rest are alerts. */
+export interface IncidentReason {
+  kind: AlertKind | 'waiting' | 'blocked';
+  /** short human label, e.g. "Waiting on you", "Army blocked" */
+  label: string;
+  /** extra context (an alert title that says more than its kind); never repeats the incident subject */
+  text?: string;
+  at: number;
+  alertId?: string;
+}
+
+/**
+ * One thing that needs the operator. Every signal about the same subject (project + task, else the
+ * waiting session, else the alert kind) folds into one incident, so a single blocked task never
+ * counts as several items.
+ */
+export interface Incident {
+  /** stable key: `${projectId}:${ref}` */
   id: string;
+  /** primary signal, for the icon: waiting beats blocked beats a bare alert */
   kind: 'alert' | 'blocked' | 'waiting';
   projectId: string;
+  /** task id as the army writes it (e.g. "t04") */
+  taskId?: string;
+  /** task slug, when the army knows the task */
+  taskSlug?: string;
+  /** the waiting session, if one is part of this incident */
+  sessionId?: string;
+  sessionTitle?: string;
   title: string;
+  /** alert body, only for incidents that are nothing but alerts (no task or session subject) */
+  body?: string;
+  /** distinct reasons, oldest first */
+  reasons: IncidentReason[];
+  /** oldest signal: the cost of delay grows with age */
   at: number;
-  /** alert ids that resolving this item clears */
+  /** alert ids that resolving this incident clears */
   alertIds: string[];
 }
 
-/** Everything that is waiting on the operator, oldest first (cost of delay grows with age). */
-export function needsYou(
-  snapshot: FleetSnapshot,
-  dismissed: ReadonlySet<string> = new Set(),
-): NeedsYouItem[] {
-  const items: NeedsYouItem[] = [];
-  for (const alert of snapshot.alerts) {
-    if (alert.cleared || dismissed.has(alert.id)) continue;
-    items.push({
-      id: `alert:${alert.id}`,
-      kind: 'alert',
-      projectId: alert.projectId,
-      title: alertTitle(alert),
-      at: alert.at,
-      alertIds: [alert.id],
-    });
-  }
-  for (const session of snapshot.sessions) {
-    if (session.status !== 'waiting') continue;
-    items.push({
-      id: `waiting:${session.id}`,
-      kind: 'waiting',
-      projectId: session.projectId,
-      title: `${session.title ?? 'Session'} is waiting on you`,
-      at: session.lastActivity,
-      alertIds: [],
-    });
-  }
+/** A needs-you item is an incident. */
+export type NeedsYouItem = Incident;
+
+/** Normalise task ids so "t04", "T4" and "04" name the same task. */
+export function taskKey(id: string): string {
+  const trimmed = id.trim().toLowerCase();
+  const numeric = /^t?0*(\d+)$/.exec(trimmed);
+  return numeric ? numeric[1]! : trimmed;
+}
+
+interface Draft {
+  id: string;
+  projectId: string;
+  ref: 'task' | 'session' | 'army' | 'attention' | 'kind';
+  taskId?: string;
+  taskSlug?: string;
+  sessionId?: string;
+  sessionTitle?: string;
+  reasons: IncidentReason[];
+  alerts: Alert[];
+  order: number;
+}
+
+/**
+ * Group everything that is waiting on the operator into incidents, oldest first.
+ * Sources: blocked army tasks (run.blocked and tasks in state "blocked", deduped by task id),
+ * waiting sessions (joined to the task their agent is on), and uncleared, undismissed alerts
+ * (army.blocked / session.waiting alerts join the incident they describe).
+ */
+export function incidents(snapshot: FleetSnapshot, dismissed: ReadonlySet<string> = new Set()): Incident[] {
+  const drafts = new Map<string, Draft>();
+  const draft = (id: string, projectId: string, ref: Draft['ref']): Draft => {
+    let entry = drafts.get(id);
+    if (!entry) {
+      entry = { id, projectId, ref, reasons: [], alerts: [], order: drafts.size };
+      drafts.set(id, entry);
+    }
+    return entry;
+  };
+  const tasksByProject = new Map<string, Map<string, OrchTask>>();
   for (const project of snapshot.projects) {
     const run = project.orch;
     if (!run) continue;
-    const blockedTasks = run.tasks.filter((task) => task.state === 'blocked');
-    if (run.phase !== 'blocked' && !run.blocked.length && !blockedTasks.length) continue;
-    // an active army.blocked alert already represents this project
-    if (
-      items.some(
-        (item) =>
-          item.kind === 'alert' &&
-          item.projectId === project.id &&
-          snapshot.alerts.some((alert) => item.alertIds.includes(alert.id) && alert.kind === 'army.blocked'),
-      )
-    )
-      continue;
-    const count = run.blocked.length + blockedTasks.length;
-    items.push({
-      id: `blocked:${project.id}`,
-      kind: 'blocked',
-      projectId: project.id,
-      title: count ? `Army blocked on ${count} ${count === 1 ? 'item' : 'items'}` : 'Army blocked',
-      at: run.updatedAt,
-      alertIds: [],
+    const tasks = new Map(run.tasks.map((task) => [taskKey(task.id), task]));
+    tasksByProject.set(project.id, tasks);
+    const ids = [
+      ...run.blocked,
+      ...run.tasks.filter((task) => task.state === 'blocked').map((task) => task.id),
+    ];
+    const seen = new Set<string>();
+    for (const raw of ids) {
+      const key = taskKey(raw);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      const entry = draft(`${project.id}:task:${key}`, project.id, 'task');
+      const task = tasks.get(key);
+      entry.taskId = task?.id ?? raw.trim();
+      entry.taskSlug = task?.slug;
+      entry.reasons.push({ kind: 'blocked', label: 'Army blocked', at: run.updatedAt });
+    }
+    if (!seen.size && run.phase === 'blocked')
+      draft(`${project.id}:army`, project.id, 'army').reasons.push({
+        kind: 'blocked',
+        label: 'Army blocked',
+        at: run.updatedAt,
+      });
+  }
+  for (const session of snapshot.sessions) {
+    if (session.status !== 'waiting') continue;
+    const agents = snapshot.agents.filter(
+      (agent) => agent.sessionId === session.id || session.agentIds.includes(agent.id),
+    );
+    const waitingAgents = agents.filter((agent) => agent.status === 'waiting');
+    const onTask = new Set(
+      (waitingAgents.length ? waitingAgents : agents)
+        .map((agent) => agent.currentTask)
+        .filter((task): task is string => !!task)
+        .map(taskKey),
+    );
+    const task = onTask.size === 1 ? [...onTask][0]! : undefined;
+    const entry = task
+      ? draft(`${session.projectId}:task:${task}`, session.projectId, 'task')
+      : draft(`${session.projectId}:session:${session.id}`, session.projectId, 'session');
+    if (task && !entry.taskId) {
+      const known = tasksByProject.get(session.projectId)?.get(task);
+      entry.taskId =
+        known?.id ??
+        (waitingAgents.length ? waitingAgents : agents).find(
+          (agent) => agent.currentTask && taskKey(agent.currentTask) === task,
+        )!.currentTask!;
+      entry.taskSlug = known?.slug;
+    }
+    if (!entry.sessionId) {
+      entry.sessionId = session.id;
+      entry.sessionTitle = session.title;
+    }
+    entry.reasons.push({ kind: 'waiting', label: 'Waiting on you', at: session.lastActivity });
+  }
+  const live = [...drafts.values()];
+  for (const alert of snapshot.alerts) {
+    if (alert.cleared || dismissed.has(alert.id)) continue;
+    let entry: Draft | undefined;
+    if (alert.kind === 'army.blocked' || alert.kind === 'session.waiting') {
+      const inProject = live.filter((item) => item.projectId === alert.projectId);
+      // an alert that names a task belongs to that task's incident
+      const words = new Set(
+        `${alert.title} ${alert.body}`
+          .split(/[^A-Za-z0-9_-]+/)
+          .filter(Boolean)
+          .map(taskKey),
+      );
+      const reasonKind = alert.kind === 'army.blocked' ? 'blocked' : 'waiting';
+      entry =
+        inProject.find((item) => item.ref === 'task' && words.has(taskKey(item.taskId ?? ''))) ??
+        inProject.find((item) => item.reasons.some((reason) => reason.kind === reasonKind)) ??
+        inProject[0] ??
+        draft(`${alert.projectId}:attention`, alert.projectId, 'attention');
+    } else {
+      entry = draft(`${alert.projectId}:${alert.kind}`, alert.projectId, 'kind');
+    }
+    const label = alertKindLabel(alert.kind);
+    const title = alertTitle(alert);
+    entry.alerts.push(alert);
+    entry.reasons.push({
+      kind: alert.kind,
+      label,
+      ...(title !== label ? { text: title } : {}),
+      at: alert.at,
+      alertId: alert.id,
     });
   }
-  return items.sort((a, b) => a.at - b.at);
+  const out = [...drafts.values()].map((entry): Incident => {
+    const sorted = [...entry.reasons].sort((a, b) => a.at - b.at);
+    const reasons: IncidentReason[] = [];
+    for (const reason of sorted) {
+      const same = reasons.find((item) => item.label === reason.label && item.text === reason.text);
+      if (!same) reasons.push(reason);
+    }
+    const waiting = reasons.some((reason) => reason.kind === 'waiting' || reason.kind === 'session.waiting');
+    const blocked = reasons.some((reason) => reason.kind === 'blocked' || reason.kind === 'army.blocked');
+    const subject = entry.taskId
+      ? entry.taskSlug
+        ? `${entry.taskId} · ${entry.taskSlug}`
+        : `Task ${entry.taskId}`
+      : entry.ref === 'session'
+        ? (entry.sessionTitle ?? 'Session')
+        : undefined;
+    const latest = entry.alerts.reduce<Alert | undefined>(
+      (last, alert) => (!last || alert.at >= last.at ? alert : last),
+      undefined,
+    );
+    const title = subject
+      ? `${subject} ${waiting ? 'is waiting on you' : 'is blocked'}`
+      : entry.ref === 'army'
+        ? 'Army blocked'
+        : latest
+          ? alertTitle(latest)
+          : 'Needs you';
+    const incident: Incident = {
+      id: entry.id,
+      kind: waiting ? 'waiting' : blocked ? 'blocked' : 'alert',
+      projectId: entry.projectId,
+      title,
+      reasons,
+      at: sorted[0]!.at,
+      alertIds: entry.alerts.map((alert) => alert.id),
+    };
+    if (entry.taskId) incident.taskId = entry.taskId;
+    if (entry.taskSlug) incident.taskSlug = entry.taskSlug;
+    if (entry.sessionId) incident.sessionId = entry.sessionId;
+    if (entry.sessionTitle) incident.sessionTitle = entry.sessionTitle;
+    if (!subject && latest?.body.trim()) incident.body = latest.body.trim();
+    return incident;
+  });
+  const order = new Map([...drafts.values()].map((entry) => [entry.id, entry.order]));
+  return out.sort((a, b) => a.at - b.at || order.get(a.id)! - order.get(b.id)!);
+}
+
+/** Everything waiting on the operator, as incidents, oldest first. */
+export function needsYou(snapshot: FleetSnapshot, dismissed: ReadonlySet<string> = new Set()): Incident[] {
+  return incidents(snapshot, dismissed);
+}
+
+/**
+ * The station's "needs you" count: incidents in this project that come from live state (a blocked
+ * task or a waiting session), so one blocked task with its waiting coder reads as 1, not 2.
+ */
+export function stationNeeds(snapshot: FleetSnapshot, projectId: string): number {
+  return incidents(snapshot).filter(
+    (incident) =>
+      incident.projectId === projectId &&
+      incident.reasons.some((reason) => reason.kind === 'waiting' || reason.kind === 'blocked'),
+  ).length;
 }
 
 export function matches(query: string, ...fields: (string | undefined)[]): boolean {

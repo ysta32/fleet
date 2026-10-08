@@ -17,6 +17,7 @@ import {
   vec3,
 } from './layout';
 import { useSceneStore } from './store';
+import { stationNeeds } from '../dashboard/model';
 import { FONTS, useVizTheme } from './theme';
 
 export interface StationData {
@@ -154,6 +155,12 @@ function StationImpl({
   const store = useSceneStore();
   const vt = useVizTheme();
   const needs = d.needs > 0;
+  // the tag counts incidents (a blocked task and its waiting coder are one), not raw signals
+  const snapshot = store.snapshot;
+  const needsCount = useMemo(
+    () => (needs && snapshot ? Math.max(1, stationNeeds(snapshot, d.id)) : d.needs),
+    [needs, snapshot, d.id, d.needs],
+  );
   const base = needs ? vt.accent : d.orch ? vt.phase[d.phase ?? 'idle'] : vt.fgMuted;
   const coreMat = useRef<THREE.MeshStandardMaterial>(null);
   const wire = useRef<THREE.MeshBasicMaterial>(null);
@@ -353,7 +360,7 @@ function StationImpl({
     onSelect(d.id);
   };
   const status = needs
-    ? `needs you · ${d.needs}`
+    ? `needs you · ${needsCount}`
     : d.orch
       ? `${d.phase ?? 'idle'} · ${d.taskCount}t`
       : d.working > 0

@@ -73,6 +73,47 @@ describe('Notifier', () => {
     expect(nt.handle(ev('blocked', { taskId: '04' }), snap())).toBeDefined();
   });
 
+  it('pushes once per incident: a blocked task and its waiting coder are one', () => {
+    const s = snap();
+    s.agents = [
+      {
+        id: 'sess:coder',
+        sessionId: 'sess',
+        projectId: 'p1',
+        role: 'coder',
+        model: 'opus',
+        label: 'coder t04',
+        status: 'waiting',
+        currentTask: 't04',
+        location: { kind: 'project', projectId: 'p1' },
+        tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        startedAt: 0,
+        lastActivity: 0,
+      },
+    ];
+    const { n: nt, exec, fetch } = setup();
+    expect(nt.handle(ev('session.waiting', { sessionId: 'sess', agentId: 'sess:coder' }), s)).toBeDefined();
+    expect(nt.handle(ev('blocked', { taskId: '04' }), s)).toBeUndefined();
+    expect(nt.handle(ev('session.waiting', { sessionId: 'sess' }), s)).toBeUndefined();
+    expect(exec).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    // a different task, another project, or a project-level event are separate incidents
+    expect(nt.handle(ev('blocked', { taskId: '05' }), s)).toBeDefined();
+    expect(nt.handle(ev('blocked', { taskId: '04', projectId: 'p2' }), s)).toBeDefined();
+    expect(nt.handle(ev('army.done'), s)).toBeDefined();
+  });
+
+  it('notifies again when an incident ends and reopens', () => {
+    const { n: nt } = setup();
+    expect(nt.handle(ev('blocked', { taskId: 't04' }), snap())).toBeDefined();
+    nt.observe(ev('task.state', { taskId: '04', data: { state: 'blocked' } }));
+    expect(nt.handle(ev('blocked', { taskId: '04' }), snap())).toBeUndefined();
+    nt.observe(ev('task.state', { taskId: '04', projectId: 'p2', data: { state: 'running' } }));
+    expect(nt.handle(ev('blocked', { taskId: '04' }), snap())).toBeUndefined();
+    nt.observe(ev('task.state', { taskId: 't04', data: { state: 'running' } }));
+    expect(nt.handle(ev('blocked', { taskId: '04' }), snap())).toBeDefined();
+  });
+
   it('rate limits to 6 per minute', () => {
     let t = 0;
     const { n: nt } = setup(cfg(), () => t);

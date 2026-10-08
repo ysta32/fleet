@@ -8,8 +8,6 @@ import { Overnight } from './Overnight.jsx';
 import { Spend } from './Spend';
 import {
   aggregateFleet,
-  alertKindLabel,
-  alertTitle,
   clockTime,
   matches,
   needsYou,
@@ -294,15 +292,6 @@ export default function Dashboard({
     .filter((alert) => !alert.cleared && !dismissed.has(alert.id))
     .sort((a, b) => b.at - a.at);
   const urgent = needsYou(snapshot, dismissed);
-  const waiting = snapshot.sessions
-    .filter((session) => session.status === 'waiting')
-    .sort((a, b) => a.lastActivity - b.lastActivity);
-  const blocked = armies.filter(
-    (project) =>
-      project.orch!.phase === 'blocked' ||
-      project.orch!.blocked.length > 0 ||
-      project.orch!.tasks.some((task) => task.state === 'blocked'),
-  );
   const nowWork = nowWorking(snapshot, now);
   const working = nowWork.rows;
   const workingAgents = nowWork.agents;
@@ -783,89 +772,70 @@ export default function Dashboard({
               </button>
             )}
           </PanelHead>
-          {blocked.length > 0 && (
-            <section className="block">
-              <h3 className="block-title">Blocked</h3>
-              {blocked.map((project) => (
-                <article className="blocked" key={project.id}>
-                  <h4>
-                    <Icon name="blocked" />
-                    {projectButton(project.id)} <span className="row-meta">army {project.orch!.phase}</span>
-                  </h4>
-                  <ul>
-                    {project.orch!.blocked.map((item, index) => (
-                      <li key={index}>{item}</li>
-                    ))}
-                    {project
-                      .orch!.tasks.filter((task) => task.state === 'blocked')
-                      .map((task) => (
-                        <li key={task.id}>
-                          <span className="num">{task.id}</span> · {task.slug}
-                        </li>
-                      ))}
-                  </ul>
-                </article>
-              ))}
-            </section>
-          )}
-          {waiting.length > 0 && (
-            <section className="block">
-              <h3 className="block-title">
-                Waiting on you <span className="num count">{waiting.length}</span>
-              </h3>
-              <ul className="dashboard-list rows">
-                {waiting.map((session) => (
-                  <li
-                    key={session.id}
-                    className="alert-row waiting-row"
-                    data-selected={selected('session', session.id)}
-                  >
-                    <Icon name="waiting" />
-                    <div className="alert-text">
-                      <button
-                        type="button"
-                        className="dashboard-link"
-                        aria-pressed={selected('session', session.id)}
-                        onClick={() => onSelect({ kind: 'session', id: session.id })}
-                      >
-                        {session.title ?? session.id}
-                      </button>
-                      <small className="row-meta">
-                        {projectButton(session.projectId)} · <span className="num">{session.model}</span> ·
-                        waiting{' '}
-                        <time dateTime={new Date(session.lastActivity).toISOString()}>
-                          {relativeTime(session.lastActivity, now)}
-                        </time>
-                      </small>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
           <section className="block">
             {urgent.length > 0 && (
               <h3 className="block-title">
-                Active <span className="num count">{alerts.length}</span>
+                Needs you <span className="num count">{urgent.length}</span>
               </h3>
             )}
             <ul className="dashboard-list rows">
-              {alerts.map((alert) => (
-                <li key={alert.id} className="alert-row">
-                  <Icon name="alert" />
+              {urgent.map((incident) => (
+                <li
+                  key={incident.id}
+                  className={`alert-row incident-row incident-${incident.kind}`}
+                  data-selected={incident.sessionId ? selected('session', incident.sessionId) : undefined}
+                >
+                  <Icon
+                    name={
+                      incident.kind === 'waiting'
+                        ? 'waiting'
+                        : incident.kind === 'blocked'
+                          ? 'blocked'
+                          : 'alert'
+                    }
+                  />
                   <div className="alert-text">
-                    <strong>{alertTitle(alert)}</strong>
-                    <p>{alert.body}</p>
+                    <strong>{incident.title}</strong>
+                    {incident.body && <p>{incident.body}</p>}
+                    {(incident.reasons.length > 1 || incident.reasons.some((reason) => reason.text)) && (
+                      <ul className="incident-reasons" aria-label="Reasons">
+                        {incident.reasons.map((reason) => (
+                          <li key={`${reason.label}:${reason.text ?? ''}`}>
+                            {reason.label}
+                            {reason.text ? <span className="row-meta"> · {reason.text}</span> : null}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                     <small className="row-meta">
-                      {projectButton(alert.projectId)} · {alertKindLabel(alert.kind)} ·{' '}
-                      <time dateTime={new Date(alert.at).toISOString()}>{relativeTime(alert.at, now)}</time>
+                      {projectButton(incident.projectId)}
+                      {incident.reasons.length === 1 &&
+                        !incident.reasons[0]!.text &&
+                        ` · ${incident.reasons[0]!.label}`}
+                      {incident.sessionId && (
+                        <>
+                          {' · '}
+                          <button
+                            type="button"
+                            className="dashboard-link"
+                            aria-pressed={selected('session', incident.sessionId)}
+                            onClick={() => onSelect({ kind: 'session', id: incident.sessionId! })}
+                          >
+                            {incident.sessionTitle ?? incident.sessionId}
+                          </button>
+                        </>
+                      )}
+                      {' · '}
+                      <time dateTime={new Date(incident.at).toISOString()}>
+                        {relativeTime(incident.at, now)}
+                      </time>
                     </small>
                   </div>
-                  {onDismissAlerts && (
+                  {onDismissAlerts && incident.alertIds.length > 0 && (
                     <button
                       type="button"
                       className="btn btn-quiet btn-sm"
-                      onClick={() => onDismissAlerts([alert.id])}
+                      onClick={() => onDismissAlerts(incident.alertIds)}
                     >
                       Clear
                     </button>
@@ -878,9 +848,6 @@ export default function Dashboard({
                 {lastAlert ? `Last alert ${relativeTime(lastAlert, now)}.` : 'No alerts recorded yet.'}{' '}
                 Blocked agents, failed CI and spend spikes land here first.
               </Empty>
-            )}
-            {!alerts.length && urgent.length > 0 && (
-              <p className="dashboard-empty quiet">No active alerts.</p>
             )}
           </section>
         </>

@@ -57,6 +57,37 @@ export function alertKindOf(e: FleetEvent): AlertKind | undefined {
   }
 }
 
+/** Normalise task ids so "t04", "T4" and "04" name the same task. */
+function taskKey(id: string): string {
+  const trimmed = id.trim().toLowerCase();
+  const numeric = /^t?0*(\d+)$/.exec(trimmed);
+  return numeric ? numeric[1]! : trimmed;
+}
+
+/**
+ * What an alert-worthy event is about: the task (directly, or via the agent/session that is on it),
+ * else the agent or session, else the alert kind for project-level events. Events about the same
+ * subject are one incident, whatever their kind: a blocked task and its waiting coder push once.
+ */
+export function incidentRef(e: FleetEvent, kind: AlertKind, snap: FleetSnapshot): string {
+  if (e.taskId) return `task:${taskKey(e.taskId)}`;
+  if (e.agentId || e.sessionId) {
+    const agents = snap.agents.filter(
+      (a) => a.projectId === e.projectId && (e.agentId ? a.id === e.agentId : a.sessionId === e.sessionId),
+    );
+    const waiting = agents.filter((a) => a.status === 'waiting');
+    const tasks = new Set(
+      (waiting.length ? waiting : agents)
+        .map((a) => a.currentTask)
+        .filter((t): t is string => !!t)
+        .map(taskKey),
+    );
+    if (tasks.size === 1) return `task:${[...tasks][0]!}`;
+    return e.agentId ? `agent:${e.agentId}` : `session:${e.sessionId!}`;
+  }
+  return `kind:${kind}`;
+}
+
 export class Notifier {
   private readonly seen = new Map<string, number>();
   private sent: number[] = [];
@@ -80,14 +111,22 @@ export class Notifier {
       deps.log ?? ((m, err) => console.error(`[notify] ${m}`, err instanceof Error ? err.message : ''));
   }
 
+  /**
+   * Watch non-alert events for incidents ending: a task leaving "blocked" closes its incident, so
+   * blocking again later is a new transition that notifies again (instead of waiting out the window).
+   */
+  observe(e: FleetEvent): void {
+    if (e.kind !== 'task.state' || !e.taskId || e.data?.state === 'blocked') return;
+    this.seen.delete(`${e.projectId}\u0000task:${taskKey(e.taskId)}`);
+  }
+
   handle(e: FleetEvent, snap: FleetSnapshot): Alert | undefined {
     const kind = alertKindOf(e);
     if (!kind || !this.cfg.kinds.includes(kind)) return undefined;
 
     const now = this.now();
     for (const [k, t] of this.seen) if (now - t >= DEDUPE_MS) this.seen.delete(k);
-    const ref = e.taskId ?? e.sessionId ?? '';
-    const key = `${kind}\u0000${e.projectId}\u0000${ref}`;
+    const key = `${e.projectId}\u0000${incidentRef(e, kind, snap)}`;
     if (this.seen.has(key)) return undefined;
 
     this.sent = this.sent.filter((t) => now - t < RATE_WINDOW_MS);

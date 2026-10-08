@@ -296,7 +296,9 @@ async function runReal(cfg: FleetConfig, opts: DaemonOptions): Promise<Daemon> {
   /** true while emitting events derived from a transcript's first (backlog) ingest */
   let replaying = false;
   store.on('event', (e: FleetEvent) => {
-    if (closed || replaying || !alertKindOf(e) || Date.now() - e.ts > NOTIFY_MAX_AGE_MS) return;
+    if (closed || replaying) return;
+    if (!alertKindOf(e)) return notifier.observe(e);
+    if (Date.now() - e.ts > NOTIFY_MAX_AGE_MS) return;
     const alert = notifier.handle(e, store.snapshot());
     if (alert) {
       store.addAlert(alert);
