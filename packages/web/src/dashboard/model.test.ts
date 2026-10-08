@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { Agent, FleetSnapshot, OrchTask, Session } from '@fleet/shared';
 import {
   aggregateFleet,
+  alertKindLabel,
+  alertTitle,
   dagLayout,
   formatCost,
   formatCount,
@@ -193,5 +195,19 @@ describe('sorting and formatters', () => {
     expect(relativeTime(now - 120000, now)).toBe('2m ago');
     expect(relativeTime(now - 7200000, now)).toBe('2h ago');
     expect(relativeTime(now - 172800000, now)).toBe('2d ago');
+  });
+});
+
+describe('alert labels', () => {
+  it('replaces a title that only echoes the kind', () => {
+    expect(alertTitle({ kind: 'ci.failed', title: 'ci.failed' })).toBe('CI failed');
+    expect(alertTitle({ kind: 'session.waiting', title: '  ' })).toBe('Waiting on you');
+  });
+  it('keeps a real collector title', () => {
+    expect(alertTitle({ kind: 'ci.failed', title: 'CI failed on #12' })).toBe('CI failed on #12');
+  });
+  it('falls back to the raw kind when unknown', () => {
+    expect(alertKindLabel('army.blocked')).toBe('Army blocked');
+    expect(alertKindLabel('future.kind')).toBe('future.kind');
   });
 });

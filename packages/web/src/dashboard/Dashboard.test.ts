@@ -1,10 +1,19 @@
+import { createServer as createHttpServer } from 'node:http';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { createServer } from 'vite';
+import { fleetSpendPlugin } from '../../vite.config';
+import { TABS } from '../shell/tabs';
+import { initialSpend, spendStart } from './Spend';
+import { KEYMAP } from '../shell/hotkeys';
+
 import type { FleetSnapshot } from '@fleet/shared';
 import type { FleetView } from '../data/contract';
 import Dashboard from './Dashboard';
 import type { DashboardTab } from './Dashboard';
+
+vi.mock('virtual:fleet-spend', () => ({ SpendTab: null, DEMO_SUMMARY: null }));
 
 const now = 1791374400000;
 function fixture(): FleetView {
@@ -125,8 +134,47 @@ function render(tab: DashboardTab, view = fixture()) {
 }
 
 describe('Dashboard', () => {
-  it('renders the overnight slot even before the snapshot arrives', () => {
-    expect(render('overnight', { ...fixture(), snapshot: null })).toBe('<div data-slot="overnight"></div>');
+  it('renders the demo overnight digest even before the snapshot arrives', () => {
+    const html = render('overnight', { ...fixture(), snapshot: null });
+    expect(html).toContain('Since you left');
+    expect(html).toContain('>Synthetic<');
+    expect(html).toContain('Replay the night');
+    expect(html).toContain('5 need attention');
+  });
+  it('registers both panels in the shared rail, palette and hotkey tab list', () => {
+    expect(TABS).toContainEqual({ id: 'overnight', label: 'Overnight', icon: 'moon', key: 'n' });
+    expect(TABS).toContainEqual({ id: 'spend', label: 'Spend', icon: 'cost', key: 'c' });
+    expect(new Set(TABS.map((tab) => tab.key)).size).toBe(TABS.length);
+    for (const tab of TABS.filter((tab) => tab.id === 'overnight' || tab.id === 'spend')) {
+      expect(KEYMAP).toContainEqual({ group: 'Go to', keys: ['G', tab.key.toUpperCase()], label: tab.label });
+    }
+  });
+  it('renders the spend not-installed state without needing a snapshot', () => {
+    const html = render('spend', { ...fixture(), snapshot: null });
+    expect(html).toContain('Spend tracking not installed');
+    expect(html).toContain('npm i fleet-spend');
+    expect(html).toContain('fleet install');
+    expect(html).not.toContain('npx');
+    expect(html).not.toContain('Loading spend tracking');
+  });
+  it('resolves the optional spend module to a real null export when absent', async () => {
+    const server = await createServer({
+      configFile: false,
+      plugins: [
+        fleetSpendPlugin(() => {
+          throw new Error('MODULE_NOT_FOUND');
+        }),
+      ],
+      server: { middlewareMode: true, hmr: { server: createHttpServer() }, ws: false },
+      optimizeDeps: { noDiscovery: true, include: [] },
+    });
+    try {
+      const module = await server.ssrLoadModule('virtual:fleet-spend');
+      expect(module.SpendTab).toBeNull();
+      expect(module.DEMO_SUMMARY).toBeNull();
+    } finally {
+      await server.close();
+    }
   });
   it('renders a loading state', () => {
     expect(render('overview', { ...fixture(), snapshot: null })).toContain('Waiting for fleet data');
@@ -175,7 +223,7 @@ describe('Dashboard', () => {
   });
   it('renders PR CI, releases, and deploys with safe links', () => {
     const html = render('prs');
-    expect(html).toContain('CI failure');
+    expect(html).toContain('CI failed');
     expect(html).toContain('Synthetic release');
     expect(html).toContain('preview');
     expect(html).not.toContain('javascript:');
@@ -213,5 +261,27 @@ describe('Dashboard', () => {
       alerts: [],
     };
     expect(render('alerts', { ...base, snapshot })).toContain('Nothing needs you.');
+  });
+});
+
+describe('initialSpend', () => {
+  it('uses the shipped example only for demo fleets', () => {
+    const example = { generatedAt: 1 };
+    expect(initialSpend(true, example)).toBe(example);
+    expect(initialSpend(false, example)).toBeUndefined();
+    expect(initialSpend(true, null)).toBeUndefined();
+  });
+});
+
+describe('spendStart', () => {
+  const example = { generatedAt: 1 };
+  it('shows the example without fetching while in demo', () => {
+    expect(spendStart(true, example)).toEqual({ summary: example, error: undefined, fetch: false });
+  });
+  it('resets to loading with no error and fetches when demo turns off', () => {
+    expect(spendStart(false, example)).toEqual({ summary: undefined, error: undefined, fetch: true });
+  });
+  it('fetches real data when no example ships', () => {
+    expect(spendStart(true, null)).toEqual({ summary: undefined, error: undefined, fetch: true });
   });
 });

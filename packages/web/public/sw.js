@@ -75,3 +75,54 @@ self.addEventListener('fetch', (event) => {
     );
   }
 });
+
+// Web Push. Payload: {title, body, tag, url}. Only same-origin paths are ever opened.
+function safePath(raw) {
+  if (typeof raw !== 'string' || !raw.startsWith('/') || raw.startsWith('//') || raw.includes('\\'))
+    return '/';
+  try {
+    const url = new URL(raw, self.location.origin);
+    if (url.origin !== self.location.origin) return '/';
+    const out = url.pathname + url.search + url.hash;
+    return out.startsWith('//') || out.includes('\\') ? '/' : out;
+  } catch (_) {
+    return '/';
+  }
+}
+
+self.addEventListener('push', (event) => {
+  let data = {};
+  try {
+    const parsed = event.data ? event.data.json() : {};
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) data = parsed;
+  } catch (_) {
+    data = {};
+  }
+  const title = typeof data.title === 'string' && data.title ? data.title : 'Fleet';
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body: typeof data.body === 'string' ? data.body : '',
+      tag: typeof data.tag === 'string' && data.tag ? data.tag : 'fleet',
+      icon: '/icons/icon-192.png',
+      badge: '/icons/icon-192.png',
+      data: { url: safePath(data.url) },
+    }),
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const path = safePath(event.notification.data && event.notification.data.url);
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      const existing = clients.find((client) => new URL(client.url).origin === self.location.origin);
+      if (existing) {
+        return existing.focus().then((focused) => {
+          if (path !== '/' && focused && 'navigate' in focused) return focused.navigate(path);
+          return focused;
+        });
+      }
+      return self.clients.openWindow(path);
+    }),
+  );
+});

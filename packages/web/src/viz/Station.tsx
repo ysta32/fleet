@@ -1,10 +1,21 @@
-import { memo, useEffect, useMemo, useRef } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import type { CiState, OrchPhase } from '@fleet/shared';
 import { easing, ease } from '@fleet/ui';
-import { alertPulse, anchorOffset, clamp, hash01, taskOrbitRadius, TASKS_PER_RING, vec3 } from './layout';
+import {
+  alertPulse,
+  anchorOffset,
+  INTRO_DELAY,
+  INTRO_DUR,
+  INTRO_STAGGER,
+  clamp,
+  hash01,
+  taskOrbitRadius,
+  TASKS_PER_RING,
+  vec3,
+} from './layout';
 import { useSceneStore } from './store';
 import { FONTS, useVizTheme } from './theme';
 
@@ -27,6 +38,8 @@ export interface StationData {
   index: number;
   /** blocked tasks + waiting agents: the "needs you" count (signal orange) */
   needs: number;
+  /** show the data block (large fleets label only the busiest stations) */
+  labelled: boolean;
 }
 
 /** Tick-marked dial ring (instrument bezel) as line segments in the xz plane. */
@@ -117,19 +130,25 @@ const RAISE = 0.42;
 
 const tmpColor = new THREE.Color();
 const tmpOff = vec3();
+const tmpProj = new THREE.Vector3();
+/** keep station tags this far inside the canvas edge */
+const TAG_MARGIN = 8;
+/** horizontal reach of the leader hairline before the text block (matches the svg + block offset) */
+const TAG_LEAD = 34;
 /** first-load choreography: the harbour fades up station by station (cinematic, land easing) */
-export const INTRO_DELAY = 0.2;
-export const INTRO_STAGGER = 0.09;
-export const INTRO_DUR = 0.9;
+export { INTRO_DELAY, INTRO_DUR, INTRO_STAGGER } from './layout';
 const ALERT_DUR = 0.64;
 
 function StationImpl({
   d,
   selected,
+  compact = false,
   onSelect,
 }: {
   d: StationData;
   selected: boolean;
+  /** narrow viewport: the needs-you tag stays on the station (the pennant crowds neighbours) */
+  compact?: boolean;
   onSelect(id: string): void;
 }) {
   const store = useSceneStore();
@@ -141,12 +160,32 @@ function StationImpl({
   const intro = useRef<THREE.Group>(null);
   const core = useRef<THREE.Group>(null);
   const r1 = useRef<THREE.Group>(null);
-  const r2 = useRef<THREE.Mesh>(null);
   const dial = useRef<THREE.LineSegments>(null);
   const sel = useRef<THREE.Group>(null);
   const gateRef = useRef<THREE.Group>(null);
   const orbMat = useRef<THREE.MeshBasicMaterial>(null);
   const label = useRef<HTMLDivElement>(null);
+  const block = useRef<HTMLDivElement | null>(null);
+  const blockObs = useRef<ResizeObserver | null>(null);
+  // callback ref: drei mounts the Html children late, so observe the block whenever it appears
+  const setBlock = useCallback((el: HTMLDivElement | null) => {
+    blockObs.current?.disconnect();
+    blockObs.current = null;
+    block.current = el;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      const e = entries[entries.length - 1];
+      if (e) blockW.current = e.borderBoxSize?.[0]?.inlineSize ?? e.contentRect.width;
+    });
+    ro.observe(el);
+    blockObs.current = ro;
+  }, []);
+  const compactRef = useRef(compact);
+  compactRef.current = compact;
+  const tagAnchor = useRef<THREE.Group>(null);
+  const blockW = useRef(0);
+  const tagFlip = useRef(false);
+  const tagShift = useRef(0);
   const mast = useRef<THREE.Group>(null);
   const pennant = useRef<THREE.Mesh>(null);
   const raisedAt = useRef<number | null>(null);
@@ -172,7 +211,6 @@ function StationImpl({
   const geos = useMemo(
     () => ({
       ring1: new THREE.TorusGeometry(1.15 * s, 0.005, 4, 160),
-      ring2: new THREE.TorusGeometry(0.9 * s, 0.004, 4, 128, Math.PI * 1.4),
       dial: dialGeometry(1.45 * s, 72, 6, 0.05),
       cross: crossGeometry(1.9 * s),
       guides: Array.from({ length: Math.ceil(d.taskCount / TASKS_PER_RING) }, (_, i) => ({
@@ -185,7 +223,6 @@ function StationImpl({
   useEffect(
     () => () => {
       geos.ring1.dispose();
-      geos.ring2.dispose();
       geos.dial.dispose();
       geos.cross.dispose();
       for (const g of geos.guides) g.geo.dispose();
@@ -202,7 +239,7 @@ function StationImpl({
     return new THREE.Vector3(o.x, o.y, o.z);
   }, [d, s]);
 
-  useFrame((_, dtRaw) => {
+  useFrame(({ camera, size }, dtRaw) => {
     const dt = store.reduced ? 0 : Math.min(dtRaw, 0.05);
     const t = store.t;
     // intro: fade up in layout order
@@ -215,6 +252,34 @@ function StationImpl({
     if (label.current && Math.abs(labelOp.current - ie) > 0.004) {
       labelOp.current = ie;
       label.current.style.opacity = String(ie);
+    }
+    // keep the tag inside the canvas: flip the leader to the other side, then nudge as a last resort
+    const lab = label.current;
+    const blk = block.current;
+    const anchor = tagAnchor.current;
+    if (lab && blk && anchor && blockW.current > 0) {
+      anchor.getWorldPosition(tmpProj).project(camera);
+      const ax = (tmpProj.x * 0.5 + 0.5) * size.width;
+      const w = blockW.current;
+      const narrow = compactRef.current;
+      let flip = false;
+      let l: number;
+      if (narrow) l = ax - w / 2;
+      else {
+        flip = ax + TAG_LEAD + w > size.width - TAG_MARGIN && ax - TAG_LEAD - w >= TAG_MARGIN;
+        l = flip ? ax - TAG_LEAD - w : ax + TAG_LEAD;
+      }
+      const r = l + w;
+      const shift =
+        l < TAG_MARGIN ? TAG_MARGIN - l : r > size.width - TAG_MARGIN ? size.width - TAG_MARGIN - r : 0;
+      if (flip !== tagFlip.current) {
+        tagFlip.current = flip;
+        lab.dataset.flip = flip ? '1' : '0';
+      }
+      if (Math.abs(shift - tagShift.current) > 0.5) {
+        tagShift.current = shift;
+        blk.style.translate = shift ? `${shift}px 0` : '';
+      }
     }
     const activity = store.activityAt.get(d.id);
     const recent = activity === undefined ? 0 : Math.max(0, 1 - (t - activity) / 1.2);
@@ -239,11 +304,11 @@ function StationImpl({
     if (wire.current) {
       tmpColor.copy(alerting ? alertColor : colors.line);
       wire.current.color.copy(tmpColor);
-      wire.current.opacity = (vt.dark ? 0.32 : 0.45) + recent * 0.2 + glow * 0.4;
+      wire.current.opacity =
+        (vt.dark ? 0.16 : 0.3) * (live ? 1 : 0.6) + recent * 0.22 + glow * 0.5 + (needs ? 0.2 : 0);
     }
     // motion means work: rings turn only while the station is busy
     const spin = busy * 0.25;
-    if (r2.current) r2.current.rotation.z += dt * spin;
     if (dial.current) dial.current.rotation.y -= dt * spin * 0.25;
     if (r1.current) r1.current.rotation.z += dt * spin * 0.15;
     if (sel.current) sel.current.visible = selected;
@@ -268,6 +333,11 @@ function StationImpl({
       orbMat.current.color.copy(colors.ci).multiplyScalar(vt.gain(d.ci === 'none' ? 0.8 : 1.5));
   });
 
+  const tagPos: [number, number, number] = needs
+    ? compact
+      ? [0, -0.9 * s, 0]
+      : [0, 0.5 * s + MAST_H - 0.17, 0]
+    : [0, 0.55 * s, 0];
   const click = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
     onSelect(d.id);
@@ -275,11 +345,14 @@ function StationImpl({
   const status = needs
     ? `needs you · ${d.needs}`
     : d.orch
-      ? `${d.phase ?? 'idle'} · ${d.taskCount} tasks`
+      ? `${d.phase ?? 'idle'} · ${d.taskCount}t`
       : d.working > 0
         ? 'working'
         : 'idle';
-  const lineOp = vt.dark ? 1 : 1.8;
+  const tagShown = d.labelled || needs || selected;
+  // idle stations recede: their instruments draw at a lower level so live work leads the eye
+  const awake = (d.orch && d.phase !== 'idle') || d.working > 0 || needs;
+  const lineOp = (vt.dark ? 1 : 2.3) * (awake ? 1 : 0.55);
   const hairline = (opacity: number) => (
     <meshBasicMaterial
       color={colors.line}
@@ -301,7 +374,7 @@ function StationImpl({
           {hairline(0.08)}
         </mesh>
         <lineSegments geometry={geos.cross} position={[0, -d.y + 0.01, 0]} scale={0.6}>
-          <lineBasicMaterial color={colors.line} transparent opacity={0.18 * lineOp} depthWrite={false} />
+          <lineBasicMaterial color={colors.line} transparent opacity={0.1 * lineOp} depthWrite={false} />
         </lineSegments>
 
         {/* core: a dark faceted hull around one emissive pip (the only bloom source) */}
@@ -327,7 +400,7 @@ function StationImpl({
               toneMapped={false}
             />
           </mesh>
-          <mesh geometry={d.orch ? shared.ico : shared.oct} scale={1.9}>
+          <mesh geometry={d.orch ? shared.ico : shared.oct} scale={1.6}>
             <meshBasicMaterial
               ref={wire}
               color={colors.line}
@@ -349,9 +422,6 @@ function StationImpl({
             {hairline(0.45)}
           </mesh>
         </group>
-        <mesh ref={r2} geometry={geos.ring2} rotation={[Math.PI / 2.6, 0.4, phase]}>
-          {hairline(0.28)}
-        </mesh>
         <lineSegments ref={dial} geometry={geos.dial} position={[0, -0.02, 0]}>
           <lineBasicMaterial color={colors.line} transparent opacity={0.26 * lineOp} depthWrite={false} />
         </lineSegments>
@@ -381,6 +451,11 @@ function StationImpl({
 
         {/* halyard signal: the scene's focal point when something needs you */}
         {needs && (
+          <mesh geometry={shared.floor} position={[0, -d.y + 0.02, 0]} scale={1.5 * s}>
+            <meshBasicMaterial color={colors.signal} toneMapped={false} transparent opacity={0.9} />
+          </mesh>
+        )}
+        {needs && (
           <group ref={mast} position={[0, 0.5 * s, 0]} scale={[1, 0.001, 1]}>
             <lineSegments geometry={shared.mast} scale={[1, MAST_H, 1]}>
               <lineBasicMaterial color={colors.signal} toneMapped={false} />
@@ -401,8 +476,8 @@ function StationImpl({
           </group>
         )}
 
-        {/* CI / deploy beacon */}
-        <group position={ciPos}>
+        {/* CI / deploy beacon (only when there is a PR to report on) */}
+        <group position={ciPos} visible={d.ci !== 'none'}>
           <lineSegments geometry={shared.pillar}>
             <lineBasicMaterial color={colors.line} transparent opacity={0.3 * lineOp} depthWrite={false} />
           </lineSegments>
@@ -411,44 +486,81 @@ function StationImpl({
           </mesh>
         </group>
 
-        <Html
-          position={[0, 1.45 * s + 0.75, 0]}
-          center
-          zIndexRange={[20, 0]}
-          style={{ pointerEvents: 'none', userSelect: 'none' }}
-        >
-          <div ref={label} style={{ textAlign: 'center', whiteSpace: 'nowrap', opacity: 0 }}>
-            <div
-              className="fl-viz-name"
-              style={{
-                fontFamily: FONTS.display,
-                color: selected ? vt.focus : vt.fg,
-                fontSize: 'clamp(15px, 1.25vw, 24px)',
-                lineHeight: 1.05,
-                letterSpacing: '-0.01em',
-                textShadow: vt.dark ? '0 1px 14px rgba(11,13,12,0.95)' : '0 0 10px rgba(243,240,232,0.95)',
-              }}
+        {/* ATC-style data block: tag offset up-right of the target on a hairline leader */}
+        <group ref={tagAnchor} position={tagPos} />
+        <Html position={tagPos} zIndexRange={[20, 0]} style={{ pointerEvents: 'none', userSelect: 'none' }}>
+          <div
+            ref={label}
+            className="fl-viz-tag"
+            data-needs={needs ? '1' : '0'}
+            data-flip="0"
+            style={{
+              position: 'absolute',
+              left: 0,
+              bottom: 0,
+              opacity: 0,
+              display: tagShown ? 'block' : 'none',
+            }}
+          >
+            <svg
+              width="30"
+              height="30"
+              viewBox="0 0 30 30"
+              style={{ position: 'absolute', left: 0, bottom: 0, overflow: 'visible' }}
+              aria-hidden
             >
-              {d.name}
-            </div>
+              <path
+                d="M0.5 29.5 L18 12 L30 12"
+                fill="none"
+                stroke={needs ? vt.accent : selected ? vt.focus : vt.fgSubtle}
+                strokeWidth="1"
+                opacity={needs || selected ? 1 : 0.7}
+              />
+            </svg>
             <div
-              className="fl-viz-sub"
-              data-needs={needs ? '1' : '0'}
+              ref={setBlock}
+              className="fl-viz-block"
               style={{
+                position: 'absolute',
+                left: 34,
+                bottom: 10,
+                whiteSpace: 'nowrap',
                 fontFamily: FONTS.mono,
-                color: needs ? vt.accent : vt.fgSubtle,
-                fontSize: 10,
-                letterSpacing: FONTS.trackingCaps,
-                textTransform: 'uppercase',
-                marginTop: 4,
                 fontVariantNumeric: 'tabular-nums',
+                textShadow: vt.dark ? '0 0 8px rgba(11,13,12,0.9)' : '0 0 6px rgba(243,240,232,0.95)',
               }}
             >
-              {status}
-              <span style={{ color: vt.fgSubtle }}>
-                {' '}
-                · {d.working}/{d.agents}
-              </span>
+              <div
+                className="fl-viz-name"
+                style={{
+                  color: needs ? vt.accent : selected ? vt.focus : vt.fg,
+                  fontSize: 12,
+                  fontWeight: 500,
+                  lineHeight: 1.2,
+                  letterSpacing: '0.04em',
+                  textTransform: 'uppercase',
+                }}
+              >
+                {d.name}
+              </div>
+              <div
+                className="fl-viz-sub"
+                data-needs={needs ? '1' : '0'}
+                style={{
+                  color: needs ? vt.accent : vt.fgSubtle,
+                  fontSize: 10,
+                  lineHeight: 1.3,
+                  letterSpacing: FONTS.trackingCaps,
+                  textTransform: 'uppercase',
+                  marginTop: 2,
+                }}
+              >
+                {status}
+                <span style={{ color: vt.fgSubtle }}>
+                  {' '}
+                  · {d.working}/{d.agents}
+                </span>
+              </div>
             </div>
           </div>
         </Html>

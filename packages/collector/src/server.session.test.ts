@@ -50,6 +50,8 @@ async function start(): Promise<number> {
   return (server.address() as AddressInfo).port;
 }
 
+const NAV = { 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document', 'Sec-Fetch-Site': 'none' };
+
 function req(
   port: number,
   method: string,
@@ -135,10 +137,14 @@ describe('POST /api/session', () => {
     expect(limited.status).toBe(429);
     expect(Number(limited.headers['retry-after'])).toBeGreaterThan(0);
   });
-  it('keeps the ?token= link flow working', async () => {
+  it('keeps the ?token= link flow working on the shell, never on /api', async () => {
     const port = await start();
-    const r = await req(port, 'GET', `/api/health?token=${TOKEN}`);
-    expect(r.status).toBe(200);
+    const r = await req(port, 'GET', `/?token=${TOKEN}`, NAV);
+    expect(r.status).toBe(303);
+    expect(r.headers.location).toBe('/');
     expect(cookieOf(r.headers)).toBeDefined();
+    const api = await req(port, 'GET', `/api/health?token=${TOKEN}`);
+    expect(api.status).toBe(401);
+    expect(cookieOf(api.headers)).toBeUndefined();
   });
 });

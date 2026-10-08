@@ -5,7 +5,18 @@ import { isIP } from 'node:net';
 import { networkInterfaces } from 'node:os';
 import path from 'node:path';
 import { PROTOCOL_VERSION } from '@fleet/shared';
-import type { Alert, FleetConfig, FleetEvent, FleetSnapshot, HistoryResponse } from '@fleet/shared';
+import { PushInputError, type PushManager } from './push.js';
+import type {
+  Agent,
+  AgentLocation,
+  Alert,
+  FleetConfig,
+  FleetEvent,
+  FleetSnapshot,
+  HistoryResponse,
+  Session,
+  ToolCallSummary,
+} from '@fleet/shared';
 
 /** Minimal store surface the server needs (FleetStore satisfies this). */
 export interface StoreLike {
@@ -19,6 +30,7 @@ export interface StoreLike {
 
 export interface CreateServerOptions {
   store: StoreLike;
+  push?: PushManager;
   config: FleetConfig;
   webDir?: string;
   digestDir?: string;
@@ -42,7 +54,7 @@ export type ExternalAlert = Omit<Alert, 'kind'> & { kind: 'spend.budget' };
 
 export type RedactSalt = string | Uint8Array;
 
-export const SERVER_VERSION = '0.1.0';
+export const SERVER_VERSION = '1.0.0';
 const SNAPSHOT_MIN_INTERVAL_MS = 2000;
 const PING_INTERVAL_MS = 15000;
 const DEFAULT_HISTORY_MS = 6 * 3600_000;
@@ -178,6 +190,21 @@ function safeTaskId(t: string | undefined): string | undefined {
   return t !== undefined && TASK_ID_RE.test(t) ? t : undefined;
 }
 
+/** Location ref for remote viewers without shareContent: kept only when it is an id-like token. */
+function redactLocation(loc: AgentLocation, salt: RedactSalt, share: boolean): AgentLocation {
+  const out: AgentLocation = { ...loc, projectId: opaqueProjectId(loc.projectId, salt) };
+  if (!share && out.ref !== undefined && !TASK_ID_RE.test(out.ref)) out.ref = '';
+  return out;
+}
+
+/** Tool summary without its target (a file basename or command word derived from the transcript). */
+function redactTool(t: ToolCallSummary | undefined, share: boolean): ToolCallSummary | undefined {
+  if (t === undefined || share) return t;
+  const out = { ...t };
+  delete out.target;
+  return out;
+}
+
 export interface RedactOptions {
   /** remote clients may see orch STATUS/HANDOFF excerpts and other free text */
   shareContent?: boolean;
@@ -188,7 +215,8 @@ export interface RedactOptions {
  * Always: Project.path = "" and every projectId-bearing field (incl. agent ids that embed it)
  * becomes opaqueProjectId(id, salt).
  * Unless shareContent: orch status/handoff text, worktree names, alert/session free text,
- * non-id task labels and non-https links are removed.
+ * non-id task labels and location refs, tool targets, agent labels (-> role), task slugs,
+ * PR titles/head refs, release names, deploy environments and non-https links are removed.
  */
 export function redactSnapshot(s: FleetSnapshot, salt: RedactSalt, opts: RedactOptions = {}): FleetSnapshot {
   const share = opts.shareContent === true;
@@ -204,6 +232,7 @@ export function redactSnapshot(s: FleetSnapshot, salt: RedactSalt, opts: RedactO
           : {
               ...p.orch,
               projectId: pid(p.orch.projectId),
+              tasks: p.orch.tasks.map((t) => ({ ...t, slug: '' })),
               statusText: '',
               handoffText: '',
               inflight: p.orch.inflight.map((x) => ({ ...x, worktree: '' })),
@@ -218,37 +247,55 @@ export function redactSnapshot(s: FleetSnapshot, salt: RedactSalt, opts: RedactO
       return out;
     }),
     sessions: s.sessions.map((x) => {
-      const out = {
+      const out: Session = {
         ...x,
         projectId: pid(x.projectId),
         agentIds: x.agentIds.map((a) => redactAgentId(a, x.projectId, salt)),
       };
-      if (!share) delete out.title;
+      if (!share) {
+        delete out.title;
+        const tool = redactTool(x.lastTool, share);
+        if (tool !== undefined) out.lastTool = tool;
+      }
       return out;
     }),
     agents: s.agents.map((a) => {
-      const out = {
+      const out: Agent = {
         ...a,
         id: redactAgentId(a.id, a.projectId, salt),
         projectId: pid(a.projectId),
-        location: { ...a.location, projectId: pid(a.location.projectId) },
+        location: redactLocation(a.location, salt, share),
       };
       if (!share) {
+        out.label = a.role;
+        const tool = redactTool(a.lastTool, share);
+        if (tool !== undefined) out.lastTool = tool;
         const task = safeTaskId(a.currentTask);
         if (task === undefined) delete out.currentTask;
         else out.currentTask = task;
       }
       return out;
     }),
-    prs: s.prs.map((x) => ({
-      ...x,
-      projectId: pid(x.projectId),
-      url: share || x.url.startsWith('https://github.com/') ? x.url : '',
-    })),
-    releases: s.releases.map((x) => ({ ...x, projectId: pid(x.projectId) })),
+    prs: s.prs.map((x) =>
+      share
+        ? { ...x, projectId: pid(x.projectId) }
+        : {
+            ...x,
+            projectId: pid(x.projectId),
+            title: '',
+            headRef: '',
+            url: x.url.startsWith('https://github.com/') ? x.url : '',
+          },
+    ),
+    releases: s.releases.map((x) =>
+      share ? { ...x, projectId: pid(x.projectId) } : { ...x, projectId: pid(x.projectId), name: '' },
+    ),
     deploys: s.deploys.map((x) => {
       const out = { ...x, projectId: pid(x.projectId) };
-      if (!share && out.url !== undefined && !out.url.startsWith('https://')) delete out.url;
+      if (!share) {
+        out.environment = '';
+        if (out.url !== undefined && !out.url.startsWith('https://')) delete out.url;
+      }
       return out;
     }),
     alerts: s.alerts.map((x) =>
@@ -263,7 +310,7 @@ export function redactSnapshot(s: FleetSnapshot, salt: RedactSalt, opts: RedactO
 export function redactEvent(e: FleetEvent, salt: RedactSalt, opts: RedactOptions = {}): FleetEvent {
   const out: FleetEvent = { ...e, projectId: opaqueProjectId(e.projectId, salt) };
   if (e.agentId !== undefined) out.agentId = redactAgentId(e.agentId, e.projectId, salt);
-  if (e.to) out.to = { ...e.to, projectId: opaqueProjectId(e.to.projectId, salt) };
+  if (e.to) out.to = redactLocation(e.to, salt, opts.shareContent === true);
   if (opts.shareContent !== true) {
     out.label = e.kind;
     delete out.data;
@@ -300,6 +347,33 @@ function parseUrl(url: string | undefined): ParsedUrl {
   const rawPath = (q === -1 ? u : u.slice(0, q)).split('#')[0] || '/';
   const query = new URLSearchParams(q === -1 ? '' : u.slice(q + 1));
   return { rawPath, query };
+}
+
+/**
+ * Canonical form of a raw request path, used to classify and route requests: percent-decoded once,
+ * duplicate slashes collapsed, "." / ".." segments resolved. undefined (-> 400) for malformed
+ * encodings, encoded "/" or "\\", backslashes, NUL, or a path that resolves above "/".
+ */
+export function canonicalPath(rawPath: string): string | undefined {
+  if (/%(2f|5c)/i.test(rawPath)) return undefined;
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(rawPath);
+  } catch {
+    return undefined;
+  }
+  if (decoded.includes('\0') || decoded.includes('\\')) return undefined;
+  const out: string[] = [];
+  for (const seg of decoded.split('/')) {
+    if (seg === '' || seg === '.') continue;
+    if (seg === '..') {
+      if (out.length === 0) return undefined;
+      out.pop();
+      continue;
+    }
+    out.push(seg);
+  }
+  return '/' + out.join('/');
 }
 
 function parseTime(v: string | null): number | undefined | null {
@@ -361,8 +435,12 @@ export function createServer(opts: CreateServerOptions): http.Server {
     return webRootReal;
   };
 
-  /** true when the client is local: loopback socket AND a loopback Host header. */
+  /**
+   * true when the client is local: loopback socket AND a loopback Host header AND no proxy
+   * forwarding headers (a local reverse proxy relays remote clients over loopback).
+   */
   function isLocal(req: http.IncomingMessage): boolean {
+    if (req.headers['x-forwarded-for'] !== undefined || req.headers.forwarded !== undefined) return false;
     return isLoopback(req) && LOOPBACK_HOSTS.has(hostName(req));
   }
 
@@ -412,10 +490,73 @@ export function createServer(opts: CreateServerOptions): http.Server {
     return url.toString();
   }
 
-  /** Failed POST /api/session attempts per client address, to slow token guessing. */
+  /**
+   * Failed remote auth attempts per client address (POST /api/session, bad Bearer/cookie on /api
+   * routes, bad ?token= links), to slow token guessing.
+   */
   const sessionFailures = new Map<string, { count: number; resetAt: number }>();
   const SESSION_MAX_FAILURES = 10;
   const SESSION_WINDOW_MS = 60_000;
+  const SESSION_MAX_KEYS = 10_000;
+
+  /**
+   * Limiter key for a request, or undefined when it must never be limited: a loopback socket with no
+   * forwarding headers is a local process, which never needs to guess the token. A loopback socket
+   * WITH forwarding headers is a local reverse proxy relaying remote clients, so each relayed
+   * client gets its own bucket (socket + the client address the proxy appended, i.e. the LAST
+   * X-Forwarded-For / Forwarded "for" value: earlier values are client-supplied and spoofable, and
+   * would let one client mint unlimited fresh buckets). A non-loopback socket is keyed on its
+   * address alone, ignoring forwarding headers it could forge.
+   */
+  function clientKey(req: http.IncomingMessage): string | undefined {
+    const sock = req.socket.remoteAddress ?? 'unknown';
+    if (!isLoopback(req)) return sock;
+    const xff = req.headers['x-forwarded-for'];
+    const fwd = req.headers.forwarded;
+    if (xff === undefined && fwd === undefined) return undefined;
+    let client: string | undefined;
+    if (xff !== undefined) {
+      const parts = (Array.isArray(xff) ? xff.join(',') : xff).split(',');
+      client = parts[parts.length - 1]!.trim();
+    } else if (fwd !== undefined) {
+      const elems = (Array.isArray(fwd) ? fwd.join(',') : fwd).split(',');
+      const m = /(?:^|;)\s*for=("?)([^";]*)\1/i.exec(elems[elems.length - 1]!);
+      client = m?.[2]?.trim();
+    }
+    return `${sock}|${(client || 'unknown').toLowerCase().slice(0, 64)}`;
+  }
+
+  /** Seconds until the client may retry, or undefined when it is not rate-limited. */
+  function authRetryAfter(key: string | undefined): number | undefined {
+    if (key === undefined) return undefined;
+    const now = Date.now();
+    const entry = sessionFailures.get(key);
+    if (!entry) return undefined;
+    if (entry.resetAt <= now) {
+      sessionFailures.delete(key);
+      return undefined;
+    }
+    return entry.count >= SESSION_MAX_FAILURES ? Math.ceil((entry.resetAt - now) / 1000) : undefined;
+  }
+
+  function recordAuthFailure(key: string | undefined): void {
+    if (key === undefined) return;
+    const now = Date.now();
+    let entry = sessionFailures.get(key);
+    if (entry && entry.resetAt <= now) entry = undefined;
+    if (!entry) {
+      // bounded memory: evict the oldest buckets instead of clearing (which would reset lockouts)
+      sessionFailures.delete(key);
+      for (const k of sessionFailures.keys()) {
+        if (sessionFailures.size < SESSION_MAX_KEYS) break;
+        sessionFailures.delete(k);
+      }
+    }
+    sessionFailures.set(key, {
+      count: (entry?.count ?? 0) + 1,
+      resetAt: entry?.resetAt ?? now + SESSION_WINDOW_MS,
+    });
+  }
 
   /**
    * POST /api/session: exchanges `Authorization: Bearer <token>` for the HttpOnly session cookie,
@@ -424,41 +565,85 @@ export function createServer(opts: CreateServerOptions): http.Server {
   function handleSession(req: http.IncomingMessage, res: http.ServerResponse): void {
     req.resume(); // no body expected; drain anything sent
     if (crossSite(req)) return sendError(res, 403, 'cross-site request');
-    const key = req.socket.remoteAddress ?? 'unknown';
-    const now = Date.now();
-    let entry = sessionFailures.get(key);
-    if (entry && entry.resetAt <= now) {
-      sessionFailures.delete(key);
-      entry = undefined;
-    }
-    if (entry && entry.count >= SESSION_MAX_FAILURES) {
-      res.setHeader('Retry-After', String(Math.ceil((entry.resetAt - now) / 1000)));
+    const key = clientKey(req);
+    const retryAfter = authRetryAfter(key);
+    if (retryAfter !== undefined) {
+      res.setHeader('Retry-After', String(retryAfter));
       return sendError(res, 429, 'too many attempts');
     }
     if (!tokenMatches(bearerToken(req), config.token)) {
-      if (sessionFailures.size > 10_000) sessionFailures.clear();
-      sessionFailures.set(key, {
-        count: (entry?.count ?? 0) + 1,
-        resetAt: entry?.resetAt ?? now + SESSION_WINDOW_MS,
-      });
+      recordAuthFailure(key);
       res.setHeader('WWW-Authenticate', 'Bearer');
       return sendError(res, 401, 'unauthorized');
     }
-    sessionFailures.delete(key);
+    if (key !== undefined) sessionFailures.delete(key);
     setSessionCookie(req, res);
     res.setHeader('Cache-Control', 'no-store');
     res.writeHead(204);
     res.end();
   }
 
-  function authorize(req: http.IncomingMessage, query: URLSearchParams, res: http.ServerResponse): boolean {
-    const queryToken = query.get('token') ?? undefined;
-    if (tokenMatches(queryToken, config.token)) {
-      // lets the web UI load its own assets after being opened with ?token=
-      setSessionCookie(req, res);
-      return true;
+  /**
+   * Remote /api access check (Bearer header or session cookie; never ?token=). Sends the 429/401
+   * response itself and returns false when access is denied. Presented-but-wrong credentials count
+   * towards the per-address failure limit shared with POST /api/session.
+   */
+  function authorizeRemoteApi(req: http.IncomingMessage, res: http.ServerResponse): boolean {
+    const key = clientKey(req);
+    const retryAfter = authRetryAfter(key);
+    if (retryAfter !== undefined) {
+      res.setHeader('Retry-After', String(retryAfter));
+      sendError(res, 429, 'too many attempts');
+      return false;
     }
-    return tokenMatches(bearerToken(req), config.token) || tokenMatches(cookieToken(req), config.token);
+    const bearer = bearerToken(req);
+    const cookie = cookieToken(req);
+    if (tokenMatches(bearer, config.token) || tokenMatches(cookie, config.token)) return true;
+    if ((bearer !== undefined && bearer !== '') || (cookie !== undefined && cookie !== '')) {
+      recordAuthFailure(key);
+    }
+    res.setHeader('WWW-Authenticate', 'Bearer');
+    sendError(res, 401, 'unauthorized');
+    return false;
+  }
+
+  /**
+   * A top-level navigation to the web shell carrying ?token=: a valid token sets the session cookie
+   * and redirects (303) to the same (canonical, non-/api) path without the token, so it does not
+   * linger in the address bar or history. Only a browser-attested top-level, same-origin or typed
+   * navigation qualifies (Sec-Fetch-Mode=navigate, Sec-Fetch-Dest=document, Sec-Fetch-Site
+   * none/same-origin); without those headers the user pastes the token into the token gate instead.
+   * Returns true when the redirect was sent; otherwise the shell is served as usual (no cookie).
+   */
+  function handleShellToken(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    canon: string,
+    query: URLSearchParams,
+  ): boolean {
+    const site = req.headers['sec-fetch-site'];
+    if (
+      req.headers['sec-fetch-mode'] !== 'navigate' ||
+      req.headers['sec-fetch-dest'] !== 'document' ||
+      (site !== 'none' && site !== 'same-origin')
+    )
+      return false;
+    const key = clientKey(req);
+    if (authRetryAfter(key) !== undefined) return false;
+    if (!tokenMatches(query.get('token') ?? undefined, config.token)) {
+      recordAuthFailure(key);
+      return false;
+    }
+    const rest = new URLSearchParams(query);
+    rest.delete('token');
+    const search = rest.toString();
+    // canon starts with exactly one "/" and has no empty, dot or slash-bearing segments, so the
+    // re-encoded Location is same-origin and decodes back to the same non-/api path
+    const location = canon.split('/').map(encodeURIComponent).join('/') + (search ? `?${search}` : '');
+    setSessionCookie(req, res);
+    res.writeHead(303, { Location: location, 'Cache-Control': 'no-store', 'Content-Length': 0 });
+    res.end();
+    return true;
   }
 
   function handleEvents(req: http.IncomingMessage, res: http.ServerResponse, local: boolean): void {
@@ -739,44 +924,93 @@ export function createServer(opts: CreateServerOptions): http.Server {
     res.end();
   }
 
+  async function handlePush(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    rawPath: string,
+  ): Promise<void> {
+    const push = opts.push;
+    if (!push || store.snapshot().demo) return sendError(res, 404, 'push disabled');
+    const method = req.method ?? 'GET';
+    const keyRoute = rawPath === '/api/push/key';
+    if (keyRoute ? method !== 'GET' : method !== 'POST' && method !== 'DELETE') {
+      res.setHeader('Allow', keyRoute ? 'GET' : 'POST, DELETE');
+      return sendError(res, 405, 'method not allowed');
+    }
+    if (keyRoute) return sendJson(res, 200, { publicKey: await push.publicKey() });
+    if (crossSite(req)) return sendError(res, 403, 'cross-site request');
+    const ctype = String(req.headers['content-type'] ?? '')
+      .split(';')[0]!
+      .trim()
+      .toLowerCase();
+    if (ctype !== 'application/json') return sendError(res, 415, 'expected application/json');
+    const tooLarge = (): void => {
+      res.setHeader('Connection', 'close');
+      sendError(res, 413, 'payload too large');
+    };
+    const declared = req.headers['content-length'];
+    if (declared !== undefined && !(Number(declared) <= MAX_ALERT_BODY_BYTES)) return tooLarge();
+    const raw = await readBody(req, MAX_ALERT_BODY_BYTES);
+    if (raw === undefined) return tooLarge();
+    let body: unknown;
+    try {
+      body = JSON.parse(raw.toString('utf8'));
+    } catch {
+      return sendError(res, 400, 'invalid json');
+    }
+    try {
+      if (method === 'POST') await push.subscribe(body);
+      else await push.unsubscribe(body);
+    } catch (err) {
+      if (err instanceof PushInputError) return sendError(res, err.status, err.message);
+      throw err;
+    }
+    res.writeHead(204);
+    res.end();
+  }
+
   async function handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
 
     if (!hostAllowed(req)) return sendError(res, 421, 'misdirected request');
     const { rawPath, query } = parseUrl(req.url);
+    // classify and route on the canonical path so "//api/x", "/a/../api/x", "/%61pi/x" ... can
+    // neither dodge the /api auth rules nor be treated as shell paths
+    const canon = canonicalPath(rawPath);
+    if (canon === undefined) return sendError(res, 400, 'bad request');
 
     const method = req.method ?? 'GET';
-    if (rawPath === '/api/alerts') {
+    if (canon === '/api/alerts') {
       if (method !== 'POST') {
         res.setHeader('Allow', 'POST');
         return sendError(res, 405, 'method not allowed');
       }
       return handlePostAlert(req, res);
     }
-    if (rawPath === '/api/session') {
+    if (canon === '/api/session') {
       if (method !== 'POST') {
         res.setHeader('Allow', 'POST');
         return sendError(res, 405, 'method not allowed');
       }
       return handleSession(req, res);
     }
+    if (canon === '/api/push/key' || canon === '/api/push/subscribe') {
+      if (!isLocal(req) && !authorizeRemoteApi(req, res)) return;
+      return handlePush(req, res, canon);
+    }
     if (method !== 'GET' && method !== 'HEAD') {
       res.setHeader('Allow', 'GET, HEAD');
       return sendError(res, 405, 'method not allowed');
     }
     const local = isLocal(req);
-    const api = rawPath === '/api' || rawPath.startsWith('/api/');
+    const api = canon === '/api' || canon.startsWith('/api/');
     // Remote clients may load the static web shell (it holds no fleet data) so a fresh browser can
-    // reach the token gate; every /api route still requires the token. authorize() also turns a
-    // valid ?token= link on a shell path into the session cookie.
-    if (!local && !authorize(req, query, res) && api) {
-      res.removeHeader('Set-Cookie');
-      res.setHeader('WWW-Authenticate', 'Bearer');
-      return sendError(res, 401, 'unauthorized');
-    }
+    // reach the token gate; every /api route still requires the token (Bearer or cookie only).
+    if (api && !local && !authorizeRemoteApi(req, res)) return;
+    if (!api && query.has('token') && handleShellToken(req, res, canon, query)) return;
 
     if (api) {
-      switch (rawPath) {
+      switch (canon) {
         case '/api/health': {
           const share = local && config.lan ? shareUrl(req) : undefined;
           return sendJson(res, 200, {
@@ -817,9 +1051,8 @@ export function createServer(opts: CreateServerOptions): http.Server {
         case '/api/digest/latest':
           return handleDigest(res, local);
         default: {
-          if (!Object.prototype.hasOwnProperty.call(extraGet, rawPath))
-            return sendError(res, 404, 'not found');
-          const route = extraGet[rawPath];
+          if (!Object.prototype.hasOwnProperty.call(extraGet, canon)) return sendError(res, 404, 'not found');
+          const route = extraGet[canon];
           if (typeof route !== 'function') return sendError(res, 404, 'not found');
           if (!local && config.shareContent !== true) return sendError(res, 403, 'forbidden');
           const result = await route(req);

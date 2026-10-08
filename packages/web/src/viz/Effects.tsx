@@ -89,15 +89,28 @@ export function Effects() {
     [ringGeo, beamGeo, partGeo, ringMat, beamMat, partMat],
   );
 
+  const epoch = useRef(store.seekEpoch);
   useFrame((_, dtRaw) => {
     const dt = Math.min(dtRaw, 0.05);
     const t = store.t;
+    if (epoch.current !== store.seekEpoch) {
+      // replay scrub: transient effects belong to the old timeline
+      epoch.current = store.seekEpoch;
+      if (rings.current) initInstances(rings.current, RING_POOL);
+      if (beams.current) initInstances(beams.current, BEAM_POOL);
+      if (parts.current) initInstances(parts.current, PARTICLE_POOL);
+    }
     const rm = rings.current;
     if (rm) {
       for (let i = 0; i < RING_POOL; i++) {
         const r = store.rings[i]!;
         if (!r.active) continue;
         const age = t - r.start;
+        if (age < 0) {
+          // staggered echo not started yet
+          rm.setMatrixAt(i, ZERO);
+          continue;
+        }
         ringPulse(age, r.dur, r.from, r.to, pulse);
         if (!pulse.alive) {
           r.active = false;

@@ -1,4 +1,5 @@
 #!/bin/bash
+# Builds menubar/build/FleetBar.app with swiftc.
 set -euo pipefail
 
 cd "$(dirname "$0")"

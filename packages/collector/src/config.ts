@@ -1,13 +1,20 @@
 import { randomBytes } from 'node:crypto';
 import {
   chmodSync,
+  closeSync,
+  constants as fsConstants,
   existsSync,
+  fchmodSync,
+  fstatSync,
+  lstatSync,
   linkSync,
   mkdirSync,
+  openSync,
   readFileSync,
   renameSync,
   unlinkSync,
   writeFileSync,
+  type Stats,
 } from 'node:fs';
 import { homedir as osHomedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -42,13 +49,57 @@ export function defaultConfig(): Omit<FleetConfig, 'token'> {
   };
 }
 
-function readJson(path: string): Record<string, unknown> {
-  const raw = readFileSync(path, 'utf8');
-  const parsed: unknown = JSON.parse(raw);
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    throw new Error(`config at ${path} must be a JSON object`);
+/**
+ * The config holds the access token: if the file is ours and readable/writable/executable by anyone
+ * else (mode broader than 0600), tighten it through the already-open descriptor, so the file that
+ * was checked is the one changed. A chmod failure is reported, not fatal: the config is still usable.
+ */
+function tightenMode(fd: number, st: Stats, path: string): void {
+  const uid = process.getuid?.();
+  if (uid === undefined || st.uid !== uid || (st.mode & 0o777 & ~0o600) === 0) return;
+  try {
+    fchmodSync(fd, 0o600);
+  } catch (e) {
+    console.warn(`fleet: could not restrict permissions of ${path} to 0600: ${(e as Error).message}`);
   }
-  return parsed as Record<string, unknown>;
+}
+
+/**
+ * Read and validate the config through one descriptor. A symlinked config (e.g. managed dotfiles) is
+ * read but never chmod-ed, so a link can't redirect the chmod to an unrelated file. A regular file is
+ * opened with O_NOFOLLOW (a swap to a symlink mid-load falls back to read-only), parsed and
+ * validated, and only then has its mode tightened through the same descriptor.
+ */
+function readJson(path: string): Record<string, unknown> {
+  let link = lstatSync(path).isSymbolicLink();
+  const base = fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0);
+  let fd: number;
+  if (link) {
+    fd = openSync(path, base);
+  } else {
+    try {
+      fd = openSync(path, base | (fsConstants.O_NOFOLLOW ?? 0));
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'ELOOP') throw e;
+      link = true;
+      fd = openSync(path, base);
+    }
+  }
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile()) throw new Error(`config at ${path} must be a regular file`);
+    const parsed: unknown = JSON.parse(readFileSync(fd, 'utf8'));
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new Error(`config at ${path} must be a JSON object`);
+    }
+    if (!link) tightenMode(fd, st, path);
+    else if ((st.mode & 0o077) !== 0) {
+      console.warn(`fleet: ${path} is a symlink to a file readable by others; restrict it to 0600`);
+    }
+    return parsed as Record<string, unknown>;
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /**

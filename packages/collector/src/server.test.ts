@@ -146,6 +146,8 @@ async function start(opts: {
   port = (server.address() as AddressInfo).port;
 }
 
+const NAV = { 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document', 'Sec-Fetch-Site': 'none' };
+
 function get(
   p: string,
   headers: Record<string, string> = {},
@@ -274,11 +276,14 @@ describe('auth matrix', () => {
     expect((await get('/api/snapshot', { authorization: `Basic ${TOKEN}` })).status).toBe(401);
   });
 
-  it('remote with bearer, query token, or cookie -> 200', async () => {
-    await start({ remote: true });
+  it('remote with bearer or cookie -> 200; a valid query token is refused on /api', async () => {
+    await start({ remote: true, webDir: tmp });
     expect((await get('/api/snapshot', { authorization: `Bearer ${TOKEN}` })).status).toBe(200);
-    const q = await get(`/api/snapshot?token=${TOKEN}`);
-    expect(q.status).toBe(200);
+    const refused = await get(`/api/snapshot?token=${TOKEN}`);
+    expect(refused.status).toBe(401);
+    expect(refused.headers['set-cookie']).toBeUndefined();
+    const q = await get(`/?token=${TOKEN}`, NAV);
+    expect(q.status).toBe(303);
     const cookie = String(q.headers['set-cookie']);
     expect(cookie).toContain(`fleet_token=${TOKEN}`);
     expect(cookie).toContain('HttpOnly');
@@ -456,7 +461,7 @@ describe('redaction', () => {
 
   it('Secure cookie behind https proxy', async () => {
     await start({ remote: true });
-    const r = await get(`/api/snapshot?token=${TOKEN}`, { 'x-forwarded-proto': 'https' });
+    const r = await get(`/?token=${TOKEN}`, { ...NAV, 'x-forwarded-proto': 'https' });
     expect(String(r.headers['set-cookie'])).toContain('Secure');
   });
 });
@@ -562,7 +567,7 @@ describe('SSE', () => {
     await denied.ready;
     expect(denied.status()).toBe(401);
     denied.close();
-    const sse = openSse(`/api/events?token=${TOKEN}`);
+    const sse = openSse('/api/events', { authorization: `Bearer ${TOKEN}` });
     await sse.ready;
     await waitFor(() => sse.frames.some((f) => f.event === 'snapshot'));
     store.emit('event', EVENT);

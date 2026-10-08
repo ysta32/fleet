@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Icon } from './Icon';
 
-function CopyCommand({ command }: { command: string }) {
+export function CopyCommand({ command }: { command: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="copy-command">

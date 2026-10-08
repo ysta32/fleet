@@ -1,7 +1,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { IconName } from '@fleet/ui';
 import type { Selection } from './data/contract';
 import type { DashboardTab } from './dashboard/Dashboard';
+import { TABS } from './shell/tabs';
 import { formatCost, needsYou } from './dashboard/model';
 import { useFleet } from './data/useFleet';
 import { Dashboard, FleetScene } from './shell/slots';
@@ -17,19 +17,12 @@ import { TokenGate } from './shell/TokenGate';
 import { Onboarding } from './shell/Onboarding';
 import { SelectionCard } from './shell/SelectionCard';
 import { useConnection } from './shell/connection';
+import { modeOf } from './shell/mode';
 import { useShareUrl } from './shell/share';
 import { useTheme } from './shell/theme';
 import type { PaletteItem } from './shell/palette';
 import './styles.css';
 
-const TABS: { id: DashboardTab; label: string; icon: IconName; key: string }[] = [
-  { id: 'overview', label: 'Overview', icon: 'fleet', key: 'o' },
-  { id: 'sessions', label: 'Sessions', icon: 'session', key: 's' },
-  { id: 'armies', label: 'Armies', icon: 'army', key: 'a' },
-  { id: 'prs', label: 'PRs', icon: 'merge', key: 'p' },
-  { id: 'alerts', label: 'Alerts', icon: 'bell', key: 'i' },
-  { id: 'overnight', label: 'Overnight', icon: 'moon', key: 'n' },
-];
 const DISMISSED_KEY = 'fleet.dismissedAlerts';
 
 function readDismissed(): Set<string> {
@@ -188,7 +181,7 @@ function Shell() {
     const items: PaletteItem[] = TABS.map((entry) => ({
       id: `tab:${entry.id}`,
       group: 'Commands',
-      label: `Go to ${entry.label.toLowerCase()}`,
+      label: `Go to ${entry.label === 'PRs' ? 'PRs' : entry.label.toLowerCase()}`,
       icon: entry.icon,
       shortcut: ['G', entry.key.toUpperCase()],
       run: () => go(entry.id),
@@ -291,14 +284,12 @@ function Shell() {
 
   if (link.state === 'unauthorized') return <TokenGate />;
 
-  const modeLabel =
-    view.mode === 'replay'
-      ? 'Replay'
-      : view.mode === 'demo'
-        ? 'Demo'
-        : view.connected
-          ? 'Live'
-          : 'Connecting';
+  const pill = modeOf({
+    mode: view.mode,
+    connected: view.connected,
+    link: link.state,
+    synthetic: snapshot?.demo === true,
+  });
   return (
     <div className={`app${sheet ? ' sheet-open' : ''}${firstRun ? ' first-run' : ''}`} data-mode={view.mode}>
       <a className="skip-link" href="#inspector">
@@ -310,12 +301,20 @@ function Shell() {
           <span className="brand-name">fleet</span>
         </a>
         <span
-          className={`mode mode-${view.mode}${view.connected ? ' is-on' : ''}`}
+          className={`mode mode-${pill.kind}${view.connected ? ' is-on' : ''}`}
           role="status"
-          title={view.connected ? 'Receiving updates' : 'Not connected'}
+          title={
+            pill.kind === 'demo'
+              ? 'Synthetic demo data'
+              : pill.kind === 'offline'
+                ? 'Not receiving updates'
+                : view.connected
+                  ? 'Receiving updates'
+                  : 'Not connected'
+          }
         >
           <i aria-hidden="true" />
-          {modeLabel}
+          {pill.label}
         </span>
         <div className="search" role="search">
           <Icon name="search" />

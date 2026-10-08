@@ -1,4 +1,12 @@
-import type { FleetSnapshot, ModelFamily, OrchTask, Session, TokenUsage } from '@fleet/shared';
+import type {
+  Alert,
+  AlertKind,
+  FleetSnapshot,
+  ModelFamily,
+  OrchTask,
+  Session,
+  TokenUsage,
+} from '@fleet/shared';
 
 export const MODEL_FAMILIES: ModelFamily[] = ['opus', 'sonnet', 'haiku', 'fable', 'astra', 'unknown'];
 
@@ -17,6 +25,26 @@ export function formatCost(value: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value);
+}
+
+export const ALERT_KIND_LABELS: Record<AlertKind, string> = {
+  'army.done': 'Army finished',
+  'army.blocked': 'Army blocked',
+  'ci.failed': 'CI failed',
+  'session.waiting': 'Waiting on you',
+  'deploy.failed': 'Deploy failed',
+  'spend.budget': 'Over spend budget',
+};
+
+/** Human label for an alert kind; unknown kinds fall back to the raw value. */
+export function alertKindLabel(kind: string): string {
+  return (ALERT_KIND_LABELS as Record<string, string>)[kind] ?? kind;
+}
+
+/** Readable alert headline: the collector title, unless it is empty or just echoes the kind. */
+export function alertTitle(alert: Pick<Alert, 'kind' | 'title'>): string {
+  const title = alert.title.trim();
+  return !title || title === alert.kind ? alertKindLabel(alert.kind) : title;
 }
 
 export function relativeTime(at: number, now: number): string {
@@ -179,7 +207,7 @@ export function needsYou(
       id: `alert:${alert.id}`,
       kind: 'alert',
       projectId: alert.projectId,
-      title: alert.title,
+      title: alertTitle(alert),
       at: alert.at,
       alertIds: [alert.id],
     });

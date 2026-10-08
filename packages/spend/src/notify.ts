@@ -39,18 +39,34 @@ function isSentState(value: unknown): value is Record<string, Channel[]> {
   );
 }
 
-function fleetToken(deps: NotifyDeps, readFile: typeof readFileSync): string | undefined {
-  const token = (deps.env ?? process.env).FLEET_TOKEN;
-  if (token) return token;
+function readFleetConfig(deps: NotifyDeps, readFile: typeof readFileSync): Record<string, unknown> {
+  const env = deps.env ?? process.env;
+  const path = deps.fleetConfigPath ?? (env.FLEET_CONFIG || join(homedir(), '.config/fleet/config.json'));
   try {
-    const config: unknown = JSON.parse(
-      readFile(deps.fleetConfigPath ?? join(homedir(), '.config/fleet/config.json'), 'utf8'),
-    );
-    if (config !== null && typeof config === 'object' && 'token' in config) {
-      return typeof config.token === 'string' && config.token ? config.token : undefined;
+    const config: unknown = JSON.parse(readFile(path, 'utf8'));
+    if (config !== null && typeof config === 'object' && !Array.isArray(config)) {
+      return config as Record<string, unknown>;
     }
   } catch {}
-  return undefined;
+  return {};
+}
+
+function fleetToken(deps: NotifyDeps, config: () => Record<string, unknown>): string | undefined {
+  const token = (deps.env ?? process.env).FLEET_TOKEN;
+  if (token) return token;
+  return typeof config().token === 'string' && config().token ? (config().token as string) : undefined;
+}
+
+function validPort(n: number): boolean {
+  return Number.isInteger(n) && n >= 1 && n <= 65535;
+}
+
+function fleetPort(deps: NotifyDeps, config: () => Record<string, unknown>): number {
+  const envPort = (deps.env ?? process.env).FLEET_PORT;
+  if (envPort !== undefined && envPort !== '' && validPort(Number(envPort))) return Number(envPort);
+  const port = config().port;
+  if (typeof port === 'number' && validPort(port)) return port;
+  return 4747;
 }
 
 export async function dispatchAlerts(
@@ -72,7 +88,10 @@ export async function dispatchAlerts(
   } catch (error) {
     if (!(error instanceof SyntaxError) && (error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
-  const token = cfg.notify.fleet ? fleetToken(deps, readFile) : undefined;
+  let loaded: Record<string, unknown> | undefined;
+  const fleetConfig = () => (loaded ??= readFleetConfig(deps, readFile));
+  const token = cfg.notify.fleet ? fleetToken(deps, fleetConfig) : undefined;
+  const alertsUrl = token ? `http://127.0.0.1:${fleetPort(deps, fleetConfig)}/api/alerts` : '';
   const newlySent: SpendAlert[] = [];
   const attempted = new Set<string>();
   for (const alert of alerts) {
@@ -92,7 +111,7 @@ export async function dispatchAlerts(
     }
     if (cfg.notify.fleet && token && !channels.includes('fleet')) {
       try {
-        const response = await fetch('http://127.0.0.1:4747/api/alerts', {
+        const response = await fetch(alertsUrl, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({

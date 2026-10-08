@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import type { CSSProperties, ReactNode } from 'react';
+import type { ReactNode } from 'react';
+import { Icon } from '../shell/Icon';
 import type { FleetView } from '../data/contract';
 import { fetchHistory } from '../data/liveSource';
 import {
@@ -7,42 +8,18 @@ import {
   getDemoDigest,
   getDemoDigestHistory,
   safeDigestUrl,
+  formatWindow,
   summarizeDigest,
 } from './overnight';
 import type { OvernightDigest } from './overnight';
 
-const panel: CSSProperties = {
-  color: 'var(--fl-fg)',
-  fontFamily: 'var(--fl-font-sans)',
-  padding: 'var(--fl-space-6)',
-  background: 'var(--fl-gradient-surface), var(--fl-surface-1)',
-  border: 'var(--fl-hairline) solid var(--fl-border)',
-  borderRadius: 'var(--fl-radius-lg)',
-  lineHeight: 'var(--fl-leading-normal)',
-  overflowWrap: 'anywhere',
-};
-const muted: CSSProperties = { color: 'var(--fl-fg-muted)', fontSize: 'var(--fl-text-sm)' };
-const button: CSSProperties = {
-  background: 'var(--fl-accent)',
-  color: 'var(--fl-accent-fg)',
-  border: 0,
-  borderRadius: 'var(--fl-radius-sm)',
-  padding: 'var(--fl-space-4) var(--fl-space-5)',
-  font: 'inherit',
-  cursor: 'pointer',
-};
+const LEAD_METRICS = new Set(['PRs merged', 'CI failures']);
 const healthLabels = { red: 'Needs attention', yellow: 'Worth a look', green: 'Healthy', quiet: 'Quiet' };
-const healthColors = {
-  red: 'var(--fl-danger)',
-  yellow: 'var(--fl-warn)',
-  green: 'var(--fl-success)',
-  quiet: 'var(--fl-fg-muted)',
-};
 
 function ActivityLink({ url, children }: { url: string; children: ReactNode }) {
   const href = safeDigestUrl(url);
   return href ? (
-    <a href={href} target="_blank" rel="noreferrer" style={{ color: 'var(--fl-fg)' }}>
+    <a href={href} target="_blank" rel="noreferrer">
       {children}
     </a>
   ) : (
@@ -110,174 +87,146 @@ export function Overnight({ view }: { view: FleetView }) {
   }
 
   const model = digest ? summarizeDigest(digest) : null;
+  const lead = model?.metrics.filter((metric) => LEAD_METRICS.has(metric.label)) ?? [];
+  const rest = model?.metrics.filter((metric) => !LEAD_METRICS.has(metric.label)) ?? [];
   return (
-    <section style={panel} aria-label="Since you left">
-      <header>
-        <p style={{ ...muted, fontFamily: 'var(--fl-font-mono)', margin: 0 }}>
-          OVERNIGHT{demo ? ' / DEMO' : ''}
-        </p>
-        <h2
-          style={{
-            fontFamily: 'var(--fl-font-display)',
-            fontSize: 'var(--fl-text-3xl)',
-            fontWeight: 400,
-            letterSpacing: 'var(--fl-tracking-display)',
-            lineHeight: 'var(--fl-leading-tight)',
-            margin: 'var(--fl-space-3) 0 var(--fl-space-5)',
-          }}
-        >
-          Since you left
-        </h2>
+    <section className="dashboard overnight" aria-label="Since you left">
+      <header className="panel-head">
+        <h2 className="panel-title">Since you left</h2>
+        {model && <p className="panel-meta num">{formatWindow(model.from, model.to)}</p>}
+        {demo && <span className="tag">Synthetic</span>}
       </header>
       {error ? (
-        <div role="alert">
-          <h3>The digest is out of reach.</h3>
-          <p style={muted}>We couldn’t load your overnight activity. Try again in a moment.</p>
-          <button type="button" style={button} onClick={() => setAttempt((value) => value + 1)}>
+        <div className="empty" role="alert">
+          <Icon name="offline" className="empty-icon" />
+          <p className="empty-title">The digest is out of reach.</p>
+          <p className="empty-body">
+            Fleet could not load the overnight digest from the collector. Check that it is running, then try
+            again.
+          </p>
+          <button
+            type="button"
+            className="btn btn-quiet btn-sm"
+            onClick={() => setAttempt((value) => value + 1)}
+          >
+            <Icon name="undo" />
             Try again
           </button>
         </div>
       ) : digest === undefined ? (
-        <div role="status" aria-label="Loading overnight digest" aria-busy="true">
-          <p style={muted}>Gathering the night’s activity…</p>
+        <div
+          className="overnight-loading"
+          role="status"
+          aria-label="Loading overnight digest"
+          aria-busy="true"
+        >
           {[100, 75, 45].map((width) => (
             <div
               key={width}
               aria-hidden="true"
-              style={{
-                width: `${width}%`,
-                height: 'var(--fl-space-6)',
-                marginBlock: 'var(--fl-space-4)',
-                background: 'var(--fl-skeleton)',
-                borderRadius: 'var(--fl-radius-sm)',
-              }}
+              className="skeleton skeleton-row"
+              style={{ width: `${width}%` }}
             />
           ))}
         </div>
       ) : !model ? (
-        <div style={{ paddingBlock: 'var(--fl-space-7)' }}>
-          <h3
-            style={{ fontFamily: 'var(--fl-font-display)', fontSize: 'var(--fl-text-2xl)', fontWeight: 400 }}
-          >
-            Your first morning starts here.
-          </h3>
-          <p style={muted}>
-            No overnight digest yet. Once a digest is published, your merges, releases and projects needing
-            attention will appear here.
+        <div className="empty">
+          <Icon name="moon" className="empty-icon" />
+          <p className="empty-title">Your first morning starts here.</p>
+          <p className="empty-body">
+            No overnight digest yet. After the first night with a published digest, merges, releases and the
+            projects that need you appear here.
           </p>
         </div>
       ) : (
         <>
-          <p style={{ fontSize: 'var(--fl-text-lg)', maxWidth: 'var(--fl-measure)' }}>{model.headline}</p>
-          <p style={muted}>
-            <time dateTime={model.window.since}>{new Date(model.from).toLocaleString()}</time> →{' '}
-            <time dateTime={model.window.until}>{new Date(model.to).toLocaleString()}</time>
-          </p>
-          <dl
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 130px), 1fr))',
-              gap: 'var(--fl-space-5)',
-              marginBlock: 'var(--fl-space-7)',
-            }}
-          >
-            {model.metrics.map((metric) => (
+          <p className="overnight-lead">{model.headline}</p>
+          <dl className="overnight-metrics">
+            {lead.map((metric) => (
               <div
                 key={metric.label}
-                style={{
-                  borderTop: 'var(--fl-hairline) solid var(--fl-border-strong)',
-                  paddingTop: 'var(--fl-space-4)',
-                }}
+                className={`overnight-metric overnight-metric-lead${metric.label === 'CI failures' && metric.value > 0 ? ' is-bad' : ''}`}
               >
-                <dt style={muted}>{metric.label}</dt>
-                <dd style={{ margin: 0, fontFamily: 'var(--fl-font-mono)', fontSize: 'var(--fl-text-2xl)' }}>
-                  {metric.value.toLocaleString()}
-                </dd>
+                <dt className="micro">{metric.label}</dt>
+                <dd className="numeral">{metric.value.toLocaleString()}</dd>
+              </div>
+            ))}
+            {rest.map((metric) => (
+              <div key={metric.label} className="overnight-metric">
+                <dt>{metric.label}</dt>
+                <dd className="num">{metric.value.toLocaleString()}</dd>
               </div>
             ))}
           </dl>
-          <button type="button" style={button} disabled={replaying} onClick={() => void replay()}>
-            {replaying ? 'Loading replay…' : 'Replay the night'}
-          </button>
-          {replayError && (
-            <p role="alert" style={{ color: 'var(--fl-danger)' }}>
-              Replay is unavailable for this window. Try again in a moment.
-            </p>
-          )}
-          <h3 style={{ marginTop: 'var(--fl-space-7)' }}>
-            Across your projects <span style={muted}>· {model.needsAttention} need attention</span>
-          </h3>
-          {!model.projects.length && <p style={muted}>No project activity in this window.</p>}
-          {model.projects.map((project) => (
-            <article
-              key={project.id}
-              style={{
-                borderTop: 'var(--fl-hairline) solid var(--fl-border)',
-                paddingBlock: 'var(--fl-space-5)',
-              }}
+          <div className="overnight-actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={replaying}
+              onClick={() => void replay()}
             >
-              <div
-                style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--fl-space-4)' }}
-              >
-                <h4 style={{ margin: 0, fontSize: 'var(--fl-text-lg)' }}>{project.name}</h4>
-                <span
-                  style={{
-                    fontFamily: 'var(--fl-font-mono)',
-                    fontSize: 'var(--fl-text-xs)',
-                    color: healthColors[project.health],
-                    border: 'var(--fl-hairline) solid var(--fl-border-strong)',
-                    borderRadius: 'var(--fl-radius-pill)',
-                    padding: 'var(--fl-space-1) var(--fl-space-3)',
-                  }}
-                >
-                  {healthLabels[project.health]}
-                </span>
-              </div>
-              <p style={muted}>{project.summary}</p>
-              {project.mergedPRs.length > 0 && (
-                <>
-                  <h5>Merged pull requests</h5>
-                  <ul>
-                    {project.mergedPRs.map((pr) => (
-                      <li key={pr.number}>
-                        <ActivityLink url={pr.url}>
-                          #{pr.number} · {pr.title}
-                        </ActivityLink>
-                      </li>
-                    ))}
-                  </ul>
-                </>
+              <Icon name="replay" />
+              {replaying ? 'Loading replay…' : 'Replay the night'}
+            </button>
+            {replayError && (
+              <p role="alert" className="overnight-error">
+                Replay is unavailable for this window. Try again in a moment.
+              </p>
+            )}
+          </div>
+          <section className="block">
+            <h3 className="block-title">
+              Projects <span className="num count">{model.projects.length}</span>
+              {model.needsAttention > 0 && (
+                <span className="block-note">{model.needsAttention} need attention</span>
               )}
-              {project.releases.length > 0 && (
-                <>
-                  <h5>Releases</h5>
-                  <ul>
-                    {project.releases.map((release) => (
-                      <li key={release.tag}>
-                        <ActivityLink url={release.url}>
-                          {release.tag} · {release.name}
-                        </ActivityLink>
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              )}
-              {project.ciFailures.length > 0 && (
-                <>
-                  <h5 style={{ color: 'var(--fl-danger)' }}>CI failures</h5>
-                  <ul>
+            </h3>
+            {!model.projects.length && (
+              <p className="dashboard-empty quiet">No project activity in this window.</p>
+            )}
+            {model.projects.map((project) => (
+              <article key={project.id} className={`overnight-project health-${project.health}`}>
+                <header>
+                  <h4>{project.name}</h4>
+                  <span className="overnight-health">
+                    <i aria-hidden="true" />
+                    {healthLabels[project.health]}
+                  </span>
+                </header>
+                <p className="overnight-summary">{project.summary}</p>
+                {(project.mergedPRs.length > 0 ||
+                  project.releases.length > 0 ||
+                  project.ciFailures.length > 0) && (
+                  <ul className="overnight-items">
                     {project.ciFailures.map((run) => (
-                      <li key={run.runId}>
+                      <li key={`ci:${run.runId}`} className="is-bad">
+                        <Icon name="x" />
                         <ActivityLink url={run.url}>
-                          {run.workflow} · {run.branch}
+                          CI failed · {run.workflow} · <span className="num">{run.branch}</span>
+                        </ActivityLink>
+                      </li>
+                    ))}
+                    {project.mergedPRs.map((pr) => (
+                      <li key={`pr:${pr.number}`}>
+                        <Icon name="merge" />
+                        <ActivityLink url={pr.url}>
+                          <span className="num">#{pr.number}</span> {pr.title}
+                        </ActivityLink>
+                      </li>
+                    ))}
+                    {project.releases.map((release) => (
+                      <li key={`rel:${release.tag}`}>
+                        <Icon name="release" />
+                        <ActivityLink url={release.url}>
+                          <span className="num">{release.tag}</span> {release.name}
                         </ActivityLink>
                       </li>
                     ))}
                   </ul>
-                </>
-              )}
-            </article>
-          ))}
+                )}
+              </article>
+            ))}
+          </section>
         </>
       )}
     </section>

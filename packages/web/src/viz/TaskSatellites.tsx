@@ -3,8 +3,16 @@ import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { FleetSnapshot, OrchTaskState } from '@fleet/shared';
 import { easing, ease } from '@fleet/ui';
-import { clamp, normTaskId, taskOrbitOffset, vec3 } from './layout';
-import { INTRO_DELAY, INTRO_DUR, INTRO_STAGGER } from './Station';
+import {
+  clamp,
+  hash01,
+  INTRO_DELAY,
+  INTRO_DUR,
+  INTRO_STAGGER,
+  normTaskId,
+  taskOrbitOffset,
+  vec3,
+} from './layout';
 import { useSceneStore } from './store';
 import { useVizTheme } from './theme';
 
@@ -127,7 +135,9 @@ export function TaskSatellites({
     if (!m || !h) return;
     // motion means work: each army's orbit only advances while it has running tasks / working agents
     const dt = store.reduced ? 0 : Math.min(dtRaw, 0.05);
-    for (const l of store.layouts.values()) l.orbitT += dt * (l.busy ? 1 : 0);
+    for (const l of store.layouts.values())
+      // replay: orbit phase is a function of the playhead (deterministic scrub)
+      l.orbitT = store.replaying ? hash01(l.id) * 40 + store.replaySec : l.orbitT + dt * (l.busy ? 1 : 0);
     for (let i = 0; i < slots.length; i++) {
       const s = slots[i]!;
       const l = store.layouts.get(s.projectId);

@@ -78,6 +78,13 @@ export interface LaunchdDeps {
   exec?: ExecFn;
   home?: string;
   uid?: number;
+  /** write the plist but never call launchctl (FLEET_NO_LAUNCHD=1) */
+  noLoad?: boolean;
+}
+
+/** What `install` would write, without touching the filesystem or launchctl. */
+export function planInstall(o: PlistOpts, d: LaunchdDeps = {}): { path: string; xml: string } {
+  return { path: plistPath(d.home), xml: plistXml(o) };
 }
 
 export function plistPath(home: string = homedir()): string {
@@ -104,6 +111,7 @@ export async function install(o: PlistOpts, d: LaunchdDeps = {}): Promise<string
   mkdirSync(join(path, '..'), { recursive: true });
   mkdirSync(o.logDir, { recursive: true });
   writeFileSync(path, plistXml(o), { mode: 0o644 });
+  if (d.noLoad) return path;
   if (await isLoaded(exec, uid)) {
     await exec('launchctl', ['bootout', `gui/${uid}/${LABEL}`]);
   }
@@ -115,7 +123,7 @@ export async function uninstall(d: LaunchdDeps = {}): Promise<boolean> {
   const exec = d.exec ?? defaultExec;
   const uid = uidOf(d);
   const path = plistPath(d.home);
-  if (await isLoaded(exec, uid)) {
+  if (!d.noLoad && (await isLoaded(exec, uid))) {
     await exec('launchctl', ['bootout', `gui/${uid}/${LABEL}`]);
   }
   if (!existsSync(path)) return false;

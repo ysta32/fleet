@@ -1,6 +1,6 @@
 {
   "name": "fleet-collector",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Fleet: mission control for Claude Code agents (local collector daemon + web UI)",
   "type": "module",
   "bin": {
@@ -9,8 +9,7 @@
   "main": "dist/index.js",
   "files": [
     "dist",
-    "web",
-    "launchd"
+    "web"
   ],
   "scripts": {
     "build": "tsc -b && npm run copy-web",
@@ -18,7 +17,11 @@
     "typecheck": "tsc -b"
   },
   "dependencies": {
-    "@fleet/shared": "0.1.0"
+    "@fleet/shared": "1.0.0",
+    "web-push": "^3.6.7"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@types/web-push": "^3.6.4"
+  }
 }

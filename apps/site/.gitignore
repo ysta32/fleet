@@ -1,0 +1,8 @@
+.next/
+out/
+lib/optional.generated.ts
+app/ink.generated.css
+public/island/
+*.tsbuildinfo
+lib/brand.generated.ts
+lib/spend.generated.tsx

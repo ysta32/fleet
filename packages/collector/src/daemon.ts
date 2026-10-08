@@ -28,6 +28,7 @@ import { Notifier, alertKindOf, type NotifierDeps } from './notify.js';
 import { diffOrch, readOrchRun, worktreeOf } from './orch/reader.js';
 import { createServer, type StoreLike } from './server.js';
 import { FleetStore } from './store.js';
+import { PushManager } from './push.js';
 import { SessionParser } from './transcripts/parse.js';
 import { Tailer, type TranscriptFile } from './transcripts/tailer.js';
 
@@ -291,12 +292,16 @@ async function runReal(cfg: FleetConfig, opts: DaemonOptions): Promise<Daemon> {
 
   /* notifications: every source's events go through the store */
   const notifier = new Notifier(cfg.notify, { log, ...opts.notifierDeps });
+  const push = new PushManager(histDir);
   /** true while emitting events derived from a transcript's first (backlog) ingest */
   let replaying = false;
   store.on('event', (e: FleetEvent) => {
     if (closed || replaying || !alertKindOf(e) || Date.now() - e.ts > NOTIFY_MAX_AGE_MS) return;
     const alert = notifier.handle(e, store.snapshot());
-    if (alert) store.addAlert(alert);
+    if (alert) {
+      store.addAlert(alert);
+      void push.send(alert, store.snapshot()).catch(() => log('push delivery failed'));
+    }
   });
 
   /* projects */
@@ -608,9 +613,15 @@ async function runReal(cfg: FleetConfig, opts: DaemonOptions): Promise<Daemon> {
     store: view,
     config: cfg,
     webDir: opts.webDir ?? defaultWebDir(),
+    push,
     digestDir: cfg.digestDir ?? path.join(homeDir(), '.overnight', 'archive'),
     onExternalAlert: (alert) => {
-      if (!closed) store.addAlert(alert);
+      if (!closed) {
+        store.addAlert(alert);
+        if (cfg.notify.kinds.includes(alert.kind)) {
+          void push.send(alert, store.snapshot()).catch(() => log('push delivery failed'));
+        }
+      }
     },
     ...(spendMod
       ? {

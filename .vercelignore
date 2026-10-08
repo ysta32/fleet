@@ -1,0 +1,10 @@
+.orch
+node_modules
+**/node_modules
+**/dist
+apps/site/out
+apps/site/.next
+docs/screenshots
+menubar/build
+*.log
+.env*

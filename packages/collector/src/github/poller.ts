@@ -103,8 +103,21 @@ function deployState(value: unknown): Deploy['state'] {
 
 function diff(previous: Snapshot, next: Snapshot, ts: number): FleetEvent[] {
   const events: FleetEvent[] = [];
-  const add = (kind: FleetEvent['kind'], severity: FleetEvent['severity'], label: string): void => {
-    events.push({ id: `${ts}-${++eventSequence}`, ts, kind, severity, projectId: '', label });
+  const add = (
+    kind: FleetEvent['kind'],
+    severity: FleetEvent['severity'],
+    label: string,
+    data?: FleetEvent['data'],
+  ): void => {
+    events.push({
+      id: `${ts}-${++eventSequence}`,
+      ts,
+      kind,
+      severity,
+      projectId: '',
+      label,
+      ...(data ? { data } : {}),
+    });
   };
   for (const pr of next.prs) {
     const old = previous.prs.find((item) => item.number === pr.number);
@@ -124,6 +137,7 @@ function diff(previous: Snapshot, next: Snapshot, ts: number): FleetEvent[] {
         deploy.state === 'error' ? 'failure' : 'deploy',
         deploy.state === 'error' ? 'error' : deploy.state === 'ready' ? 'success' : 'info',
         `Deployment ${deploy.state}`,
+        deploy.state === 'error' ? { source: 'deploy' } : undefined,
       );
     }
   }

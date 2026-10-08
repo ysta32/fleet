@@ -150,6 +150,28 @@ describe('spend notifications', () => {
     expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ [alert.id]: ['fleet'] });
   });
 
+  it('resolves port and token from FLEET_PORT and FLEET_CONFIG', async () => {
+    const configPath = join(dir, 'custom.json');
+    writeFileSync(configPath, JSON.stringify({ token: 'custom-token', port: 5000 }));
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(new Response('ok'));
+    await dispatchAlerts([alert], DEFAULT_CONFIG, path, {
+      fetch,
+      env: { FLEET_CONFIG: configPath },
+      platform: 'linux',
+    });
+    expect(fetch.mock.calls[0]?.[0]).toBe('http://127.0.0.1:5000/api/alerts');
+    expect((fetch.mock.calls[0]?.[1]?.headers as Record<string, string>).Authorization).toBe(
+      'Bearer custom-token',
+    );
+    const second = vi.fn<typeof globalThis.fetch>().mockResolvedValue(new Response('ok'));
+    await dispatchAlerts([{ ...alert, id: 'other' }], DEFAULT_CONFIG, path, {
+      fetch: second,
+      env: { FLEET_CONFIG: configPath, FLEET_PORT: '4900' },
+      platform: 'linux',
+    });
+    expect(second.mock.calls[0]?.[0]).toBe('http://127.0.0.1:4900/api/alerts');
+  });
+
   it('uses only the config token and truncates the Fleet payload', async () => {
     const fleetConfigPath = join(dir, 'config.json');
     writeFileSync(fleetConfigPath, JSON.stringify({ token: 'file-token', unrelated: 'private' }));
@@ -176,14 +198,14 @@ describe('spend notifications', () => {
     expect(readFileSync(path, 'utf8')).not.toContain('file-token');
   });
 
-  it('prefers the injected env token without reading the Fleet config', async () => {
+  it('prefers the injected env token over the Fleet config token', async () => {
     const readFile = vi.fn<typeof readFileSync>().mockImplementation(() => {
       throw Object.assign(new Error('missing'), { code: 'ENOENT' });
     });
     const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(new Response('ok'));
     await dispatchAlerts([alert], DEFAULT_CONFIG, path, { fetch, readFile, env, platform: 'linux' });
-    expect(readFile).toHaveBeenCalledTimes(1);
     expect(readFile).toHaveBeenCalledWith(path, 'utf8');
+    expect(fetch.mock.calls[0][0]).toBe('http://127.0.0.1:4747/api/alerts');
     expect(fetch.mock.calls[0][1]?.headers).toEqual({
       Authorization: `Bearer ${env.FLEET_TOKEN}`,
       'Content-Type': 'application/json',
