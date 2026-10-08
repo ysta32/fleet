@@ -211,6 +211,7 @@ describe('runDaemon (real sources, synthetic data)', () => {
       orchMs: 200,
       tailPollMs: 100,
       notifierDeps: { exec: () => undefined },
+      loadSpend: async () => undefined,
     });
   });
 
