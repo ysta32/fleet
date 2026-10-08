@@ -37,6 +37,11 @@ export interface FleetSceneProps {
   view: FleetView;
   selection: Selection;
   onSelect(sel: Selection): void;
+  /**
+   * Show the in-scene detail card for the selection (default true). The app shell turns it off
+   * while its own selection drawer is open, so one selection never has two detail surfaces.
+   */
+  detailCard?: boolean;
 }
 
 const MAX_BOTS = 240;
@@ -456,7 +461,7 @@ function buildStations(snap: FleetSnapshot, store: SceneStore): StationData[] {
   return out;
 }
 
-function SceneContents({ view, selection, onSelect }: FleetSceneProps) {
+function SceneContents({ view, selection, onSelect, detailCard = true }: FleetSceneProps) {
   const store = useSceneStore();
   const vt = useVizTheme();
   store.vt = vt;
@@ -534,7 +539,13 @@ function SceneContents({ view, selection, onSelect }: FleetSceneProps) {
         onSelect={selectAgent}
       />
       <Effects />
-      <Hud selection={selection} snapshot={snap} replayAt={replayAt} onClose={() => onSelect(null)} />
+      <Hud
+        selection={selection}
+        snapshot={snap}
+        replayAt={replayAt}
+        card={detailCard}
+        onClose={() => onSelect(null)}
+      />
       <CameraRig
         selection={selection}
         radius={radius}
@@ -621,7 +632,7 @@ function Legend({ vt }: { vt: VizTheme }) {
   );
 }
 
-export default function FleetScene({ view: viewProp, selection, onSelect }: FleetSceneProps) {
+export default function FleetScene({ view: viewProp, selection, onSelect, detailCard }: FleetSceneProps) {
   // dev/screenshot harness: `?vizdev=1` swaps in synthetic data (never real transcripts)
   const devView = useVizDevView();
   const view = devView ?? viewProp;
@@ -665,7 +676,7 @@ export default function FleetScene({ view: viewProp, selection, onSelect }: Flee
               flipflops={3}
               onFallback={() => setDpr(1)}
             >
-              <SceneContents view={view} selection={selection} onSelect={onSelect} />
+              <SceneContents view={view} selection={selection} onSelect={onSelect} detailCard={detailCard} />
               <EffectComposer multisampling={4} enableNormalPass={false}>
                 <Bloom
                   mipmapBlur

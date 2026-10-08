@@ -212,10 +212,13 @@ export function Hud({
   selection,
   snapshot,
   replayAt,
+  card = true,
   onClose,
 }: {
   selection: Selection;
   snapshot: FleetSnapshot | null;
+  /** false while another surface (the app's selection drawer) already shows this selection */
+  card?: boolean;
   /** replay playhead (epoch ms) when in replay mode; ages/elapsed are measured against it */
   replayAt: number | null;
   onClose(): void;
@@ -250,7 +253,7 @@ export function Hud({
     }
   });
 
-  if (!selection || !snapshot) return null;
+  if (!selection || !snapshot || !card) return null;
   return (
     <group ref={anchor}>
       {visible && (

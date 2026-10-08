@@ -15,7 +15,7 @@ import { HelpOverlay } from './shell/HelpOverlay';
 import { StatusBanner } from './shell/StatusBanner';
 import { TokenGate } from './shell/TokenGate';
 import { Onboarding } from './shell/Onboarding';
-import { SelectionCard } from './shell/SelectionCard';
+import { SelectionCard, selectionShown } from './shell/SelectionCard';
 import { MoreSheet } from './shell/MoreSheet';
 import { PhoneAlerts } from './push/PhoneAlerts';
 import { useConnection } from './shell/connection';
@@ -465,7 +465,12 @@ function Shell() {
         >
           <Suspense fallback={null}>
             <div className="scene-slot">
-              <FleetScene view={view} selection={selection} onSelect={setSelection} />
+              <FleetScene
+                view={view}
+                selection={selection}
+                onSelect={setSelection}
+                detailCard={!selectionShown(snapshot, selection)}
+              />
             </div>
           </Suspense>
         </ErrorBoundary>

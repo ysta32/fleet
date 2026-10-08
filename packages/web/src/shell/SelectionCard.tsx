@@ -66,6 +66,18 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 
 const TIMELINE_LIMIT = 12;
 
+/** True when the drawer can show this selection (its entity exists in the snapshot). */
+export function selectionShown(snapshot: FleetSnapshot | null, selection: Selection): boolean {
+  if (!snapshot || !selection) return false;
+  const list =
+    selection.kind === 'session'
+      ? snapshot.sessions
+      : selection.kind === 'agent'
+        ? snapshot.agents
+        : snapshot.projects;
+  return list.some((item) => item.id === selection.id);
+}
+
 /**
  * Events that belong to the selection, newest first. A session owns its own events plus those of
  * its agents (lead and subagents); an agent owns events tagged with its id; a project owns every
@@ -85,7 +97,13 @@ export function selectionEvents(
     owns = (event) =>
       event.sessionId === selection.id || (event.agentId !== undefined && agents.has(event.agentId));
   } else if (selection.kind === 'agent') {
-    owns = (event) => event.agentId === selection.id;
+    // a lead agent shares its session's id; session events without an agent tag are the lead's own
+    const lead = snapshot.agents.some(
+      (agent) => agent.id === selection.id && agent.sessionId === selection.id,
+    );
+    owns = (event) =>
+      event.agentId === selection.id ||
+      (lead && event.agentId === undefined && event.sessionId === selection.id);
   } else {
     owns = (event) => event.projectId === selection.id;
   }
