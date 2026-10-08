@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
@@ -135,7 +135,6 @@ const tmpProj = new THREE.Vector3();
 const TAG_MARGIN = 8;
 /** horizontal reach of the leader hairline before the text block (matches the svg + block offset) */
 const TAG_LEAD = 34;
-const NARROW_MQ = '(max-width: 560px)';
 /** first-load choreography: the harbour fades up station by station (cinematic, land easing) */
 export { INTRO_DELAY, INTRO_DUR, INTRO_STAGGER } from './layout';
 const ALERT_DUR = 0.64;
@@ -166,7 +165,23 @@ function StationImpl({
   const gateRef = useRef<THREE.Group>(null);
   const orbMat = useRef<THREE.MeshBasicMaterial>(null);
   const label = useRef<HTMLDivElement>(null);
-  const block = useRef<HTMLDivElement>(null);
+  const block = useRef<HTMLDivElement | null>(null);
+  const blockObs = useRef<ResizeObserver | null>(null);
+  // callback ref: drei mounts the Html children late, so observe the block whenever it appears
+  const setBlock = useCallback((el: HTMLDivElement | null) => {
+    blockObs.current?.disconnect();
+    blockObs.current = null;
+    block.current = el;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      const e = entries[entries.length - 1];
+      if (e) blockW.current = e.borderBoxSize?.[0]?.inlineSize ?? e.contentRect.width;
+    });
+    ro.observe(el);
+    blockObs.current = ro;
+  }, []);
+  const compactRef = useRef(compact);
+  compactRef.current = compact;
   const tagAnchor = useRef<THREE.Group>(null);
   const blockW = useRef(0);
   const tagFlip = useRef(false);
@@ -242,14 +257,11 @@ function StationImpl({
     const lab = label.current;
     const blk = block.current;
     const anchor = tagAnchor.current;
-    if (lab && blk && anchor && blockW.current === 0 && lab.style.display !== 'none') {
-      blockW.current = blk.offsetWidth;
-    }
     if (lab && blk && anchor && blockW.current > 0) {
       anchor.getWorldPosition(tmpProj).project(camera);
       const ax = (tmpProj.x * 0.5 + 0.5) * size.width;
       const w = blockW.current;
-      const narrow = typeof window !== 'undefined' && window.matchMedia(NARROW_MQ).matches;
+      const narrow = compactRef.current;
       let flip = false;
       let l: number;
       if (narrow) l = ax - w / 2;
@@ -338,11 +350,6 @@ function StationImpl({
         ? 'working'
         : 'idle';
   const tagShown = d.labelled || needs || selected;
-  // the tag's width drives edge clamping; invalidate it whenever its text or visibility changes
-  // (the frame loop re-measures: drei mounts the Html children after this effect would run)
-  useLayoutEffect(() => {
-    blockW.current = 0;
-  }, [d.name, d.working, d.agents, status, tagShown]);
   // idle stations recede: their instruments draw at a lower level so live work leads the eye
   const awake = (d.orch && d.phase !== 'idle') || d.working > 0 || needs;
   const lineOp = (vt.dark ? 1 : 2.3) * (awake ? 1 : 0.55);
@@ -511,7 +518,7 @@ function StationImpl({
               />
             </svg>
             <div
-              ref={block}
+              ref={setBlock}
               className="fl-viz-block"
               style={{
                 position: 'absolute',
