@@ -30,8 +30,8 @@ export function PushToggle() {
     setBusy(true);
     setError(null);
     const result = on ? await disablePush() : await enablePush();
-    if (result.ok) setOn(!on);
-    else setError(result.error);
+    setOn(result.subscribed);
+    if (!result.ok) setError(result.error);
     setBusy(false);
   };
 

@@ -81,7 +81,9 @@ function safePath(raw) {
   if (typeof raw !== 'string' || !raw.startsWith('/') || raw.startsWith('//') || raw.includes('\\')) return '/';
   try {
     const url = new URL(raw, self.location.origin);
-    return url.origin === self.location.origin ? url.pathname + url.search + url.hash : '/';
+    if (url.origin !== self.location.origin) return '/';
+    const out = url.pathname + url.search + url.hash;
+    return out.startsWith('//') || out.includes('\\') ? '/' : out;
   } catch (_) {
     return '/';
   }
@@ -90,7 +92,8 @@ function safePath(raw) {
 self.addEventListener('push', (event) => {
   let data = {};
   try {
-    data = event.data ? event.data.json() : {};
+    const parsed = event.data ? event.data.json() : {};
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) data = parsed;
   } catch (_) {
     data = {};
   }
@@ -98,7 +101,7 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     self.registration.showNotification(title, {
       body: typeof data.body === 'string' ? data.body : '',
-      tag: typeof data.tag === 'string' ? data.tag : undefined,
+      tag: typeof data.tag === 'string' && data.tag ? data.tag : 'fleet',
       icon: '/icons/icon-192.png',
       badge: '/icons/icon-192.png',
       data: { url: safePath(data.url) },

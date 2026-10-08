@@ -24,7 +24,8 @@ export function safeNotificationPath(raw: unknown, origin = 'https://fleet.inval
   try {
     const url = new URL(raw, origin);
     if (url.origin !== origin) return '/';
-    return url.pathname + url.search + url.hash;
+    const out = url.pathname + url.search + url.hash;
+    return out.startsWith('//') || out.includes('\\') ? '/' : out;
   } catch {
     return '/';
   }
