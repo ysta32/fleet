@@ -25,7 +25,6 @@ export default function Features() {
       />
       <div className="page-body">
         <Feature
-          n="01"
           label="Live fleet"
           title="A harbour you can read from across the room."
           body={[
@@ -49,7 +48,6 @@ export default function Features() {
           </Link>
         </Feature>
         <Feature
-          n="02"
           label="Needs you"
           title="The agent that is waiting goes to the top."
           body={[
@@ -63,7 +61,6 @@ export default function Features() {
           </div>
         </Feature>
         <Feature
-          n="03"
           label="Sessions and cost"
           title="Tokens and dollars, per session, as they happen."
           body={[
@@ -77,7 +74,6 @@ export default function Features() {
           </div>
         </Feature>
         <Feature
-          n="04"
           label="Phone and alerts"
           title="Leave the desk without losing the thread."
           body={[
@@ -89,7 +85,6 @@ export default function Features() {
           <PhonePreview />
         </Feature>
         <Feature
-          n="05"
           label="GitHub and replay"
           title="Pull requests, CI and the last few hours, in place."
           body={[
@@ -121,29 +116,26 @@ export default function Features() {
 }
 
 function Feature({
-  n,
   label,
   title,
   body,
   children,
   flip = false,
 }: {
-  n: string;
   label: string;
   title: string;
   body: string[];
   children: React.ReactNode;
   flip?: boolean;
 }) {
+  const id = `f-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
   return (
-    <section className="section" aria-labelledby={`f-${n}`} style={{ paddingBlock: 'var(--fl-space-9)' }}>
+    <section className="section" aria-labelledby={id}>
       <div className={flip ? 'wrap split split-rev' : 'wrap split'}>
         <div className="sticky-col" data-reveal>
-          <span className="label">
-            {n} · {label}
-          </span>
+          <span className="label sec-n">{label}</span>
           <h2
-            id={`f-${n}`}
+            id={id}
             className="h2"
             style={{ marginTop: 'var(--fl-space-4)', fontSize: 'var(--fl-text-2xl)' }}
           >

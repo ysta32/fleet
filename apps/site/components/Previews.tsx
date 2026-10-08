@@ -159,26 +159,49 @@ export function TerminalWall() {
   );
 }
 
+/** A phone lock screen: the clock, then Fleet's ntfy alerts stacked newest first, from the demo inbox. */
 export function PhonePreview() {
-  const { inbox } = demoPreview();
-  const top = inbox[0];
+  const { inbox, snapshot } = demoPreview();
+  const at = new Date(snapshot.generatedAt);
+  const date = at.toLocaleDateString('en-GB', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    timeZone: 'UTC',
+  });
+  const time = at.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
+  // The inbox is sorted longest wait first; a lock screen shows the newest alert on top.
+  const stack = [...inbox].sort((a, b) => a.minutes - b.minutes).slice(0, 3);
   return (
-    <div className="phone" aria-label="Phone notification preview, synthetic data" role="img">
+    <div className="phone" aria-label="Phone lock screen with Fleet alerts, synthetic data" role="img">
       <div className="phone-screen">
-        <span className="label" style={{ textAlign: 'center' }}>
-          22:54
-        </span>
-        <div className="notif">
-          <span className="label">ntfy · Fleet · now</span>
-          <strong>{top ? `${top.title} · ${top.project}` : 'Nothing needs you'}</strong>
-          <span style={{ color: 'var(--fl-fg-muted)' }}>
-            {top ? `${top.detail}. Idle ${top.minutes}m.` : ''}
-          </span>
+        <span className="phone-notch" aria-hidden="true" />
+        <div className="phone-clock">
+          <span className="phone-date">{date}</span>
+          <span className="phone-time">{time}</span>
         </div>
-        <div className="notif" style={{ opacity: 0.6 }}>
-          <span className="label">ntfy · Fleet · 12m ago</span>
-          <span>Army finished · aurora-api</span>
-        </div>
+        <ol className="phone-stack">
+          {stack.length === 0 ? (
+            <li className="notif">
+              <span className="notif-app">Fleet</span>
+              <strong>Nothing needs you</strong>
+            </li>
+          ) : (
+            stack.map((item, i) => (
+              <li className="notif" key={item.id} data-depth={i}>
+                <span className="notif-app">
+                  <span className="notif-icon" aria-hidden="true" />
+                  ntfy · Fleet
+                  <span className="notif-when">{item.minutes}m ago</span>
+                </span>
+                <strong>
+                  {item.title} · {item.project}
+                </strong>
+                <span className="notif-body">{item.detail}</span>
+              </li>
+            ))
+          )}
+        </ol>
       </div>
     </div>
   );
