@@ -11,7 +11,8 @@ shipped while you slept, including what your AI agents did.
 
 All screenshots use the synthetic `acme-dev` demo data (`src/demo/scenarios.ts`); no real repositories appear.
 Visual regression: `npm run build && npm run visual` compares 168 shots (7 scenarios × page, archive and email ×
-light and dark × 360/768/1280/1920) against `test/visual/baseline/`. See [DESIGN.md](DESIGN.md).
+light and dark × 360/768/1280/1920) against a locally generated baseline in `test/visual/baseline/` (`npm run visual:update`; not committed). See
+[DESIGN.md](DESIGN.md).
 
 ## What it shows
 

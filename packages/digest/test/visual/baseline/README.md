@@ -10,7 +10,9 @@ references fail comparison if dimensions differ or more than 0.5% of pixels diff
 
 After reviewing the screenshots, run `npm run visual:update` to create or replace
 the reference PNGs in this directory. Add `-- --only=typical` to update just that
-scenario. The committed baseline was approved after design rounds 4-8 (see DESIGN.md).
+scenario. Reference PNGs are generated locally and ignored by Git (they are ~40MB because of the
+grain texture), so a fresh clone or CI reports `NO BASELINE` and exits 0. Generate them from a known-good
+commit before comparing.
 
 The runner requires Chrome or Chromium; set `CHROME_PATH` if it is not found
 automatically. Generated HTML, screenshots, diffs, and the contact sheet are in

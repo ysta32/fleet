@@ -15,7 +15,8 @@ First release inside the Fleet monorepo (moved from the archived `ysta32/overnig
   ntfy delivery.
 - Digest JSON contract `overnight.digest/v1` (`SCHEMA.md`) and `renderDigestFragment` / `DIGEST_CSS` for the Fleet site.
 - Example GitHub Actions workflow for a **private** repo (`examples/overnight-digest.yml`); it refuses public repos.
-- Visual QA harness (`npm run visual`) with 7 synthetic scenarios and a committed baseline.
+- Visual QA harness (`npm run visual`) with 7 synthetic scenarios; baselines are generated locally
+  (`npm run visual:update`) and are not committed.
 
 ### Design
 

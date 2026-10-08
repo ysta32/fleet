@@ -133,6 +133,6 @@ switches to ink on white.
   narrow lines, so it is now wider.
 - **2026-10-07, round 8 (verification):** all 168 shots re-checked. Index rows read in full at 768, rough-night
   hierarchy (red rule, red needs-you rule, +9 more) holds at 1280, and the email light and dark both use Halyard
-  values (contrast ≥ 4.5:1 for text, drift-tested). The baseline was committed from this round. Known limitation:
+  values (contrast ≥ 4.5:1 for text, drift-tested). The baseline was generated from this round (locally; PNGs are not committed). Known limitation:
   the harness has no stored history, so page shots show "1 of 14 nights". Real archives show the full trend (see
   the archive shot).
