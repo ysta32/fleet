@@ -88,6 +88,8 @@ function Shell() {
   const firstRun = !!snapshot && snapshot.sessions.length === 0 && snapshot.projects.length === 0;
 
   const go = useCallback((next: DashboardTab) => {
+    // navigating anywhere closes the selection drawer so the new section is never hidden under it
+    setSelection(null);
     setTab(next);
     setSheet(true);
     inspector.current?.scrollTo({ top: 0 });

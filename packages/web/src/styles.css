@@ -1001,6 +1001,14 @@ time {
     display: inline-grid;
     margin-right: calc(-1 * var(--fl-space-3));
   }
+  /* close controls on touch: at least a 44px target */
+  .palette-close,
+  .dialog-head .icon-button,
+  .more-head .icon-button,
+  .selection-card header .icon-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 /* phone More sheet */
 .overlay-sheet {

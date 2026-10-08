@@ -1,8 +1,59 @@
+import { useId, useRef } from 'react';
 import type { ReactNode } from 'react';
 import type { FleetEvent, FleetSnapshot } from '@fleet/shared';
 import type { Selection } from '../data/contract';
 import { clockTime, formatCost, formatCount, relativeTime, totalTokens } from '../dashboard/model';
 import { Icon } from './Icon';
+import { useDrawer, useMediaQuery } from './modal';
+
+/** The drawer shares the inspector's grid cell, so the inspector is what it covers. */
+const coversInspector = (element: Element) => element.classList.contains('inspector');
+
+/**
+ * Dialog shell for the drawer. Stays mounted while the selection changes, so focus moves in once
+ * on open and returns to the invoking element on close. Modal (focus trapped, everything else
+ * inert) on phones where it is a sheet; elsewhere only the covered inspector is inert.
+ */
+function Drawer({
+  kind,
+  title,
+  onClose,
+  children,
+}: {
+  kind: string;
+  title: string;
+  onClose(): void;
+  children: ReactNode;
+}) {
+  const id = useId();
+  const node = useRef<HTMLElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const modal = useMediaQuery('(max-width: 767px)');
+  useDrawer(node, heading, modal, coversInspector);
+  return (
+    <section
+      ref={node}
+      className="selection-card drawer"
+      role="dialog"
+      aria-modal={modal ? true : undefined}
+      aria-labelledby={`${id}-title`}
+      aria-describedby={`${id}-kind`}
+    >
+      <header>
+        <p id={`${id}-kind`} className="micro">
+          {kind}
+        </p>
+        <button type="button" className="icon-button" aria-label="Close details (Esc)" onClick={onClose}>
+          <Icon name="close" />
+        </button>
+      </header>
+      <h2 ref={heading} id={`${id}-title`} className="selection-title" tabIndex={-1}>
+        {title}
+      </h2>
+      {children}
+    </section>
+  );
+}
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -120,14 +171,7 @@ export function SelectionCard({
   }
   const timeline = selectionEvents(snapshot, selection, events);
   return (
-    <section className="selection-card drawer" aria-label={`Selected ${kind.toLowerCase()}`}>
-      <header>
-        <p className="micro">{kind}</p>
-        <button type="button" className="icon-button" aria-label="Clear selection (Esc)" onClick={onClose}>
-          <Icon name="close" />
-        </button>
-      </header>
-      <h2 className="selection-title">{title}</h2>
+    <Drawer kind={kind} title={title} onClose={onClose}>
       <div className="drawer-body">
         <dl className="kv-list">
           {rows.map(([label, value]) => (
@@ -161,6 +205,6 @@ export function SelectionCard({
           </p>
         )}
       </div>
-    </section>
+    </Drawer>
   );
 }
