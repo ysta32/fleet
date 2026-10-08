@@ -929,6 +929,14 @@ time {
   text-align: right;
   padding-right: 1ch;
 }
+/* a same-second run reads as one block: its time shows once, on the first row, with no rules inside */
+.drawer-event-joined {
+  border-bottom-color: transparent;
+  padding-bottom: var(--fl-space-1);
+}
+.drawer-event-follows {
+  padding-top: var(--fl-space-1);
+}
 .drawer-group-head {
   margin: var(--fl-space-4) 0 var(--fl-space-1);
   color: var(--fl-fg-muted);
@@ -1116,6 +1124,10 @@ time {
 }
 .dialog.help {
   max-height: min(84vh, 820px);
+}
+.help-body .help-push-first {
+  border-top: 0;
+  border-bottom: var(--fl-hairline) solid var(--fl-border);
 }
 .dialog-sm {
   width: min(440px, 100%);

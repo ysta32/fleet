@@ -1,18 +1,26 @@
 {
   "dark-wide": {
     "x": 0.5,
-    "y": 0.2923
+    "y": 0.4578,
+    "name": "helix-db",
+    "status": "needs you · 1"
   },
   "dark-m": {
     "x": 0.5,
-    "y": 0.2615
+    "y": 0.3696,
+    "name": "helix-db",
+    "status": "needs you · 1"
   },
   "light-wide": {
     "x": 0.5,
-    "y": 0.2923
+    "y": 0.4578,
+    "name": "helix-db",
+    "status": "needs you · 1"
   },
   "light-m": {
     "x": 0.5,
-    "y": 0.2615
+    "y": 0.3696,
+    "name": "helix-db",
+    "status": "needs you · 1"
   }
 }

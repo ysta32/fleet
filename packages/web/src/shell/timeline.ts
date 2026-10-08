@@ -58,3 +58,41 @@ export function eventDelta(at: number, previous: number): string {
   if (minutes < 60) return `+${minutes}m`;
   return `+${Math.floor(minutes / 60)}h`;
 }
+
+export interface TimelineRow {
+  event: FleetEvent;
+  /** what the time column shows: the clock for a group's first event, else the gap ("+2s") */
+  time: string;
+  /** events in this row's same-second run, counting itself (1 when it stands alone); 0 on followers */
+  run: number;
+  /** in the same clock second as its run's first row, so it joins that run with no time of its own */
+  follows: boolean;
+}
+
+/**
+ * One task group's rows, oldest first. Several events often land in the same second (an agent moves,
+ * then calls a tool); rather than a column of "+0s", a run like that shows its time once, on its first
+ * row, and the rest of the run follows it with no time of their own.
+ */
+export function timelineRows(events: readonly FleetEvent[]): TimelineRow[] {
+  const rows: TimelineRow[] = [];
+  let head: TimelineRow | undefined;
+  const second = (at: number) => Math.floor(at / 1000);
+  events.forEach((event, index) => {
+    const previous = index > 0 ? events[index - 1] : undefined;
+    // the same clock second as the run's first event: gaps alone would chain 0, 0.9, 1.8, 2.7s into one
+    if (head && second(event.ts) === second(head.event.ts)) {
+      head.run++;
+      rows.push({ event, time: '', run: 0, follows: true });
+      return;
+    }
+    head = {
+      event,
+      time: previous ? eventDelta(event.ts, previous.ts) : eventClock(event.ts),
+      run: 1,
+      follows: false,
+    };
+    rows.push(head);
+  });
+  return rows;
+}

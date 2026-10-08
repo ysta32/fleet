@@ -589,8 +589,34 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
   // Cosmetic choices (model mix, tool targets, step pacing) draw from their own stream by seed.
   const vary = mulberry32((seed ^ 0x5bd1e995) >>> 0);
   const pick = <T>(items: readonly T[]): T => items[Math.floor(vary() * items.length)]!;
+  // Sub-step timing has its own stream too, so spreading event times leaves every other choice unchanged.
+  const spread = mulberry32((seed ^ 0x2c1b3c6d) >>> 0);
   let now = origin;
   let nextStep = now + STEP_MS;
+  /**
+   * Time of the latest event. Inside a step, events happen during the elapsed window (now - STEP_MS,
+   * now] at increasing times, not all at its end; outside steps (settling at load) they happen at now.
+   * Earlier steps' events are all at or before now - STEP_MS, so the stream stays in time order, never
+   * passes the clock, and one army's turns (2.4s apart) read +1s to +3s instead of a flat +2s.
+   */
+  let cursor = now;
+  let stepping = false;
+  const stamp = (): number => {
+    cursor = stepping ? Math.min(now, cursor + 1 + Math.floor(spread() * 40)) : now;
+    return cursor;
+  };
+  /** When alerts and ledger entries raised now happened: with the event that raised them. */
+  const eventTime = (): number => (stepping ? cursor : now);
+  const beginStep = (at: number): void => {
+    now = at;
+    stepping = true;
+    // a step's first event lands anywhere in the window; the rest follow within tens of ms
+    cursor = now - STEP_MS + Math.floor(spread() * (STEP_MS - 120));
+  };
+  const endStep = (): void => {
+    stepping = false;
+    cursor = now;
+  };
   let sequence = 0;
   let alertSeq = 0;
   let turn = 0;
@@ -793,10 +819,11 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
         label: string,
         severity: FleetEvent['severity'],
         data: FleetEvent['data'],
-      ) =>
+      ) => {
+        const ts = stamp();
         events.push({
-          id: `${now}-${sequence++}`,
-          ts: now,
+          id: `${ts}-${sequence++}`,
+          ts,
           kind,
           projectId: project.id,
           ...(session ? { sessionId: session.id } : {}),
@@ -804,10 +831,11 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
           label,
           data,
         });
+      };
       const record = (
         kind: LedgerEntry['kind'],
         extra: Omit<LedgerEntry, 'at' | 'projectId' | 'kind'> = {},
-      ) => ledger.push({ at: now, projectId: project.id, kind, ...extra });
+      ) => ledger.push({ at: eventTime(), projectId: project.id, kind, ...extra });
       if (job.phase === 'ci' && now >= job.ciAt) {
         pr.ci = job.fail ? 'failure' : 'success';
         pr.updatedAt = now;
@@ -826,7 +854,7 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
             projectId: project.id,
             title: 'ci.failed',
             body: `Checks failed on #${pr.number}: ${pr.title}`,
-            at: now,
+            at: eventTime(),
           });
           state.alerts = state.alerts.slice(-12);
         }
@@ -897,9 +925,10 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
       to?: AgentLocation,
     ): void {
       agent.lastActivity = now;
+      const ts = stamp();
       events.push({
-        id: `${now}-${sequence++}`,
-        ts: now,
+        id: `${ts}-${sequence++}`,
+        ts,
         kind,
         projectId: project.id,
         sessionId: session.id,
@@ -925,7 +954,7 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
         projectId: project.id,
         title: kind,
         body,
-        at: now,
+        at: eventTime(),
         taskId: task.id,
         sessionId: session.id,
       });
@@ -935,7 +964,7 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
       kind: LedgerEntry['kind'],
       extra: Omit<LedgerEntry, 'at' | 'projectId' | 'kind'> = {},
     ): void {
-      ledger.push({ at: now, projectId: project.id, kind, ...extra });
+      ledger.push({ at: eventTime(), projectId: project.id, kind, ...extra });
     }
     function beginWait(durationMs: number): void {
       army.waiting = true;
@@ -1276,9 +1305,10 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
   {
     const events: FleetEvent[] = [];
     while (nextStep <= createdAt) {
-      now = nextStep;
+      beginStep(nextStep);
       business(events);
       advance(armies[turn++ % armies.length]!, events);
+      endStep();
       nextStep += STEP_MS;
       if ((now - origin) % WARMUP_FRAME_MS === 0) {
         rememberEvents(events, false);
@@ -1301,9 +1331,10 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
     const events: FleetEvent[] = [];
     const catchUpEnd = Math.min(end, now + MAX_CATCH_UP_MS);
     while (nextStep <= catchUpEnd) {
-      now = nextStep;
+      beginStep(nextStep);
       business(events);
       advance(armies[turn++ % armies.length]!, events);
+      endStep();
       nextStep += STEP_MS;
     }
     if (nextStep <= end) nextStep += (Math.floor((end - nextStep) / STEP_MS) + 1) * STEP_MS;

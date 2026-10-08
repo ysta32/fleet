@@ -5,9 +5,10 @@
 //                                                   station labels keep their real size on a 375px screen and
 //                                                   stay sharp when the hero frames the waiting station
 //   poster/fleet-close-1280.webp                    a 16:10 dark still for the product panels
-//   lib/poster-anchors.json                         where the waiting station's signal sits in each hero
-//                                                   poster (fractions of the frame), so the page can frame it
-//                                                   and raise its beacon there before any script runs
+//   lib/poster-anchors.json                         where the waiting station's vessel sits in each hero
+//                                                   poster (fractions of the frame) and what its tag reads, so
+//                                                   the page seats its beacon and phone label there before any
+//                                                   script runs
 // Every still is the site's one world (lib/world.generated.json, written by scripts/prebuild.mjs).
 //   og/<slug>.png                                   1200x630 social cards, one per pageMeta() call in app/
 //   icons/*.png, manifest.webmanifest               favicon + PWA set rasterised from packages/ui/brand
@@ -101,21 +102,38 @@ async function newPage(browser, { width, height, scheme, scale = 1 }, pages) {
 
 const world = JSON.parse(await readFile(path.join(site, 'lib/world.generated.json'), 'utf8'));
 
-/** The waiting station's tag anchor (its signal pennant) as fractions of the viewport, or null. */
+/**
+ * The waiting station as the live beacon reads it (components/FleetStage.tsx trackSignal): its vessel as fractions
+ * of the viewport (the island's host data-vessel-x/y; the canvas fills the viewport here) and its tag's two lines.
+ * Null when no tag is marked.
+ */
 const NEEDS_ANCHOR = () => {
   // the station the island's camera frames (island/entry.tsx markSignalTag), as for the live beacon
   const tag = [...document.querySelectorAll('.fl-viz-tag[data-signal="1"]')].find(
     (el) => el.style.visibility !== 'hidden' && el.style.display !== 'none',
   );
-  if (!tag) return null;
-  const r = tag.getBoundingClientRect();
-  return { x: r.left / innerWidth, y: r.bottom / innerHeight };
+  const host = document.getElementById('h');
+  const x = Number(host?.dataset.vesselX);
+  const y = Number(host?.dataset.vesselY);
+  if (!tag || !host?.dataset.vesselX || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+  const name = tag.querySelector('.fl-viz-name')?.textContent?.trim() ?? '';
+  const status = tag.querySelector('.fl-viz-sub')?.firstChild?.textContent?.trim() ?? '';
+  return { x, y, name, status };
 };
 
-async function renderScene(browser, { theme, width, height, settleMs, scale = 1, frame = false }) {
+/**
+ * `ownTag`: the still is for the phone hero, which draws the waiting station's label itself (FleetStage
+ * .beacon-tag, beside the vessel), so the scene's own tag for that station is left out of the picture, as the
+ * stylesheet hides it in the live phone scene.
+ */
+async function renderScene(
+  browser,
+  { theme, width, height, settleMs, scale = 1, frame = false, ownTag = false },
+) {
+  const hide = ownTag ? `.fl-viz-tag[data-signal='1']{opacity:0 !important}` : '';
   const html = `<!doctype html><html data-theme="${theme}"><head><meta charset="utf-8">
 <link rel="stylesheet" href="${FONTS_CSS}">
-<style>html,body{margin:0;height:100%;overflow:hidden}#h{position:fixed;inset:0}</style></head>
+<style>html,body{margin:0;height:100%;overflow:hidden}#h{position:fixed;inset:0}${hide}</style></head>
 <body><div id="h"></div><script type="module">
 import { mount } from '/island/fleet-scene.js';
 await document.fonts.ready;
@@ -146,8 +164,9 @@ async function posters(browser) {
   const anchors = {};
   const need = (a, what) => {
     if (!a) throw new Error(`${what}: no station needs you in the world at this moment (lib/world.mjs)`);
+    if (!a.name || !a.status) throw new Error(`${what}: the waiting station's tag has no name or status`);
     const r = (n) => Math.round(n * 10_000) / 10_000;
-    return { x: r(a.x), y: r(a.y) };
+    return { x: r(a.x), y: r(a.y), name: a.name, status: a.status };
   };
   for (const theme of ['dark', 'light']) {
     // the hero posters use the hero's camera framing (island `frame`), so the live scene takes over in place
@@ -172,6 +191,7 @@ async function posters(browser) {
       scale: 3,
       settleMs: 7000,
       frame: true,
+      ownTag: true,
     });
     anchors[`${theme}-m`] = need(phone.anchor, `phone poster ${theme}`);
     await sharp(phone.png)
@@ -179,6 +199,10 @@ async function posters(browser) {
       .toFile(path.join(pub, `poster/fleet-${theme}-m.webp`));
     console.log(`[assets] poster ${theme}`);
   }
+  // FleetStage prints one label for every poster: the stills must all show the same moment of the world.
+  const tags = new Set(Object.values(anchors).map((a) => `${a.name}\n${a.status}`));
+  if (tags.size !== 1)
+    throw new Error(`posters disagree on the waiting station's tag: ${[...tags].join(' | ')}`);
   await writeFile(path.join(site, 'lib/poster-anchors.json'), JSON.stringify(anchors, null, 2) + '\n');
   const close = await renderScene(browser, { theme: 'dark', width: 1280, height: 800, settleMs: 7000 });
   await sharp(close.png)

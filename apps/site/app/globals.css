@@ -2409,7 +2409,7 @@ main {
   position: absolute;
   inset: 0;
 }
-/* Where the waiting station's signal sits, in stage pixels. Poster state: the anchor recorded by
+/* Where the waiting station's vessel sits, in stage pixels. Poster state: the anchor recorded by
    scripts/assets.mjs (fractions of the still) mapped through object-fit: cover. Live: measured each frame.
    The camera itself frames the station (island `frame`), so the stage is never zoomed or panned in CSS: a CSS
    scale would also skew the scene's own label projection, which measures the scaled box. */
@@ -2467,7 +2467,7 @@ main {
 .stage[data-signal='none'] .beacon {
   opacity: 0;
 }
-/* A light column from the signal to the sky, a soft halo, and rings on the harbour plane. The column stops
+/* A light column from the vessel to the sky, a soft halo, and rings seated under the hull. The column stops
    --beam-clear short of the stage top, so it never runs into the header rule or the scene's corner tag. */
 .beacon-beam {
   --beam-clear: 80px;
@@ -2500,11 +2500,11 @@ main {
     transparent
   );
 }
-/* Rings sit just below the signal anchor, clear of the tag text that rises up and out from it. */
+/* Rings sit on the vessel: centred just under the hull, flat like the harbour plane it rides on. */
 .beacon-ring {
   position: absolute;
   left: -60px;
-  top: -6px;
+  top: 0;
   width: 120px;
   height: 40px;
   border: 1.5px solid var(--fl-accent);
@@ -2514,22 +2514,49 @@ main {
 .beacon-ring-2 {
   opacity: 0;
 }
+/* The phone label (FleetStage): beside the vessel, on the left, right-aligned against the ring. Wider screens
+   keep the scene's own tag, which has room to the right of the mast. */
+.beacon-tag {
+  display: none;
+}
 @media (max-width: 720px) {
   .beacon-beam {
     --beam-clear: 40px;
   }
   .beacon-ring {
     left: -44px;
-    top: -4px;
+    top: 0;
     width: 88px;
     height: 30px;
   }
-}
-/* Phones set the waiting tag centred under its anchor (FleetScene): no ring there would clear the text, and the
-   scene already draws the station's own signal floor, so the beam and its core carry the signal alone. */
-@media (max-width: 560px) {
-  .beacon-ring {
-    display: none;
+  .stage[data-signal] .fl-viz-tag[data-signal='1'] {
+    opacity: 0 !important;
+  }
+  .beacon-tag {
+    --tag-gap: 52px;
+    position: absolute;
+    right: var(--tag-gap);
+    top: 0;
+    display: grid;
+    justify-items: end;
+    gap: 2px;
+    max-width: max(0px, calc(var(--ax) - var(--tag-gap) - var(--fl-space-4)));
+    padding: var(--fl-space-2) var(--fl-space-3);
+    transform: translateY(-50%);
+    border-radius: var(--fl-radius-md);
+    background: color-mix(in srgb, var(--fl-bg) 82%, transparent);
+    box-shadow: 0 0 18px 10px color-mix(in srgb, var(--fl-bg) 82%, transparent);
+    font-family: var(--fl-font-mono);
+    font-size: 14px;
+    line-height: 1.25;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    text-align: right;
+    color: var(--fl-accent);
+    white-space: nowrap;
+  }
+  .beacon-tag-name {
+    font-weight: 600;
   }
 }
 @media (prefers-reduced-motion: no-preference) {

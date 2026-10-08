@@ -11,6 +11,7 @@ import {
   nowWorking,
   relativeTime,
   sortSessions,
+  spendNote,
   stationNeeds,
   taskKey,
   totalTokens,
@@ -570,5 +571,45 @@ describe('incidents', () => {
     expect(incidents(data).map((incident) => [incident.id, incident.title])).toEqual([
       ['alpha:army', 'Army blocked'],
     ]);
+  });
+});
+
+describe('spendNote', () => {
+  const spend = (todayUsd: number, totalUsd: number, todaySessions: number, sessions: number) => ({
+    todayUsd,
+    totalUsd,
+    earlierUsd: Math.max(0, totalUsd - todayUsd),
+    todaySessions,
+    sessions,
+  });
+  it('adds the session count and the total with older sessions, not today again', () => {
+    const note = spendNote(spend(6.56, 38.65, 21, 29));
+    expect(note.text).toBe('21 sessions since midnight · $38.65 including older sessions');
+    expect(note.text).not.toContain('$6.56');
+    expect(note.title).toBe(
+      'Today counts sessions started since local midnight: $6.56. ' +
+        'Sessions started before it add $32.09, for $38.65 in all.',
+    );
+  });
+  it('splits in shown cents, so today plus earlier always reads as the total', () => {
+    // 6.555 + 32.094 = 38.649: rounded separately the parts would read $6.56 + $32.09 vs $38.65
+    const note = spendNote(spend(6.555, 38.649, 1, 3));
+    expect(note.text).toBe('1 session since midnight · $38.65 including older sessions');
+    expect(note.title).toContain('$6.56. Sessions started before it add $32.09, for $38.65');
+    const odd = spendNote(spend(0.125, 10.13, 2, 4));
+    expect(odd.title).toContain('$0.13. Sessions started before it add $10.00, for $10.13');
+  });
+  it('rounds the split the way the shown figures round, not with Math.round', () => {
+    // formatCost shows 1.005 as $1.01 (Math.round(1.005 * 100) is 100), so earlier must be $0.99
+    expect(formatCost(1.005)).toBe('$1.01');
+    const note = spendNote(spend(1.005, 2, 1, 2));
+    expect(note.title).toBe(
+      'Today counts sessions started since local midnight: $1.01. ' +
+        'Sessions started before it add $0.99, for $2.00 in all.',
+    );
+  });
+  it('counts every session when all of them started today', () => {
+    expect(spendNote(spend(4, 4, 3, 3))).toEqual({ text: 'Across 3 sessions' });
+    expect(spendNote(spend(0, 0, 0, 1))).toEqual({ text: 'Across 1 session' });
   });
 });
