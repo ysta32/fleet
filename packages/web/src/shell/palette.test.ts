@@ -49,3 +49,40 @@ describe('pushRecent', () => {
     expect(pushRecent(['a', 'b', 'c', 'd', 'e'], 'f')).toEqual(['f', 'a', 'b', 'c', 'd']);
   });
 });
+
+describe('rankPalette phone recents', () => {
+  const active = (id: string, at: number): PaletteItem => ({ ...item(id, 'Sessions'), activeAt: at });
+  const fleet: PaletteItem[] = [
+    item('tab:overview', 'Commands', 'Go to overview'),
+    active('session:old', 100),
+    active('session:new', 300),
+    active('session:mid', 200),
+    item('project:a', 'Projects', 'aurora-api'),
+  ];
+  it('leads with Recent, topped up by the freshest sessions, before any command', () => {
+    const ranked = rankPalette(fleet, '', 40, { touch: true, recent: ['project:a'] });
+    expect(ranked.map((entry) => `${entry.group}:${entry.id}`)).toEqual([
+      'Recent:project:a',
+      'Recent:session:new',
+      'Recent:session:mid',
+      'Recent:session:old',
+      'Commands:tab:overview',
+    ]);
+  });
+  it('keeps pointer devices on their stored recents only', () => {
+    const ranked = rankPalette(fleet, '', 40, { recent: ['project:a'] });
+    expect(ranked[0]).toMatchObject({ id: 'project:a', group: 'Recent' });
+    expect(ranked[1].group).toBe('Commands');
+  });
+  it('caps the Recent group at RECENT_LIMIT', () => {
+    const many = Array.from({ length: 9 }, (_, i) => active(`session:${i}`, i));
+    const ranked = rankPalette(many, '', 40, { touch: true });
+    expect(ranked.filter((entry) => entry.group === 'Recent').map((entry) => entry.id)).toEqual([
+      'session:8',
+      'session:7',
+      'session:6',
+      'session:5',
+      'session:4',
+    ]);
+  });
+});

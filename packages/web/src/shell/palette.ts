@@ -7,6 +7,8 @@ export interface PaletteItem {
   meta?: string;
   icon: IconName;
   shortcut?: string[];
+  /** last activity (ms) for entities; on phones the freshest sessions fill Recent when little was run */
+  activeAt?: number;
   run(): void;
 }
 
@@ -37,7 +39,10 @@ const ORDER: PaletteItem['group'][] = ['Commands', 'Sessions', 'Projects', 'Agen
 export interface PaletteOptions {
   /** ids of recently run items, most recent first; shown as a Recent group when the query is empty */
   recent?: readonly string[];
-  /** touch-first device: entities (sessions, projects) lead the empty state, commands follow */
+  /**
+   * phone or touch-first device: Recent leads (topped up with the most recently active sessions when
+   * fewer than RECENT_LIMIT items were run), then entities (sessions, projects), then commands
+   */
   touch?: boolean;
 }
 
@@ -60,6 +65,14 @@ export function rankPalette(
       .map((id) => byId.get(id))
       .filter((item): item is PaletteItem => item !== undefined)
       .slice(0, RECENT_LIMIT);
+    if (options.touch && recent.length < RECENT_LIMIT) {
+      const run = new Set(recent.map((item) => item.id));
+      const fresh = items
+        .filter((item) => item.group === 'Sessions' && item.activeAt !== undefined && !run.has(item.id))
+        .sort((a, b) => (b.activeAt ?? 0) - (a.activeAt ?? 0))
+        .slice(0, RECENT_LIMIT - recent.length);
+      recent.push(...fresh);
+    }
     const taken = new Set(recent.map((item) => item.id));
     const groups: PaletteItem['group'][] = options.touch
       ? ['Sessions', 'Projects', 'Commands']

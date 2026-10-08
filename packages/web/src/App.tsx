@@ -264,6 +264,7 @@ function Shell() {
           label: session.title ?? session.id,
           meta: `${names.get(session.projectId) ?? session.projectId} · ${session.model}`,
           icon: 'session',
+          activeAt: session.lastActivity,
           run: () => setSelection({ kind: 'session', id: session.id }),
         });
       for (const agent of snapshot.agents)
@@ -518,8 +519,8 @@ function Shell() {
       />
 
       {layer === 'palette' && <CommandPalette items={paletteItems} onClose={() => setLayer(null)} />}
-      {layer === 'help' && <HelpOverlay onClose={() => setLayer(null)} />}
-      {layer === 'push' && <PhoneAlerts onClose={() => setLayer(null)} />}
+      {layer === 'help' && <HelpOverlay demo={view.mode === 'demo'} onClose={() => setLayer(null)} />}
+      {layer === 'push' && <PhoneAlerts demo={view.mode === 'demo'} onClose={() => setLayer(null)} />}
       {layer === 'more' && (
         <MoreSheet
           current={tab}

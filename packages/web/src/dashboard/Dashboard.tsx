@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { IconName } from '@fleet/ui';
 import type { ModelFamily, OrchTask } from '@fleet/shared';
@@ -6,6 +6,7 @@ import type { FleetView, Selection } from '../data/contract';
 import { Icon } from '../shell/Icon';
 import { Overnight } from './Overnight.jsx';
 import { Spend } from './Spend';
+import { DAG_NODE_H, DAG_NODE_W, dagEdgePaths, dagFocusNode, dagScrollLeft } from './dag';
 import {
   aggregateFleet,
   alertKindLabel,
@@ -59,28 +60,36 @@ function ExternalLink({ url, children }: { url?: string; children: ReactNode }) 
 
 function TaskDag({ tasks }: { tasks: OrchTask[] }) {
   const layout = dagLayout(tasks);
-  const nodes = new Map(layout.nodes.map((node) => [node.task.id, node]));
+  const scroller = useRef<HTMLDivElement>(null);
+  const focus = dagFocusNode(layout);
+  const focusKey = focus ? `${focus.task.id}:${focus.task.state}` : '';
+  // bring the blocked (else running) task into view whenever it changes, so it never sits under the fade
+  useEffect(() => {
+    const element = scroller.current;
+    const svg = element?.querySelector('svg');
+    if (!element || !svg || !focus) return;
+    const left = dagScrollLeft(focus, layout.width, svg.getBoundingClientRect().width, element.clientWidth);
+    element.scrollTo({ left, behavior: 'auto' });
+    // keyed on the focus task and graph width only: a re-render with the same focus keeps the user's scroll
+  }, [focusKey, layout.width]);
   if (!tasks.length) return <p className="dashboard-empty">No tasks planned yet.</p>;
   return (
     <>
-      <div className="dashboard-dag" tabIndex={0} aria-label="Scrollable task dependency graph">
+      <div
+        ref={scroller}
+        className="dashboard-dag"
+        tabIndex={0}
+        aria-label="Scrollable task dependency graph"
+      >
         <svg
           style={{ width: '100%', minWidth: layout.width * 0.75, maxWidth: layout.width, height: 'auto' }}
           viewBox={`0 0 ${layout.width} ${layout.height}`}
           role="img"
           aria-label="Task dependencies, from left to right"
         >
-          {layout.edges.map((edge) => {
-            const from = nodes.get(edge.from)!;
-            const to = nodes.get(edge.to)!;
-            return (
-              <path
-                key={`${edge.from}:${edge.to}`}
-                className="dashboard-edge"
-                d={`M ${from.x + 170} ${from.y + 26} C ${from.x + 190} ${from.y + 26}, ${to.x - 20} ${to.y + 26}, ${to.x} ${to.y + 26}`}
-              />
-            );
-          })}
+          {dagEdgePaths(layout).map((edge) => (
+            <path key={`${edge.from}:${edge.to}`} className="dashboard-edge" d={edge.d} />
+          ))}
           {layout.nodes.map((node) => (
             <g
               key={node.task.id}
@@ -88,7 +97,7 @@ function TaskDag({ tasks }: { tasks: OrchTask[] }) {
               transform={`translate(${node.x},${node.y})`}
             >
               <title>{`${node.task.id}: ${node.task.slug} — ${node.task.state}${node.unresolved ? ' (cyclic dependency or downstream of a cycle)' : ''}`}</title>
-              <rect width="170" height="52" rx="6" />
+              <rect width={DAG_NODE_W} height={DAG_NODE_H} rx="6" />
               <text x="10" y="21">
                 {node.task.id} ·{' '}
                 {node.task.slug.length > 15 ? `${node.task.slug.slice(0, 14)}…` : node.task.slug}

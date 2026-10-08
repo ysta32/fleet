@@ -121,6 +121,21 @@ export function cameraFitDistance(r: number): number {
   return r * Math.hypot(FIT.x, FIT.y, FIT.z);
 }
 
+/** Selection focus never magnifies the fitted harbour framing by more than this (abstract blobs, label pile-ups). */
+export const FOCUS_MAX_ZOOM = 1.6;
+
+/**
+ * Camera-to-target distance when focusing a selection on a layout fitted at radius `fitted`. The zoom cap
+ * keeps the station and its neighbours in frame instead of dollying into a single mesh; the floor frames a
+ * whole station (a vessel orbits within it) even on a one-station harbour. Projects sit a little further
+ * out than vessels so the selected station reads with its ring.
+ */
+export function focusDistance(kind: 'project' | 'session' | 'agent', fitted: number): number {
+  const floor = kind === 'project' ? 13 : 11;
+  const fit = cameraFitDistance(Math.max(0, fitted));
+  return Math.max(floor, fit / FOCUS_MAX_ZOOM);
+}
+
 /**
  * OrbitControls max distance for a fitted (aspect-scaled) radius: leaves room for the 1.45x intro
  * dolly plus some user zoom-out, so the fitted pose is never clamped (which would crop portrait).
