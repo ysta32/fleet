@@ -1,15 +1,13 @@
 // The one synthetic world every site surface draws from: hero scene and posters, product previews, phone,
-// spend beat and overnight digest. Plain ESM so scripts/prebuild.mjs, scripts/assets.mjs, the hero island
-// and the Next pages all run the same steps. createDemoFleet is passed in, so this file has no imports and
-// the client never bundles the generator through it.
+// spend beat and overnight digest. It is createDemoWorld from @fleet/shared (the app's own demo world) at one
+// seed and one fixed clock, so every surface shows the same numbers. Plain ESM so scripts/prebuild.mjs, the hero
+// island and the Next pages share it; createDemoWorld is passed in, so this file has no imports.
 
-/** createDemoFleet's default seed: the same world the app's own demo mode shows. */
-export const WORLD_SEED = 42;
-/** The site's fixed clock (UTC). The world is advanced from here to the first moment someone is waiting. */
+/** The site's search starts here (UTC); the world's clock is the first moment from here someone is waiting. */
 export const WORLD_START = Date.UTC(2026, 9, 7, 22, 40);
-const STEP_MS = 30_000;
-const MAX_STEPS = 720;
-/** After the first wait appears, let it age a little so the inbox reads "8m", not "now". */
+const STEP_MS = 5 * 60_000;
+const MAX_STEPS = 288;
+/** Once a wait appears, let it age a little so the inbox reads "8m", not "1m". */
 const SETTLE_MS = 8 * 60_000;
 
 /** Something needs the operator: a waiting session and at least two open alerts. */
@@ -20,27 +18,32 @@ export function interesting(snapshot) {
   );
 }
 
-/** Replays the world's steps on a fresh fleet: `steps` x 30s, then the settle. */
-export function advanceWorld(fleet, steps) {
-  for (let i = 0; i < steps; i++) fleet.tick(STEP_MS);
-  fleet.tick(SETTLE_MS);
-  return fleet;
-}
-
-/** Fewest 30s steps after which (steps + settle) the world is interesting; 0 when none is found. */
-export function chooseWorld(createDemoFleet) {
-  const probe = createDemoFleet({ seed: WORLD_SEED, now: WORLD_START });
-  for (let steps = 0; steps <= MAX_STEPS; steps++) {
-    if (interesting(probe.snapshot())) {
-      const check = advanceWorld(createDemoFleet({ seed: WORLD_SEED, now: WORLD_START }), steps);
-      if (interesting(check.snapshot())) return { seed: WORLD_SEED, start: WORLD_START, steps };
-    }
-    probe.tick(STEP_MS);
+/**
+ * The site's world: `seed` (the shared DEMO_SEED) and the first clock, in 5 minute steps from WORLD_START, at
+ * which the world is interesting, aged by SETTLE_MS when it is still interesting then. Throws when no moment
+ * in the next day qualifies, so a generator change cannot silently ship a hero with nothing waiting.
+ */
+export function chooseWorld(createDemoWorld, seed) {
+  for (let i = 0; i <= MAX_STEPS; i++) {
+    const at = WORLD_START + i * STEP_MS;
+    if (!interesting(createDemoWorld({ seed, now: at }).snapshot)) continue;
+    const settled = at + SETTLE_MS;
+    return { seed, now: interesting(createDemoWorld({ seed, now: settled }).snapshot) ? settled : at };
   }
-  return { seed: WORLD_SEED, start: WORLD_START, steps: 0 };
+  throw new Error(`demo world: no moment within 24h of ${new Date(WORLD_START).toISOString()} has a wait`);
 }
 
-/** The fleet at the world's moment. */
-export function openWorld(createDemoFleet, world) {
-  return advanceWorld(createDemoFleet({ seed: world.seed, now: world.start }), world.steps);
+/** The world (fleet, snapshot, spend, digest) at the site's clock. */
+export function openWorld(createDemoWorld, world) {
+  return createDemoWorld({ seed: world.seed, now: world.now });
+}
+
+/**
+ * The world's fleet alone, for the browser hero island: createDemoWorld(world).fleet without the Spend and
+ * digest work. createDemoWorld rolls days over at local midnight and the site builds with TZ=UTC, so the
+ * build-time world uses UTC day starts, which is createDemoFleet's default; passing no startOfDay here keeps
+ * the island's fleet identical to the posters and previews in any visitor time zone.
+ */
+export function openFleet(createDemoFleet, world) {
+  return createDemoFleet({ seed: world.seed, now: world.now });
 }

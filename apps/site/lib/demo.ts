@@ -1,8 +1,8 @@
 // Build-time synthetic fleet for the static UI previews. Deterministic: the site's one world (lib/world.mjs,
 // chosen by scripts/prebuild.mjs), the same seed and clock as the hero scene, spend beat and digest.
-// Uses createDemoFleet from @fleet/shared only. Never reads ~/.claude or any real data.
-import { createDemoFleet, estimateCostUsd } from '@fleet/shared';
-import type { AlertKind, FleetSnapshot, ModelFamily } from '@fleet/shared';
+// Uses createDemoWorld from @fleet/shared only. Never reads ~/.claude or any real data.
+import { createDemoWorld, estimateCostUsd } from '@fleet/shared';
+import type { AlertKind, DemoDigest, FleetSnapshot, ModelFamily } from '@fleet/shared';
 import { openWorld } from './world.mjs';
 import world from './world.generated.json';
 
@@ -116,9 +116,8 @@ let night: ReplayTape | null = null;
 
 export function demoPreview(): DemoPreview {
   if (cached) return cached;
-  const fleet = openWorld(createDemoFleet, world);
-  const snapshot = fleet.snapshot();
-  night = tapeOf(fleet.overnight(NIGHT_HOURS), snapshot);
+  const { snapshot, digest } = openWorld(createDemoWorld, world);
+  night = tapeOf(digest, snapshot);
   const name = new Map(snapshot.projects.map((p) => [p.id, p.name]));
   const now = snapshot.generatedAt;
   const signals: Signal[] = snapshot.alerts
@@ -164,9 +163,6 @@ export function demoPreview(): DemoPreview {
   return cached;
 }
 
-/** Hours on the replay tape: the app's demo night (packages/web DEMO_NIGHT_HOURS). */
-const NIGHT_HOURS = 8;
-
 export interface TapeMark {
   /** 0..1 along the tape */
   x: number;
@@ -180,10 +176,7 @@ export interface ReplayTape {
 }
 
 /** The world's last hours as replay tracks: one per project, marks where things happened, the open wait. */
-function tapeOf(
-  d: ReturnType<ReturnType<typeof createDemoFleet>['overnight']>,
-  snap: FleetSnapshot,
-): ReplayTape {
+function tapeOf(d: DemoDigest, snap: FleetSnapshot): ReplayTape {
   const since = Date.parse(d.window.since);
   const until = Date.parse(d.window.until);
   const x = (iso: string | number) => {

@@ -7,7 +7,7 @@ interface Island {
   mount(
     el: HTMLElement,
     opts: {
-      world?: { seed: number; start: number; steps: number };
+      world?: { seed: number; now: number };
       interactive?: boolean;
       onReady?: () => void;
     },
@@ -135,7 +135,7 @@ function trackSignal(stage: HTMLElement, frame: HTMLElement, host: HTMLElement):
 /**
  * The real Fleet visualizer over a poster. The poster is a still render of the same scene.
  * Reduced motion, Save-Data or no WebGL keep the poster. The island (public/island/fleet-scene.js)
- * is the FleetScene from packages/web driven by createDemoFleet: synthetic data, no network, the site's
+ * is the FleetScene from packages/web driven by the site's createDemoWorld fleet: synthetic data, no network, the site's
  * one world (lib/world.mjs). With `signal` (the home hero), a beacon rises from the waiting station and
  * phones frame that station; both come from the poster's recorded anchor first, then the live scene.
  */

@@ -1918,6 +1918,11 @@ main {
 .spend-n-hot {
   color: var(--fl-warn);
 }
+.spend-verdict {
+  margin: var(--fl-space-4) 0 0;
+  color: var(--fl-fg-muted);
+  font-size: var(--fl-text-sm);
+}
 .spend-chart {
   position: relative;
   height: 220px;
@@ -2688,6 +2693,24 @@ main {
 }
 .math-alt-row[data-current] span:first-child {
   color: var(--fl-fg);
+}
+
+/* Beside the taller phone panel, the cost panel fills its row: the worked sum stays on top and the model
+   comparison settles at the bottom edge, level with the phone, instead of leaving a blank strip under it. */
+@media (min-width: 1024px) {
+  .depth > .panel > .math {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+  .depth > .panel > .math > .math-alt {
+    margin-top: auto;
+    gap: var(--fl-space-3);
+  }
+  /* The lock screen holds one notification per incident; a shorter screen keeps the row from towering. */
+  .depth .phone-screen {
+    min-height: 420px;
+  }
 }
 
 /* ---- inner page head with a right-hand aside (features index) ---- */

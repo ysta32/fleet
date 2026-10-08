@@ -3,20 +3,22 @@
 // HTML is correct without script), then switch to the visitor's local time after hydration, keeping the
 // UTC reading in the tooltip.
 import { useEffect, useRef, useState } from 'react';
+import { formatLocalTime, formatUtcTime } from '@fleet/shared';
 
 type Style = 'time' | 'date' | 'day-time';
 
-const OPTS: Record<Style, Intl.DateTimeFormatOptions> = {
-  time: { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' },
+const OPTS: Record<Exclude<Style, 'time'>, Intl.DateTimeFormatOptions> = {
   date: { weekday: 'long', day: 'numeric', month: 'long' },
   'day-time': { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' },
 };
 
 export function formatAt(at: number, style: Style, timeZone?: string): string {
+  // Clock times are the app's own format (formatLocalTime), so site and app read the same.
+  if (style === 'time') return formatLocalTime(at, timeZone ? { timeZone } : {});
   return new Intl.DateTimeFormat('en-GB', { ...OPTS[style], timeZone }).format(at);
 }
 
-const utcTitle = (at: number) => `${new Date(at).toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+const utcTitle = formatUtcTime;
 
 /** One timestamp: UTC in the HTML, local after hydration, UTC in the title. */
 export function LocalTime({
@@ -37,9 +39,10 @@ export function LocalTime({
   );
 }
 
-const zoneName = () =>
+/** The visitor's zone label at `at` (not today): an October window reads GMT-4 in New York even in winter. */
+const zoneName = (at: number) =>
   new Intl.DateTimeFormat('en-GB', { timeZoneName: 'short' })
-    .formatToParts(Date.now())
+    .formatToParts(at)
     .find((p) => p.type === 'timeZoneName')?.value ?? 'local';
 
 /**
@@ -72,7 +75,9 @@ export function LocalizeTimes({
       );
       if (line && Number.isFinite(since) && Number.isFinite(until)) {
         line.title = `${utcTitle(since)} to ${utcTitle(until)}`;
-        line.textContent = `${formatAt(since, 'day-time')} → ${formatAt(until, 'day-time')} (${zoneName()})`;
+        // A window across a DST change names both offsets.
+        const zones = [...new Set([zoneName(since), zoneName(until)])].join(' → ');
+        line.textContent = `${formatAt(since, 'day-time')} → ${formatAt(until, 'day-time')} (${zones})`;
       }
     }
   }, [win]);

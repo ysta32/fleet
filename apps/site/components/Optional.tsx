@@ -68,7 +68,10 @@ const usd = (n: number) =>
 const usdWhole = (n: number) =>
   n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 
-/** One beat on spend: fleet-spend's own example month, its forecast and the budget line it crosses. */
+/**
+ * One beat on spend: the demo world's month, its forecast and the budget. The verdict line is computed from
+ * those numbers, so the copy stays true whether the forecast lands under the budget or passes it.
+ */
 export function SpendSection() {
   if (!spendBeat) return null;
   const s = spendBeat;
@@ -113,6 +116,13 @@ export function SpendSection() {
               </div>
             ) : null}
           </div>
+          {s.budgetUsd !== null ? (
+            <p className="spend-verdict">
+              {over
+                ? `On pace to pass the budget by ${usdWhole(s.forecastMonthEndUsd - s.budgetUsd)}. The chart marks the day it crosses.`
+                : `On pace to finish ${usdWhole(s.budgetUsd - s.forecastMonthEndUsd)} under budget.`}
+            </p>
+          ) : null}
           <SpendChart beat={s} />
           <figcaption className="caption mono">
             The demo fleet&apos;s month, as the app&apos;s Spend tab shows it in demo mode. Not a real
