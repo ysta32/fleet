@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { PriceTable, UsageRecord, SpendTokens } from '../contracts.js';
 import { findModel, priceRecord, normalizeModelId } from './engine.js';
 import { PRICE_TABLE } from './table.js';
+import { estimateCostUsd, ZERO_TOKENS } from '@fleet/shared';
 
 const ZERO: SpendTokens = { input: 0, output: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 };
 
@@ -248,5 +249,33 @@ describe('findModel', () => {
 
   it('normalizes ids', () => {
     expect(normalizeModelId(' Claude-4.5-Sonnet[1m] ')).toBe('claude-4-5-sonnet');
+  });
+});
+
+describe('@fleet/shared estimateCostUsd', () => {
+  it.each([
+    'claude-fable-5-1',
+    'claude-fable-5',
+    'claude-opus-5-5',
+    'claude-opus-5',
+    'claude-opus-4-8',
+    'claude-opus-4-7',
+    'claude-opus-4-6',
+    'claude-opus-4-5',
+    'claude-opus-4-1',
+    'claude-opus-4',
+    'claude-sonnet-5-5',
+    'claude-sonnet-5',
+    'claude-sonnet-4-6',
+    'claude-sonnet-4-5',
+    'claude-sonnet-4',
+    'claude-haiku-4-5',
+  ])('agrees with PRICE_TABLE for %s', (id) => {
+    const price = findModel(id)!;
+    for (const k of ['input', 'output', 'cacheRead'] as const) {
+      const tokens = { ...ZERO_TOKENS, [k]: 1_000_000 };
+      expect(estimateCostUsd(id, tokens)).toBeCloseTo(price[k]);
+    }
+    expect(estimateCostUsd(id, { ...ZERO_TOKENS, cacheWrite: 1_000_000 })).toBeCloseTo(price.cacheWrite5m);
   });
 });

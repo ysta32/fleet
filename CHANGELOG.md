@@ -4,6 +4,10 @@ All notable changes to Fleet are recorded here. The format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Fixed
+
+- Session and fleet costs price each Claude model at its own version's rates. Every Opus model was billed at the old Opus 4.1 rates ($15/$75, $1.50 cache reads), so Opus 4.5 and later sessions showed about 3 to 7 times their real cost.
+
 ## [1.1.1] - 2026-10-08
 
 ### Changed

@@ -396,7 +396,7 @@ const between = (random: () => number, minMinutes: number, maxMinutes: number) =
  * lane per hour (~20 per 8h), 1-3 CI failures and 0-2 releases per night, a deploy every 50-110 min.
  * Tool calls are priced at TOKEN_SCALE so the fleet burns ~$3/hour while active (~$40/day).
  */
-const TOKEN_SCALE = 0.155;
+const TOKEN_SCALE = 0.2;
 /** Work time after a stage, [min, max) ms: read 3, edit 4, test 6, review 9, branch checks 11. */
 const HOLD_MS: Record<number, [number, number]> = {
   3: [0, 8_000],
