@@ -164,7 +164,9 @@ function needsYou(d: Digest): NeedRow[] {
         tone: 'danger',
         reason: deploy.target === 'production' ? 'Deploy failed' : 'Preview failed',
         project: project.name,
-        title: deploy.commitMessage ?? deploy.branch ?? deploy.project,
+        title:
+          deploy.commitMessage ??
+          `${deploy.target === 'production' ? 'Production' : 'Preview'} deploy${deploy.branch ? ` (${deploy.branch})` : ''}`,
         url: safeUrl(deploy.url),
         action: 'Logs',
         at: deploy.at,

@@ -1106,7 +1106,9 @@ export const DIGEST_CSS = `
   --ovn-dur-fast: var(--fl-dur-fast);
   --ovn-dur-base: var(--fl-dur-base);
   --ovn-dur-slow: var(--fl-dur-slow);
-  --ovn-grain: var(--fl-grain, url("data:image/svg+xml,%3Csvg xmlns='http://www%2Ew3%2Eorg/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0.06 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"));
+  --ovn-grain: var(--fl-grain, url("data:image/svg+xml,%3Csvg xmlns='http://www%2Ew3%2Eorg/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0.55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"));
+  --ovn-grain-size: var(--fl-grain-size, 180px);
+  --ovn-grain-opacity: var(--fl-grain-opacity, 0.06);
   --ovn-glow: var(--fl-glow-accent, none);
   --ovn-dawn: color-mix(in srgb, var(--fl-accent) 13%, transparent);
 }
@@ -1114,8 +1116,10 @@ export const DIGEST_CSS = `
   --ovn-gutter: var(--ovn-space-5);
   container: ovn / inline-size;
   background-color: var(--ovn-bg);
-  background-image: var(--ovn-grain), radial-gradient(ellipse 60% 420px at 50% -120px, var(--ovn-dawn), transparent 72%);
-  background-repeat: repeat, no-repeat;
+  position: relative;
+  isolation: isolate;
+  background-image: radial-gradient(ellipse 60% 420px at 50% -120px, var(--ovn-dawn), transparent 72%);
+  background-repeat: no-repeat;
   color: var(--ovn-fg);
   font-family: var(--ovn-font-sans);
   font-size: var(--ovn-text-md);
@@ -1125,6 +1129,7 @@ export const DIGEST_CSS = `
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
 }
+.ovn-root::before { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none; background-image: var(--ovn-grain); background-size: var(--ovn-grain-size); opacity: var(--ovn-grain-opacity); mix-blend-mode: overlay; }
 .ovn-root *, .ovn-root *::before, .ovn-root *::after { box-sizing: border-box; }
 .ovn-root p, .ovn-root h1, .ovn-root h2, .ovn-root h3, .ovn-root h4, .ovn-root ul, .ovn-root ol, .ovn-root dl, .ovn-root dd { margin: 0; }
 .ovn-root ul, .ovn-root ol { padding: 0; list-style: none; }
@@ -1169,6 +1174,8 @@ export const DIGEST_CSS = `
 .ovn-root .ovn-spark-end { fill: var(--ovn-spark); stroke: var(--ovn-bg); stroke-width: 1.5; }
 .ovn-root .ovn-spark-cap { display: flex; flex-direction: column; gap: var(--ovn-space-1); max-width: 11rem; }
 .ovn-root .ovn-spark-note { font-family: var(--ovn-font-mono); font-size: var(--ovn-text-xs); color: var(--ovn-muted); }
+.ovn-root .ovn-mast-main .ovn-trend-overall { flex-basis: 100%; }
+.ovn-root .ovn-mast-main .ovn-spark-cap { flex-direction: row; flex-wrap: wrap; align-items: baseline; column-gap: var(--ovn-space-4); max-width: none; }
 
 .ovn-root .ovn-notice { margin-top: var(--ovn-space-5); padding: var(--ovn-space-3) var(--ovn-space-4); border: 1px solid color-mix(in srgb, var(--ovn-yellow) 45%, transparent); background: color-mix(in srgb, var(--ovn-yellow) 7%, transparent); border-radius: var(--ovn-radius-sm); font-size: var(--ovn-text-sm); }
 .ovn-root .ovn-notice-list { margin-top: var(--ovn-space-3); padding-left: var(--ovn-space-6); list-style: square; font-family: var(--ovn-font-mono); font-size: var(--ovn-text-xs); color: var(--ovn-muted); overflow-wrap: anywhere; }
@@ -1287,7 +1294,7 @@ export const DIGEST_CSS = `
 .ovn-root .ovn-toggle-counts { font-family: var(--ovn-font-mono); font-size: var(--ovn-text-xs); }
 .ovn-root .ovn-notice .ovn-toggle { min-height: 32px; }
 .ovn-root .ovn-notice .ovn-toggle::before { display: none; }
-.ovn-root .ovn-notice .ovn-toggle-label { font-weight: 400; }
+.ovn-root .ovn-notice .ovn-toggle-label { font-weight: 400; white-space: normal; min-width: 0; }
 .ovn-root .ovn-details-body { display: flex; flex-direction: column; gap: var(--ovn-space-6); padding: var(--ovn-space-4) 0 var(--ovn-space-2) calc(18px + var(--ovn-space-4)); }
 .ovn-root .ovn-details[open] .ovn-details-body { animation: none; }
 .ovn-root .ovn-group-h { display: flex; align-items: center; gap: var(--ovn-space-3); margin-bottom: var(--ovn-space-2); font-family: var(--ovn-font-mono); font-weight: 500; font-size: var(--ovn-text-2xs); letter-spacing: var(--ovn-tracking-caps); text-transform: uppercase; color: var(--ovn-muted); }
@@ -1359,6 +1366,9 @@ export const DIGEST_CSS = `
 .ovn-root .ovn-empty { padding: var(--ovn-space-8) 0; font-family: var(--ovn-font-display); font-style: italic; font-size: var(--ovn-text-xl); color: var(--ovn-muted); }
 
 @container ovn (min-width: 640px) {
+  .ovn-root .ovn-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .ovn-root .ovn-lane-row { grid-template-columns: minmax(8rem, 14rem) minmax(0, 1fr) 4.5rem; }
+  .ovn-root .ovn-lane-row .ovn-split-mini { width: 100%; }
   .ovn-root .ovn-dateline-item + .ovn-dateline-item { padding-left: var(--ovn-space-4); border-left: 1px solid var(--ovn-line); }
   .ovn-root .ovn-page { --ovn-gutter: var(--ovn-space-7); padding-top: var(--ovn-space-6); }
   .ovn-root .ovn-proj { grid-template-columns: 3rem minmax(0, 1fr); }
@@ -1373,6 +1383,10 @@ export const DIGEST_CSS = `
   .ovn-root .ovn-archive-headline { flex: 1; }
 }
 @container ovn (min-width: 1080px) {
+  .ovn-root .ovn-mast-main .ovn-trend-overall { flex-basis: auto; }
+  .ovn-root .ovn-mast-main .ovn-spark-cap { flex-direction: column; max-width: 11rem; }
+  .ovn-root .ovn-lane-row { grid-template-columns: minmax(0, 1fr) 64px 4.5rem; }
+  .ovn-root .ovn-lane-row .ovn-split-mini { width: 64px; }
   .ovn-root .ovn-body { display: grid; grid-template-columns: minmax(0, 1fr) 19rem; column-gap: var(--ovn-space-10); row-gap: 0; align-items: start; }
   .ovn-root .ovn-body > * { grid-column: 1; margin-bottom: var(--ovn-space-8); }
   .ovn-root .ovn-rail { display: flex; flex-direction: column; gap: var(--ovn-space-8); grid-column: 2; grid-row: 1 / span 4; position: sticky; top: var(--ovn-space-6); padding-left: var(--ovn-space-7); border-left: 1px solid var(--ovn-line); }

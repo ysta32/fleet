@@ -92,6 +92,21 @@ function capture(chrome, args, screenshot, timeoutMs = 60_000) {
   });
 }
 
+/**
+ * Headless Chrome clamps the layout viewport to about 500px, so narrower shots would lay out at
+ * ~500px and be cropped. Below that, the page is loaded in an iframe of the exact target width.
+ */
+async function framed(htmlPath, width, height) {
+  if (width >= 500) return htmlPath;
+  const wrapper = htmlPath.replace(/\.html$/, `.frame-${width}.html`);
+  const src = pathToFileURL(htmlPath).href;
+  await writeFile(
+    wrapper,
+    `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#000}iframe{display:block;border:0;width:${width}px;height:${height}px}</style></head><body><iframe src="${src}"></iframe></body></html>`,
+  );
+  return wrapper;
+}
+
 async function compare(filename) {
   let expected;
   try {
@@ -184,7 +199,7 @@ try {
                 '--disable-background-networking',
                 '--virtual-time-budget=3000',
                 `--screenshot=${screenshot}`,
-                pathToFileURL(htmlPath).href,
+                pathToFileURL(await framed(htmlPath, width, surface === 'page' ? 2400 : 1600)).href,
               ],
               screenshot,
             );
