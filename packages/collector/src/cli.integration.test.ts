@@ -93,6 +93,18 @@ describe('fleet install --dry-run', () => {
     expect(readFileSync(cfgPath, 'utf8')).toBe(body);
   });
 
+  it('prints the token and a token-free URL on separate lines', () => {
+    const r = run(tempHome(), ['token'], { FLEET_PORT: '4399' });
+    expect(r.code).toBe(0);
+    const lines = r.out.trimEnd().split('\n');
+    const url = lines.find((l) => l.startsWith('http://'));
+    const token = lines.find((l) => /^[A-Za-z0-9_-]{16,}$/.test(l));
+    expect(url).toMatch(/^http:\/\/[^/]+:4399\/$/);
+    expect(token).toBeTruthy();
+    expect(r.out).not.toContain('?token=');
+    expect(url).not.toContain(token!);
+  });
+
   it('rejects unknown options with exit 2', () => {
     expect(run(tempHome(), ['install', '--wat']).code).toBe(2);
   });

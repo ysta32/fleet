@@ -137,8 +137,8 @@ export default function Docs() {
                 <code>allowedHosts</code>.
               </li>
               <li>
-                Restart the collector, then run <code>fleet token</code>. Open the printed URL on your phone.
-                It carries the token, so treat it like a password.
+                Restart the collector, then run <code>fleet token</code>. Open the printed URL on your phone
+                and paste the token when asked. Treat the token like a password.
               </li>
               <li>Add the page to your home screen to keep it one tap away.</li>
             </ol>

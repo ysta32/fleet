@@ -3,20 +3,19 @@ import type { FleetView } from '../data/contract';
 
 export type LinkState = 'ok' | 'connecting' | 'disconnected' | 'offline' | 'unauthorized';
 
-function storedToken(): string | null {
+/** Tokens are no longer persisted by the app; drop any value an older version stored. */
+export function clearLegacyToken(): void {
   try {
-    return window.localStorage.getItem('fleet.token');
+    window.localStorage.removeItem('fleet.token');
   } catch {
-    return null;
+    // storage may be unavailable (private mode); nothing to clear
   }
 }
 
 /** Probes the collector over plain HTTP; the event stream cannot report status codes. */
 export async function probeCollector(signal?: AbortSignal): Promise<'ok' | 'unauthorized' | 'down'> {
-  const token = storedToken();
   try {
     const response = await fetch('/api/snapshot', {
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       credentials: 'same-origin',
       cache: 'no-store',
       signal,
@@ -41,6 +40,9 @@ export function useConnection(view: FleetView) {
   const everConnected = useRef(false);
   if (view.connected) everConnected.current = true;
 
+  useEffect(() => {
+    clearLegacyToken();
+  }, []);
   useEffect(() => {
     if (view.snapshot) setLastUpdate(Date.now());
   }, [view.snapshot]);

@@ -30,12 +30,12 @@ Fleet is a v1.0.0 release. It is macOS-first (the launchd agent and menu-bar app
 You need Node 20 or newer.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ysta32/fleet/main/scripts/install.sh | FLEET_FROM_GIT=1 bash
+curl -fsSL https://raw.githubusercontent.com/ysta32/fleet/main/scripts/install.sh | bash
 ```
 
 This clones the repo into `~/.fleet/src`, builds it, installs the `fleet` command, writes the launchd agent `dev.fleet.collector` so the collector starts at login, and prints the local URL (`http://127.0.0.1:4747/` by default). Rerunning is safe. It never touches `~/.claude/settings.json`.
 
-From a checkout you already have, run `FLEET_FROM=/path/to/checkout bash scripts/install.sh`. Without `FLEET_FROM_GIT`, the script installs the `fleet-collector` npm package instead. Other variables: `FLEET_PREFIX=<dir>` for a custom npm prefix, and `FLEET_NO_LAUNCHD=1` to write the plist without loading it.
+From a checkout you already have, run `FLEET_FROM=/path/to/checkout bash scripts/install.sh`. The `fleet-collector` npm package is not published yet; once it is, `FLEET_PACKAGE=<name>` installs it instead of cloning. The script runs nothing until it has been fully downloaded. Other variables: `FLEET_PREFIX=<dir>` for a custom npm prefix, and `FLEET_NO_LAUNCHD=1` to write the plist without loading it.
 
 If something looks wrong, run `fleet doctor`. It checks Node, the port, `~/.claude/projects`, `gh auth`, config permissions, launchd and web assets, and exits 0 (ok), 1 (warnings) or 2 (failures).
 
@@ -47,7 +47,7 @@ fleet start      # run the collector in the foreground
 fleet demo       # run with synthetic demo data, nothing read from your machine
 fleet open       # open the dashboard
 fleet status     # daemon health and counts
-fleet token      # print the access token and LAN URL
+fleet token      # print the LAN URL and the access token (separate lines)
 fleet install    # install and load the launchd agent (--dry-run prints the plist only)
 fleet uninstall  # unload and remove the launchd agent
 ```
@@ -59,7 +59,7 @@ fleet uninstall  # unload and remove the launchd agent
 By default the collector listens on `127.0.0.1` only, and loopback needs no token. To open Fleet on your phone:
 
 1. Set `"lan": true` in `~/.config/fleet/config.json` and restart the collector. It then binds `0.0.0.0`.
-2. Run `fleet token` to get the access token and the LAN URL, and open that URL on your phone. Remote requests must carry the token.
+2. Run `fleet token` to get the LAN URL and the access token. Open the URL on your phone and paste the token into the app. The URL never contains the token, and remote requests must carry it.
 3. Prefer [Tailscale](https://tailscale.com/) over a bare LAN: put your phone and Mac on one tailnet and use the Mac's tailnet address. If you reach it by a hostname such as `mymac.tailnet.ts.net`, add it to `allowedHosts` in the config.
 
 Remote clients get a redacted view (see Privacy). Set `"shareContent": true` only if you want them to see transcript-derived text too.
@@ -83,6 +83,11 @@ Push and ntfy payloads are redacted the same way as remote views.
 - No transcript content leaves your machine unless you opt in: by turning on `shareContent`, by pointing `notify.ntfyUrl` at a server, or by subscribing a device to Web Push. GitHub status uses your own `gh` login and is read-only; set `github: false` to turn it off.
 - Fleet Spend and the Overnight digest run locally. The digest's optional Notion, email and push delivery are off until you configure them.
 - This repository ships only synthetic fixtures. CI guards against committing real transcripts.
+
+## Security notes
+
+- A reverse proxy that rewrites the `Host` header to a loopback name makes every client look local, so the token is not required. Use `tailscale serve`, or have the proxy keep the original `Host`.
+- Loopback access needs no token, so other macOS users on the same machine can reach the collector. Fleet is built for a single-user machine.
 
 ## Packages
 

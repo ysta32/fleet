@@ -208,8 +208,9 @@ async function main(argv: string[]): Promise<number> {
       return status();
     case 'token': {
       const cfg = loadConfig();
+      console.log(`http://${lanIp()}:${cfg.port}/`);
       console.log(cfg.token);
-      console.log(`http://${lanIp()}:${cfg.port}/?token=${cfg.token}`);
+      console.log('Open the URL on your device and paste the token when the app asks for it.');
       if (!cfg.lan) console.log(`(lan is off; enable in ${configPath()} or FLEET_LAN=1)`);
       return 0;
     }
