@@ -78,7 +78,8 @@ self.addEventListener('fetch', (event) => {
 
 // Web Push. Payload: {title, body, tag, url}. Only same-origin paths are ever opened.
 function safePath(raw) {
-  if (typeof raw !== 'string' || !raw.startsWith('/') || raw.startsWith('//') || raw.includes('\\')) return '/';
+  if (typeof raw !== 'string' || !raw.startsWith('/') || raw.startsWith('//') || raw.includes('\\'))
+    return '/';
   try {
     const url = new URL(raw, self.location.origin);
     if (url.origin !== self.location.origin) return '/';

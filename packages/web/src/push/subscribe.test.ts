@@ -25,7 +25,13 @@ function setup(opts: { existing?: boolean; post?: () => Response | Promise<Respo
     return opts.post ? opts.post() : new Response('{}', { status: 200 });
   });
   vi.stubGlobal('fetch', fetchMock);
-  return { subscribe, fetchMock, get current() { return current; } };
+  return {
+    subscribe,
+    fetchMock,
+    get current() {
+      return current;
+    },
+  };
 }
 
 beforeEach(() => vi.unstubAllGlobals());
@@ -66,7 +72,10 @@ describe('disablePush', () => {
   it('unsubscribes and deletes', async () => {
     const env = setup({ existing: true });
     expect(await disablePush()).toEqual({ ok: true, subscribed: false });
-    expect(env.fetchMock).toHaveBeenCalledWith('/api/push/subscribe', expect.objectContaining({ method: 'DELETE' }));
+    expect(env.fetchMock).toHaveBeenCalledWith(
+      '/api/push/subscribe',
+      expect.objectContaining({ method: 'DELETE' }),
+    );
   });
   it('surfaces a non-2xx DELETE and reports the real state', async () => {
     setup({ existing: true, del: new Response('x', { status: 503 }) });

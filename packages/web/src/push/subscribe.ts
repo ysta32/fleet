@@ -14,7 +14,8 @@ export async function isSubscribed(): Promise<boolean> {
 }
 
 /** `subscribed` is always re-read from pushManager.getSubscription() after the attempt. */
-export type PushResult = { ok: true; subscribed: boolean } | { ok: false; error: string; subscribed: boolean };
+export type PushResult =
+  { ok: true; subscribed: boolean } | { ok: false; error: string; subscribed: boolean };
 
 function failure(error: unknown, subscribed: boolean): PushResult {
   return { ok: false, error: error instanceof Error ? error.message : 'Something went wrong.', subscribed };
@@ -34,9 +35,11 @@ async function enable(): Promise<PushResult> {
   const permission = await Notification.requestPermission();
   if (permission !== 'granted') return failure(new Error('Notifications are blocked for this site.'), false);
   const keyResponse = await fetch('/api/push/key', { credentials: 'same-origin' });
-  if (!keyResponse.ok) return failure(new Error('Collector has no push key (HTTP ' + keyResponse.status + ').'), false);
+  if (!keyResponse.ok)
+    return failure(new Error('Collector has no push key (HTTP ' + keyResponse.status + ').'), false);
   const { publicKey } = (await keyResponse.json()) as { publicKey?: unknown };
-  if (typeof publicKey !== 'string' || !publicKey) return failure(new Error('Collector returned no push key.'), false);
+  if (typeof publicKey !== 'string' || !publicKey)
+    return failure(new Error('Collector returned no push key.'), false);
   const reg = await navigator.serviceWorker.ready;
   let created: PushSubscription | null = null;
   let sub = await reg.pushManager.getSubscription();
@@ -53,7 +56,10 @@ async function enable(): Promise<PushResult> {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ endpoint: sub.endpoint, keys: { p256dh: json.keys?.p256dh, auth: json.keys?.auth } }),
+      body: JSON.stringify({
+        endpoint: sub.endpoint,
+        keys: { p256dh: json.keys?.p256dh, auth: json.keys?.auth },
+      }),
     });
     if (!response.ok) throw new Error('Collector rejected the subscription (HTTP ' + response.status + ').');
     return { ok: true, subscribed: true };
@@ -84,6 +90,7 @@ async function disable(): Promise<PushResult> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ endpoint }),
   });
-  if (!response.ok) throw new Error('Collector could not remove the subscription (HTTP ' + response.status + ').');
+  if (!response.ok)
+    throw new Error('Collector could not remove the subscription (HTTP ' + response.status + ').');
   return { ok: true, subscribed: false };
 }

@@ -26,7 +26,17 @@ describe('safeNotificationPath', () => {
     expect(safeNotificationPath('/sessions/1')).toBe('/sessions/1');
   });
   it('rejects absolute, protocol-relative and non-string urls', () => {
-    for (const bad of ['https://evil.test/', '//evil.test', '/\\evil.test', '/a/..//evil.test', 'javascript:alert(1)', 'x', '', null, 5])
+    for (const bad of [
+      'https://evil.test/',
+      '//evil.test',
+      '/\\evil.test',
+      '/a/..//evil.test',
+      'javascript:alert(1)',
+      'x',
+      '',
+      null,
+      5,
+    ])
       expect(safeNotificationPath(bad)).toBe('/');
   });
 });
