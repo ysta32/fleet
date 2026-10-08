@@ -10,6 +10,7 @@ import { createServer } from './server.js';
 
 const TOKEN = 'a'.repeat(64);
 const AUTH = { headers: { authorization: `Bearer ${TOKEN}` } };
+const NAV = { 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document', 'Sec-Fetch-Site': 'none' };
 
 function snap(): FleetSnapshot {
   return {
@@ -510,7 +511,7 @@ describe('Host header (DNS rebinding)', () => {
 describe('cookie auth', () => {
   it('valid ?token= on the shell sets fleet_token cookie (HttpOnly, SameSite=Strict) and cookie alone authorizes', async () => {
     const { port } = await start({ remote: true });
-    const first = await rawReq(port, `/?token=${TOKEN}`, {});
+    const first = await rawReq(port, `/?token=${TOKEN}`, NAV);
     expect(first.status).toBe(303);
     expect(first.headers.location).toBe('/');
     const sc = ([] as string[])
@@ -815,35 +816,79 @@ describe('?token= link on the web shell', () => {
 
   it('valid token: 303 to the same path without the token, other params kept, same cookie flags', async () => {
     const { port } = await start({ remote: true });
-    const r = await rawReq(port, `/fleet/view?x=1&token=${TOKEN}&y=two`, {});
+    const r = await rawReq(port, `/fleet/view?x=1&token=${TOKEN}&y=two`, NAV);
     expect(r.status).toBe(303);
     expect(r.headers.location).toBe('/fleet/view?x=1&y=two');
     expect(r.headers['cache-control']).toBe('no-store');
     const c = cookieOf(r.headers)!;
     expect(c).toBe(`fleet_token=${TOKEN}; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000`);
     expect(r.body).not.toContain('INDEX-MARK');
+    const same = await rawReq(port, `/?token=${TOKEN}`, { ...NAV, 'Sec-Fetch-Site': 'same-origin' });
+    expect(same.status).toBe(303);
   });
-  it('the redirect can never become protocol-relative', async () => {
+  it('the redirect is always a canonical same-origin path', async () => {
     const { port } = await start({ remote: true });
-    const r = await rawReq(port, `//evil.example/x?token=${TOKEN}`, {});
+    const r = await rawReq(port, `//evil.example/x?token=${TOKEN}`, NAV);
     expect(r.status).toBe(303);
     expect(r.headers.location).toBe('/evil.example/x');
-    const r2 = await rawReq(port, `/%2F%2Fevil.example?token=${TOKEN}`, {});
-    expect(r2.headers.location!.startsWith('//')).toBe(false);
+    const r2 = await rawReq(port, `/a/./b/../c?token=${TOKEN}`, NAV);
+    expect(r2.headers.location).toBe('/a/c');
+    const r3 = await rawReq(port, `/%2F%2Fevil.example?token=${TOKEN}`, NAV);
+    expect(r3.status).toBe(400);
+    expect(r3.headers['set-cookie']).toBeUndefined();
+  });
+  it('/api reached through non-canonical paths never mints a cookie or redirects into /api', async () => {
+    const { port } = await start({ remote: true });
+    for (const p of [
+      '//api/snapshot',
+      '/./api/snapshot',
+      '/a/../api/snapshot',
+      '/%61pi/snapshot',
+      '/api/./x',
+    ]) {
+      const r = await rawReq(port, `${p}?token=${TOKEN}`, NAV);
+      expect(r.status, p).toBe(401);
+      expect(r.headers['set-cookie'], p).toBeUndefined();
+      expect(r.headers.location, p).toBeUndefined();
+      expect(r.body, p).not.toContain('SYNTH-STATUS');
+    }
+    for (const p of ['/api%2Fsnapshot', '/api%2fx', '/api%5Cx', '/../api/snapshot', '/%2e%2e/api/x']) {
+      const r = await rawReq(port, `${p}?token=${TOKEN}`, NAV);
+      expect(r.status, p).toBe(400);
+      expect(r.headers['set-cookie'], p).toBeUndefined();
+    }
+  });
+  it('non-canonical /api paths are still authorized by Bearer and redacted', async () => {
+    const { port } = await start({ remote: true });
+    const r = await rawReq(port, '//api/./snapshot', { authorization: `Bearer ${TOKEN}` });
+    expect(r.status).toBe(200);
+    expect(r.body).not.toContain('SYNTH-STATUS');
+    expect((JSON.parse(r.body) as FleetSnapshot).projects[0]!.path).toBe('');
   });
   it('invalid token: shell served without a cookie', async () => {
     const { port } = await start({ remote: true });
-    const r = await rawReq(port, `/?token=${'b'.repeat(64)}`, {});
+    const r = await rawReq(port, `/?token=${'b'.repeat(64)}`, NAV);
     expect(r.status).toBe(200);
     expect(r.body).toContain('INDEX-MARK');
     expect(r.headers['set-cookie']).toBeUndefined();
   });
-  it('non-navigation fetches never exchange the token', async () => {
-    const { port } = await start({ remote: true });
-    const r = await rawReq(port, `/?token=${TOKEN}`, { 'Sec-Fetch-Mode': 'cors' });
-    expect(r.status).toBe(200);
-    expect(r.headers['set-cookie']).toBeUndefined();
-  });
+  for (const [name, headers] of [
+    ['missing Sec-Fetch headers', {}],
+    ['cors fetch', { ...NAV, 'Sec-Fetch-Mode': 'cors' }],
+    ['iframe destination', { ...NAV, 'Sec-Fetch-Dest': 'iframe' }],
+    ['missing Sec-Fetch-Dest', { 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Site': 'none' }],
+    ['cross-site navigation', { ...NAV, 'Sec-Fetch-Site': 'cross-site' }],
+    ['same-site navigation', { ...NAV, 'Sec-Fetch-Site': 'same-site' }],
+    ['missing Sec-Fetch-Site', { 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document' }],
+  ] as const) {
+    it(`${name}: shell served, token never exchanged`, async () => {
+      const { port } = await start({ remote: true });
+      const r = await rawReq(port, `/?token=${TOKEN}`, headers);
+      expect(r.status).toBe(200);
+      expect(r.body).toContain('INDEX-MARK');
+      expect(r.headers['set-cookie']).toBeUndefined();
+    });
+  }
 });
 
 describe('remote auth failure limit', () => {
@@ -876,8 +921,8 @@ describe('remote auth failure limit', () => {
   });
   it('bad ?token= links on the shell count too', async () => {
     const { base, port } = await start({ remote: true });
-    for (let i = 0; i < 10; i++) expect((await rawReq(port, '/?token=wrong', {})).status).toBe(200);
-    expect((await rawReq(port, `/?token=${TOKEN}`, {})).headers['set-cookie']).toBeUndefined();
+    for (let i = 0; i < 10; i++) expect((await rawReq(port, '/?token=wrong', NAV)).status).toBe(200);
+    expect((await rawReq(port, `/?token=${TOKEN}`, NAV)).headers['set-cookie']).toBeUndefined();
     expect((await fetch(`${base}/api/snapshot`, AUTH)).status).toBe(429);
   });
   it('requests without credentials do not count', async () => {
@@ -885,12 +930,67 @@ describe('remote auth failure limit', () => {
     for (let i = 0; i < 15; i++) expect((await fetch(`${base}/api/snapshot`)).status).toBe(401);
     expect((await fetch(`${base}/api/snapshot`, AUTH)).status).toBe(200);
   });
-  it('loopback clients are never limited', async () => {
-    const { base } = await start();
+  const postSession = (port: number, headers: Record<string, string>): Promise<number> =>
+    new Promise((resolve, reject) => {
+      const r = http.request(
+        { host: '127.0.0.1', port, path: '/api/session', method: 'POST', headers },
+        (res) => {
+          res.resume();
+          resolve(res.statusCode ?? 0);
+        },
+      );
+      r.on('error', reject);
+      r.end();
+    });
+
+  it('loopback-socket requests without forwarding headers are never limited, even when not local', async () => {
+    const { port } = await start();
+    // a LAN Host header on a loopback socket is not "local" (token required) but is never locked out
+    const lanHost = { Host: `192.0.2.10:${port}` };
     for (let i = 0; i < 15; i++) {
-      await fetch(`${base}/api/snapshot`, { headers: { authorization: 'Bearer wrong' } });
+      const bad = await rawReq(port, '/api/snapshot', { ...lanHost, authorization: 'Bearer wrong' });
+      expect(bad.status).toBe(401);
+      expect(await postSession(port, { ...lanHost, authorization: 'Bearer wrong' })).toBe(401);
+      expect((await rawReq(port, '/?token=wrong', { ...lanHost, ...NAV })).status).toBe(200);
     }
-    expect((await fetch(`${base}/api/snapshot`)).status).toBe(200);
+    const ok = await rawReq(port, '/api/snapshot', { ...lanHost, authorization: `Bearer ${TOKEN}` });
+    expect(ok.status).toBe(200);
+    expect((await rawReq(port, `/?token=${TOKEN}`, { ...lanHost, ...NAV })).status).toBe(303);
+    expect((await rawReq(port, '/api/snapshot', {})).status).toBe(200);
+  });
+
+  it('proxied clients get separate buckets and cannot lock out others or local use', async () => {
+    const { port } = await start();
+    const viaProxy = (client: string, extra: Record<string, string> = {}) =>
+      rawReq(port, '/api/snapshot', { 'X-Forwarded-For': client, ...extra });
+    for (let i = 0; i < 10; i++) {
+      expect((await viaProxy('198.51.100.1', { authorization: 'Bearer wrong' })).status).toBe(401);
+    }
+    expect((await viaProxy('198.51.100.1', { authorization: `Bearer ${TOKEN}` })).status).toBe(429);
+    // a forged leading X-Forwarded-For value does not mint a fresh bucket: the proxy-appended last one counts
+    expect((await viaProxy('203.0.113.77, 198.51.100.1', { authorization: `Bearer ${TOKEN}` })).status).toBe(
+      429,
+    );
+    expect((await viaProxy('198.51.100.2', { authorization: `Bearer ${TOKEN}` })).status).toBe(200);
+    expect(
+      (
+        await rawReq(port, '/api/snapshot', {
+          Forwarded: 'for=198.51.100.3',
+          authorization: `Bearer ${TOKEN}`,
+        })
+      ).status,
+    ).toBe(200);
+    expect((await rawReq(port, '/api/snapshot', {})).status).toBe(200);
+    expect(await postSession(port, { authorization: `Bearer ${TOKEN}` })).toBe(204);
+  });
+
+  it('Forwarded "for" values are bucketed like X-Forwarded-For', async () => {
+    const { port } = await start();
+    const fwd = (v: string, auth: string) =>
+      rawReq(port, '/api/snapshot', { Forwarded: v, authorization: auth });
+    for (let i = 0; i < 10; i++) expect((await fwd('for="[2001:db8::1]"', 'Bearer wrong')).status).toBe(401);
+    expect((await fwd('for=192.0.2.60, for="[2001:db8::1]"', `Bearer ${TOKEN}`)).status).toBe(429);
+    expect((await fwd('for=192.0.2.61', `Bearer ${TOKEN}`)).status).toBe(200);
   });
 });
 

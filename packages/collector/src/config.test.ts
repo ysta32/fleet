@@ -1,5 +1,6 @@
 import {
   chmodSync,
+  symlinkSync,
   mkdtempSync,
   readFileSync,
   statSync,
@@ -88,6 +89,33 @@ describe('config', () => {
     const saved = JSON.parse(readFileSync(configPath(), 'utf8'));
     expect(saved.port).toBe(4747);
     expect(saved.lan).toBe(false);
+  });
+
+  it('reads a symlinked config but never changes the link target', () => {
+    const target = join(home, 'real.json');
+    writeFileSync(target, JSON.stringify({ token: 'target-token' }));
+    chmodSync(target, 0o644);
+    const link = join(home, 'link.json');
+    symlinkSync(target, link);
+    expect(loadConfig(link).token).toBe('target-token');
+    expect(statSync(target).mode & 0o777).toBe(0o644);
+    expect(JSON.parse(readFileSync(target, 'utf8'))).toEqual({ token: 'target-token' });
+  });
+
+  it('does not chmod a config that fails to parse or validate', () => {
+    const p = join(home, 'bad.json');
+    for (const body of ['{not json', '[1,2]']) {
+      writeFileSync(p, body);
+      chmodSync(p, 0o644);
+      expect(() => loadConfig(p)).toThrow();
+      expect(statSync(p).mode & 0o777).toBe(0o644);
+    }
+  });
+
+  it('refuses a config path that is not a regular file', () => {
+    const dir = join(home, 'dir.json');
+    mkdirSync(dir);
+    expect(() => loadConfig(dir)).toThrow(/regular file/);
   });
 
   it('tightens an existing config broader than 0600 on every load', () => {

@@ -146,6 +146,8 @@ async function start(opts: {
   port = (server.address() as AddressInfo).port;
 }
 
+const NAV = { 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document', 'Sec-Fetch-Site': 'none' };
+
 function get(
   p: string,
   headers: Record<string, string> = {},
@@ -280,7 +282,7 @@ describe('auth matrix', () => {
     const refused = await get(`/api/snapshot?token=${TOKEN}`);
     expect(refused.status).toBe(401);
     expect(refused.headers['set-cookie']).toBeUndefined();
-    const q = await get(`/?token=${TOKEN}`);
+    const q = await get(`/?token=${TOKEN}`, NAV);
     expect(q.status).toBe(303);
     const cookie = String(q.headers['set-cookie']);
     expect(cookie).toContain(`fleet_token=${TOKEN}`);
@@ -459,7 +461,7 @@ describe('redaction', () => {
 
   it('Secure cookie behind https proxy', async () => {
     await start({ remote: true });
-    const r = await get(`/?token=${TOKEN}`, { 'x-forwarded-proto': 'https' });
+    const r = await get(`/?token=${TOKEN}`, { ...NAV, 'x-forwarded-proto': 'https' });
     expect(String(r.headers['set-cookie'])).toContain('Secure');
   });
 });

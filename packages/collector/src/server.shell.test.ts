@@ -84,6 +84,8 @@ async function start(
   return (server.address() as AddressInfo).port;
 }
 
+const NAV = { 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document', 'Sec-Fetch-Site': 'none' };
+
 function get(
   port: number,
   p: string,
@@ -154,11 +156,11 @@ describe('remote web shell without a token', () => {
 
   it('a valid ?token= link on the shell still sets the session cookie; a bad one does not', async () => {
     const port = await start();
-    const ok = await get(port, `/?token=${TOKEN}`);
+    const ok = await get(port, `/?token=${TOKEN}`, NAV);
     expect(ok.status).toBe(303);
     expect(ok.headers.location).toBe('/');
     expect(String(ok.headers['set-cookie'])).toContain(`fleet_token=${TOKEN}`);
-    const bad = await get(port, '/?token=wrong');
+    const bad = await get(port, '/?token=wrong', NAV);
     expect(bad.status).toBe(200);
     expect(bad.headers['set-cookie']).toBeUndefined();
   });

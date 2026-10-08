@@ -349,6 +349,33 @@ function parseUrl(url: string | undefined): ParsedUrl {
   return { rawPath, query };
 }
 
+/**
+ * Canonical form of a raw request path, used to classify and route requests: percent-decoded once,
+ * duplicate slashes collapsed, "." / ".." segments resolved. undefined (-> 400) for malformed
+ * encodings, encoded "/" or "\\", backslashes, NUL, or a path that resolves above "/".
+ */
+export function canonicalPath(rawPath: string): string | undefined {
+  if (/%(2f|5c)/i.test(rawPath)) return undefined;
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(rawPath);
+  } catch {
+    return undefined;
+  }
+  if (decoded.includes('\0') || decoded.includes('\\')) return undefined;
+  const out: string[] = [];
+  for (const seg of decoded.split('/')) {
+    if (seg === '' || seg === '.') continue;
+    if (seg === '..') {
+      if (out.length === 0) return undefined;
+      out.pop();
+      continue;
+    }
+    out.push(seg);
+  }
+  return '/' + out.join('/');
+}
+
 function parseTime(v: string | null): number | undefined | null {
   if (v === null || v === '') return undefined;
   if (!/^\d{1,16}$/.test(v)) return null;
@@ -470,11 +497,38 @@ export function createServer(opts: CreateServerOptions): http.Server {
   const sessionFailures = new Map<string, { count: number; resetAt: number }>();
   const SESSION_MAX_FAILURES = 10;
   const SESSION_WINDOW_MS = 60_000;
+  const SESSION_MAX_KEYS = 10_000;
 
-  const clientKey = (req: http.IncomingMessage): string => req.socket.remoteAddress ?? 'unknown';
+  /**
+   * Limiter key for a request, or undefined when it must never be limited: a loopback socket with no
+   * forwarding headers is a local process, which never needs to guess the token. A loopback socket
+   * WITH forwarding headers is a local reverse proxy relaying remote clients, so each relayed
+   * client gets its own bucket (socket + the client address the proxy appended, i.e. the LAST
+   * X-Forwarded-For / Forwarded "for" value: earlier values are client-supplied and spoofable, and
+   * would let one client mint unlimited fresh buckets). A non-loopback socket is keyed on its
+   * address alone, ignoring forwarding headers it could forge.
+   */
+  function clientKey(req: http.IncomingMessage): string | undefined {
+    const sock = req.socket.remoteAddress ?? 'unknown';
+    if (!isLoopback(req)) return sock;
+    const xff = req.headers['x-forwarded-for'];
+    const fwd = req.headers.forwarded;
+    if (xff === undefined && fwd === undefined) return undefined;
+    let client: string | undefined;
+    if (xff !== undefined) {
+      const parts = (Array.isArray(xff) ? xff.join(',') : xff).split(',');
+      client = parts[parts.length - 1]!.trim();
+    } else if (fwd !== undefined) {
+      const elems = (Array.isArray(fwd) ? fwd.join(',') : fwd).split(',');
+      const m = /(?:^|;)\s*for=("?)([^";]*)\1/i.exec(elems[elems.length - 1]!);
+      client = m?.[2]?.trim();
+    }
+    return `${sock}|${(client || 'unknown').toLowerCase().slice(0, 64)}`;
+  }
 
   /** Seconds until the client may retry, or undefined when it is not rate-limited. */
-  function authRetryAfter(key: string): number | undefined {
+  function authRetryAfter(key: string | undefined): number | undefined {
+    if (key === undefined) return undefined;
     const now = Date.now();
     const entry = sessionFailures.get(key);
     if (!entry) return undefined;
@@ -485,11 +539,19 @@ export function createServer(opts: CreateServerOptions): http.Server {
     return entry.count >= SESSION_MAX_FAILURES ? Math.ceil((entry.resetAt - now) / 1000) : undefined;
   }
 
-  function recordAuthFailure(key: string): void {
+  function recordAuthFailure(key: string | undefined): void {
+    if (key === undefined) return;
     const now = Date.now();
     let entry = sessionFailures.get(key);
     if (entry && entry.resetAt <= now) entry = undefined;
-    if (!entry && sessionFailures.size > 10_000) sessionFailures.clear();
+    if (!entry) {
+      // bounded memory: evict the oldest buckets instead of clearing (which would reset lockouts)
+      sessionFailures.delete(key);
+      for (const k of sessionFailures.keys()) {
+        if (sessionFailures.size < SESSION_MAX_KEYS) break;
+        sessionFailures.delete(k);
+      }
+    }
     sessionFailures.set(key, {
       count: (entry?.count ?? 0) + 1,
       resetAt: entry?.resetAt ?? now + SESSION_WINDOW_MS,
@@ -514,7 +576,7 @@ export function createServer(opts: CreateServerOptions): http.Server {
       res.setHeader('WWW-Authenticate', 'Bearer');
       return sendError(res, 401, 'unauthorized');
     }
-    sessionFailures.delete(key);
+    if (key !== undefined) sessionFailures.delete(key);
     setSessionCookie(req, res);
     res.setHeader('Cache-Control', 'no-store');
     res.writeHead(204);
@@ -547,30 +609,37 @@ export function createServer(opts: CreateServerOptions): http.Server {
 
   /**
    * A top-level navigation to the web shell carrying ?token=: a valid token sets the session cookie
-   * and redirects (303) to the same path without the token, so it does not linger in the address
-   * bar or history. Returns true when the redirect was sent; otherwise the shell is served as usual
-   * (no cookie).
+   * and redirects (303) to the same (canonical, non-/api) path without the token, so it does not
+   * linger in the address bar or history. Only a browser-attested top-level, same-origin or typed
+   * navigation qualifies (Sec-Fetch-Mode=navigate, Sec-Fetch-Dest=document, Sec-Fetch-Site
+   * none/same-origin); without those headers the user pastes the token into the token gate instead.
+   * Returns true when the redirect was sent; otherwise the shell is served as usual (no cookie).
    */
   function handleShellToken(
     req: http.IncomingMessage,
     res: http.ServerResponse,
-    rawPath: string,
+    canon: string,
     query: URLSearchParams,
-    local: boolean,
   ): boolean {
-    const mode = req.headers['sec-fetch-mode'];
-    if (typeof mode === 'string' && mode !== 'navigate') return false;
+    const site = req.headers['sec-fetch-site'];
+    if (
+      req.headers['sec-fetch-mode'] !== 'navigate' ||
+      req.headers['sec-fetch-dest'] !== 'document' ||
+      (site !== 'none' && site !== 'same-origin')
+    )
+      return false;
     const key = clientKey(req);
-    if (!local && authRetryAfter(key) !== undefined) return false;
+    if (authRetryAfter(key) !== undefined) return false;
     if (!tokenMatches(query.get('token') ?? undefined, config.token)) {
-      if (!local) recordAuthFailure(key);
+      recordAuthFailure(key);
       return false;
     }
     const rest = new URLSearchParams(query);
     rest.delete('token');
     const search = rest.toString();
-    // collapse leading slashes/backslashes so the Location can never become protocol-relative
-    const location = '/' + rawPath.replace(/^[/\\]+/, '') + (search ? `?${search}` : '');
+    // canon starts with exactly one "/" and has no empty, dot or slash-bearing segments, so the
+    // re-encoded Location is same-origin and decodes back to the same non-/api path
+    const location = canon.split('/').map(encodeURIComponent).join('/') + (search ? `?${search}` : '');
     setSessionCookie(req, res);
     res.writeHead(303, { Location: location, 'Cache-Control': 'no-store', 'Content-Length': 0 });
     res.end();
@@ -905,39 +974,43 @@ export function createServer(opts: CreateServerOptions): http.Server {
 
     if (!hostAllowed(req)) return sendError(res, 421, 'misdirected request');
     const { rawPath, query } = parseUrl(req.url);
+    // classify and route on the canonical path so "//api/x", "/a/../api/x", "/%61pi/x" ... can
+    // neither dodge the /api auth rules nor be treated as shell paths
+    const canon = canonicalPath(rawPath);
+    if (canon === undefined) return sendError(res, 400, 'bad request');
 
     const method = req.method ?? 'GET';
-    if (rawPath === '/api/alerts') {
+    if (canon === '/api/alerts') {
       if (method !== 'POST') {
         res.setHeader('Allow', 'POST');
         return sendError(res, 405, 'method not allowed');
       }
       return handlePostAlert(req, res);
     }
-    if (rawPath === '/api/session') {
+    if (canon === '/api/session') {
       if (method !== 'POST') {
         res.setHeader('Allow', 'POST');
         return sendError(res, 405, 'method not allowed');
       }
       return handleSession(req, res);
     }
-    if (rawPath === '/api/push/key' || rawPath === '/api/push/subscribe') {
+    if (canon === '/api/push/key' || canon === '/api/push/subscribe') {
       if (!isLocal(req) && !authorizeRemoteApi(req, res)) return;
-      return handlePush(req, res, rawPath);
+      return handlePush(req, res, canon);
     }
     if (method !== 'GET' && method !== 'HEAD') {
       res.setHeader('Allow', 'GET, HEAD');
       return sendError(res, 405, 'method not allowed');
     }
     const local = isLocal(req);
-    const api = rawPath === '/api' || rawPath.startsWith('/api/');
+    const api = canon === '/api' || canon.startsWith('/api/');
     // Remote clients may load the static web shell (it holds no fleet data) so a fresh browser can
     // reach the token gate; every /api route still requires the token (Bearer or cookie only).
     if (api && !local && !authorizeRemoteApi(req, res)) return;
-    if (!api && query.has('token') && handleShellToken(req, res, rawPath, query, local)) return;
+    if (!api && query.has('token') && handleShellToken(req, res, canon, query)) return;
 
     if (api) {
-      switch (rawPath) {
+      switch (canon) {
         case '/api/health': {
           const share = local && config.lan ? shareUrl(req) : undefined;
           return sendJson(res, 200, {
@@ -978,9 +1051,8 @@ export function createServer(opts: CreateServerOptions): http.Server {
         case '/api/digest/latest':
           return handleDigest(res, local);
         default: {
-          if (!Object.prototype.hasOwnProperty.call(extraGet, rawPath))
-            return sendError(res, 404, 'not found');
-          const route = extraGet[rawPath];
+          if (!Object.prototype.hasOwnProperty.call(extraGet, canon)) return sendError(res, 404, 'not found');
+          const route = extraGet[canon];
           if (typeof route !== 'function') return sendError(res, 404, 'not found');
           if (!local && config.shareContent !== true) return sendError(res, 403, 'forbidden');
           const result = await route(req);
