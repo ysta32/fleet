@@ -17,16 +17,11 @@ export function TokenGate() {
     const result = await unlock(value);
     setBusy(false);
     if (result === 'ok') {
-      // Clean URL: the token lives in storage and the HttpOnly cookie, never in the address bar.
+      // Clean URL: the token lives only in the HttpOnly cookie, never in the address bar.
       const url = new URL(window.location.href);
       url.searchParams.delete('token');
-      window.location.replace(url.toString());
-    } else
-      setError(
-        result === 'rejected'
-          ? 'That token was rejected. Run fleet token on the machine running Fleet and paste the token it prints.'
-          : 'Collector unreachable, so the token could not be checked. Make sure Fleet is running and try again.',
-      );
+      window.location.replace(`${url.pathname}${url.search}${url.hash}`);
+    } else setError(UNLOCK_ERRORS[result]);
   };
   return (
     <main className="gate">
@@ -73,34 +68,40 @@ export function TokenGate() {
           </p>
         )}
         <p className="gate-meta">
-          The token is kept in this browser only and is never sent anywhere but this collector.
+          The token is exchanged for a session cookie in this browser and is never sent anywhere but this collector.
         </p>
       </form>
     </main>
   );
 }
 
+export type UnlockResult = 'ok' | 'rejected' | 'throttled' | 'unreachable';
+
 /**
- * Checks a token with a Bearer header (never in the address bar). On success, stores it for the
- * event stream and asks the collector for its HttpOnly session cookie so the shell itself loads.
+ * Exchanges the token for the collector's HttpOnly session cookie via POST /api/session with a
+ * Bearer header, so the token never appears in any URL. The cookie then authenticates the shell,
+ * the API and the event stream.
  */
-export async function unlock(token: string, fetcher: typeof fetch = fetch): Promise<'ok' | 'rejected' | 'unreachable'> {
+export async function unlock(token: string, fetcher: typeof fetch = fetch): Promise<UnlockResult> {
+  let res: Response;
   try {
-    const check = await fetcher('/api/health', {
+    res = await fetcher('/api/session', {
+      method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
       credentials: 'same-origin',
       cache: 'no-store',
     });
-    if (check.status === 401 || check.status === 403) return 'rejected';
-    if (!check.ok) return 'unreachable';
-    try {
-      window.localStorage.setItem('fleet.token', token);
-    } catch {
-      // Storage disabled: the cookie below still authenticates this browser.
-    }
-    await fetcher(`/api/health?token=${encodeURIComponent(token)}`, { credentials: 'same-origin', cache: 'no-store' });
-    return 'ok';
   } catch {
     return 'unreachable';
   }
+  if (res.ok) return 'ok';
+  if (res.status === 401 || res.status === 403) return 'rejected';
+  if (res.status === 429) return 'throttled';
+  return 'unreachable';
 }
+
+const UNLOCK_ERRORS: Record<Exclude<UnlockResult, 'ok'>, string> = {
+  rejected: 'That token was rejected. Run fleet token on the machine running Fleet and paste the token it prints.',
+  throttled: 'Too many attempts. Wait a minute, then try again.',
+  unreachable: 'Collector unreachable, so the token could not be checked. Make sure Fleet is running and try again.',
+};

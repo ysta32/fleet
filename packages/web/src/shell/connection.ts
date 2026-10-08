@@ -14,9 +14,13 @@ function storedToken(): string | null {
 /** Probes the collector over plain HTTP; the event stream cannot report status codes. */
 export async function probeCollector(signal?: AbortSignal): Promise<'ok' | 'unauthorized' | 'down'> {
   const token = storedToken();
-  const url = token ? `/api/snapshot?token=${encodeURIComponent(token)}` : '/api/snapshot';
   try {
-    const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store', signal });
+    const response = await fetch('/api/snapshot', {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      credentials: 'same-origin',
+      cache: 'no-store',
+      signal,
+    });
     if (response.status === 401 || response.status === 403) return 'unauthorized';
     return response.ok ? 'ok' : 'down';
   } catch {
