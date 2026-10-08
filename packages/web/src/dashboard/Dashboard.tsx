@@ -413,7 +413,9 @@ export default function Dashboard({
           {snapshot.sessions.length > 0 && (
             <dl className="kpis">
               <div className="kpi kpi-hero">
-                <dt className="micro">Spend today</dt>
+                <dt className="micro">
+                  {view.mode === 'replay' ? `Spend by ${clockTime(now)}` : 'Spend today'}
+                </dt>
                 <dd className="numeral">{formatCost(totals.costToday)}</dd>
                 <dd
                   className="kpi-note"
@@ -537,12 +539,24 @@ export default function Dashboard({
               ))}
             </ol>
             {!events.length && (
-              <Empty quiet icon="live" title={query ? `No events match “${query}”.` : 'No recent events.'}>
+              <Empty
+                quiet
+                icon="live"
+                title={
+                  query
+                    ? `No events match “${query}”.`
+                    : view.mode === 'replay'
+                      ? `Nothing logged before ${clockTime(now)}.`
+                      : 'No recent events.'
+                }
+              >
                 {query
                   ? 'Clear the search with Esc.'
-                  : demo
-                    ? 'Synthetic tool calls, merges and deploys stream in here as the demo runs.'
-                    : 'Tool calls, merges and deploys stream in here as they happen.'}
+                  : view.mode === 'replay'
+                    ? 'The replay starts here. Press play or drag the playhead and events fill in.'
+                    : demo
+                      ? 'Synthetic tool calls, merges and deploys stream in here as the demo runs.'
+                      : 'Tool calls, merges and deploys stream in here as they happen.'}
               </Empty>
             )}
           </section>

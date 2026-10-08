@@ -5,6 +5,17 @@ import { createDemoSource } from './demoSource';
 import { connectLive, fetchHistory } from './liveSource';
 import { advancePlayhead, clampPlayhead, eventsCrossed, normalizeHistory, reconstruct } from './replay';
 
+/** Replays also load this much before the window, so the log has context at the window start. */
+const PREROLL_MS = 15 * 60_000;
+
+/**
+ * The replay window [to - durationMs, to] of a history loaded with pre-roll: frames and events before
+ * the window stay (the playhead's snapshot and log read them), but the tape starts at the window.
+ */
+export function windowed(history: HistoryResponse, durationMs: number): HistoryResponse {
+  return { ...history, from: Math.max(history.from, history.to - durationMs) };
+}
+
 interface Playback {
   history: HistoryResponse;
   at: number;
@@ -106,16 +117,19 @@ export function useFleet(): FleetView {
       if (!Number.isFinite(hours) || hours <= 0) return;
       const duration = Math.min(hours, 24);
       request.current?.abort();
+      const durationMs = duration * 3_600_000;
       if (demo) {
-        if (source.current) load(source.current.history(duration));
+        // the demo keeps 12h, so the overnight window has no pre-roll (its world starts there)
+        if (source.current)
+          load(windowed(source.current.history((durationMs + PREROLL_MS) / 3_600_000), durationMs));
         return;
       }
       const controller = new AbortController();
       request.current = controller;
       const to = Date.now();
-      void fetchHistory(to - duration * 3_600_000, to, controller.signal)
+      void fetchHistory(to - durationMs - PREROLL_MS, to, controller.signal)
         .then((history) => {
-          if (!controller.signal.aborted) load(history);
+          if (!controller.signal.aborted) load(windowed(history, durationMs));
         })
         .catch((error: unknown) => {
           if (!controller.signal.aborted)
