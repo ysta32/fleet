@@ -28,26 +28,30 @@ export function HelpOverlay({ onClose }: { onClose(): void }) {
             <Icon name="close" />
           </button>
         </header>
-        <div className="help-groups">
-          {groups.map((group) => (
-            <section key={group}>
-              <h3 className="micro">{group}</h3>
-              <dl>
-                {KEYMAP.filter((entry) => entry.group === group).map((entry) => (
-                  <div key={entry.label} className="help-row">
-                    <dt>{entry.label}</dt>
-                    <dd>
-                      {entry.keys.map((key) => (
-                        <Kbd key={key}>{key}</Kbd>
-                      ))}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            </section>
-          ))}
+        <div className="help-body">
+          <div className="help-groups">
+            {groups.map((group) => (
+              <section key={group}>
+                <h3 className="micro">{group}</h3>
+                <dl>
+                  {KEYMAP.filter((entry) => entry.group === group).map((entry) => (
+                    <div key={entry.label} className="help-row">
+                      <dt>{entry.label}</dt>
+                      <dd>
+                        {entry.keys.map((key) => (
+                          <Kbd key={key}>{key}</Kbd>
+                        ))}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
+            ))}
+          </div>
+          <div className="help-push">
+            <PushToggle />
+          </div>
         </div>
-        <PushToggle />
       </div>
     </div>
   );

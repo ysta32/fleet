@@ -410,7 +410,8 @@
   gap: var(--fl-space-3);
   padding: var(--fl-space-2) 0;
   border-bottom: var(--fl-hairline) solid var(--fl-border);
-  animation: land var(--fl-motion-land) both;
+  /* fade only: a translate on streaming rows reads as a gap under the header */
+  animation: fade-up var(--fl-dur-base) var(--fl-ease-out) both;
 }
 .log-row time {
   color: var(--fl-fg-subtle);
@@ -1066,4 +1067,8 @@
 .overnight-items a:hover {
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+/* an empty list must not add a grid gap above its empty state */
+.dashboard-list:empty {
+  display: none;
 }

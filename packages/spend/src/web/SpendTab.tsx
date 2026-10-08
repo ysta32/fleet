@@ -278,29 +278,6 @@ function Dashboard({ s }: { s: SpendSummary }) {
 
   return (
     <div className="fls-stack">
-      <div className="fls-meta" style={{ justifyContent: 'flex-end' }}>
-        <span className="fls-chip" data-tint={tint} title={`Burn rate: ${tint}`}>
-          <span className="fls-dot" aria-hidden="true" />
-          <span className="fls-chip-label">
-            Burn <span className="fls-num">{money(s.burnUsdPerHour)}/h</span>, {tint}
-          </span>
-        </span>
-        {partial && (
-          <a
-            className="fls-badge fls-badge-warn"
-            href="#fls-src-h"
-            title={`${missing.map((x) => toolName(x.source)).join(', ')} not connected; totals exclude ${missing.length === 1 ? 'it' : 'them'}.`}
-          >
-            Partial, {okCount} of {s.sources.length} sources
-          </a>
-        )}
-        <span className="fls-badge">Estimated</span>
-        <span className="fls-chip">
-          <Icon name="clock" small />
-          <span className="fls-num">Updated {timeUtc(s.generatedAt)}</span>
-        </span>
-      </div>
-
       <section className="fls-hero" aria-labelledby="fls-hero-h">
         <div className="fls-hero-top">
           <div>
@@ -336,6 +313,28 @@ function Dashboard({ s }: { s: SpendSummary }) {
                 '.'
               )}
             </p>
+            <div className="fls-meta fls-hero-meta">
+              <span className="fls-chip" data-tint={tint} title={`Burn rate: ${tint}`}>
+                <span className="fls-dot" aria-hidden="true" />
+                <span className="fls-chip-label">
+                  Burn <span className="fls-num">{money(s.burnUsdPerHour)}/h</span>, {tint}
+                </span>
+              </span>
+              {partial && (
+                <a
+                  className="fls-badge fls-badge-warn"
+                  href="#fls-src-h"
+                  title={`${missing.map((x) => toolName(x.source)).join(', ')} not connected; totals exclude ${missing.length === 1 ? 'it' : 'them'}.`}
+                >
+                  Partial, {okCount} of {s.sources.length} sources
+                </a>
+              )}
+              <span className="fls-badge">Estimated</span>
+              <span className="fls-chip">
+                <Icon name="clock" small />
+                <span className="fls-num">Updated {timeUtc(s.generatedAt)}</span>
+              </span>
+            </div>
           </div>
           <ul className="fls-legend" aria-label="Legend">
             <li style={{ color: 'var(--fl-accent, #ff6a2b)' }}>

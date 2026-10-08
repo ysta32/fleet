@@ -13,6 +13,7 @@ import {
   clockTime,
   matches,
   needsYou,
+  nowWorking,
   dagLayout,
   formatCost,
   formatCount,
@@ -270,6 +271,8 @@ export default function Dashboard({
   const snapshot = view.snapshot;
   if (!snapshot) return <DashboardSkeleton />;
   const now = view.mode === 'replay' ? view.replay.at : view.mode === 'demo' ? snapshot.generatedAt : clock;
+  /** synthetic fleet: empty states explain the demo instead of pointing at setup commands */
+  const demo = view.mode === 'demo' || snapshot.demo === true;
   const names = new Map(snapshot.projects.map((project) => [project.id, project.name]));
   const projectName = (id: string) => names.get(id) ?? id;
   const selected = (kind: NonNullable<Selection>['kind'], id: string) =>
@@ -300,8 +303,9 @@ export default function Dashboard({
       project.orch!.blocked.length > 0 ||
       project.orch!.tasks.some((task) => task.state === 'blocked'),
   );
-  const working = totals.projects.filter((item) => item.working);
-  const workingAgents = snapshot.agents.filter((agent) => agent.status === 'working').length;
+  const nowWork = nowWorking(snapshot, now);
+  const working = nowWork.rows;
+  const workingAgents = nowWork.agents;
   const tokenTotal = totalTokens(totals.tokens);
   const events = [...view.events]
     .filter((event) => matches(query, event.label, projectName(event.projectId)))
@@ -423,11 +427,15 @@ export default function Dashboard({
 
           <section className="block">
             <h3 className="block-title">
-              Now working <span className="num count">{working.length}</span>
+              Now working{' '}
+              <span className="num count">
+                {nowWork.agents} {nowWork.agents === 1 ? 'agent' : 'agents'} · {nowWork.projects}{' '}
+                {nowWork.projects === 1 ? 'project' : 'projects'}
+              </span>
             </h3>
             {working.length ? (
               <ul className="rows">
-                {working.map(({ project, activeByModel, activeAgents }) => (
+                {working.map(({ project, activeByModel, activeAgents, reason }) => (
                   <li
                     key={project.id}
                     className="row row-working"
@@ -435,7 +443,16 @@ export default function Dashboard({
                   >
                     <span className="row-main">{projectButton(project.id)}</span>
                     <span className="num row-num">
-                      {activeAgents} <span className="unit">{activeAgents === 1 ? 'agent' : 'agents'}</span>
+                      {reason === 'agents' ? (
+                        <>
+                          {activeAgents}{' '}
+                          <span className="unit">{activeAgents === 1 ? 'agent' : 'agents'}</span>
+                        </>
+                      ) : (
+                        <span className="unit">
+                          {reason === 'session' ? 'session active' : 'army running'}
+                        </span>
+                      )}
                     </span>
                     <span className="dashboard-chips">
                       {MODEL_FAMILIES.filter((model) => activeByModel[model] > 0).map((model) => (
@@ -443,7 +460,9 @@ export default function Dashboard({
                           <span className="num"> {activeByModel[model]}</span>
                         </ModelChip>
                       ))}
-                      {project.orch && <span className="row-meta">army {project.orch.phase}</span>}
+                      {project.orch && reason !== 'army' && (
+                        <span className="row-meta">army {project.orch.phase}</span>
+                      )}
                     </span>
                   </li>
                 ))}
@@ -483,7 +502,9 @@ export default function Dashboard({
               <Empty quiet icon="live" title={query ? `No events match “${query}”.` : 'No recent events.'}>
                 {query
                   ? 'Clear the search with Esc.'
-                  : 'Tool calls, merges and deploys stream in here as they happen.'}
+                  : demo
+                    ? 'Synthetic tool calls, merges and deploys stream in here as the demo runs.'
+                    : 'Tool calls, merges and deploys stream in here as they happen.'}
               </Empty>
             )}
           </section>
@@ -594,8 +615,10 @@ export default function Dashboard({
             </div>
           )}
           {!snapshot.sessions.length && (
-            <Empty icon="session" title="No sessions yet.">
-              Start Claude Code in any repo and it appears here within 2 seconds.
+            <Empty icon="session" title={demo ? 'The demo fleet is between sessions.' : 'No sessions yet.'}>
+              {demo
+                ? 'Synthetic sessions come and go as the demo runs. On your machine, a Claude Code session appears here within 2 seconds.'
+                : 'Start Claude Code in any repo and it appears here within 2 seconds.'}
             </Empty>
           )}
           {snapshot.sessions.length > 0 && !sessions.length && (
@@ -648,9 +671,10 @@ export default function Dashboard({
             );
           })}
           {!armies.length && (
-            <Empty icon="army" title="No armies running.">
-              An army appears when a repo has an orchestrator state folder. Its task graph, inflight agents
-              and blockers show here.
+            <Empty icon="army" title={demo ? 'No armies in the demo right now.' : 'No armies running.'}>
+              {demo
+                ? 'Synthetic armies come and go as the demo runs. Each shows its task graph, inflight agents and blockers here.'
+                : 'An army appears when a repo has an orchestrator state folder. Its task graph, inflight agents and blockers show here.'}
             </Empty>
           )}
         </>
@@ -681,8 +705,14 @@ export default function Dashboard({
               ))}
             </ul>
             {!snapshot.prs.length && (
-              <Empty quiet icon="merge" title="No pull requests.">
-                Fleet reads PRs and CI with your GitHub token. Run fleet doctor to check it.
+              <Empty
+                quiet
+                icon="merge"
+                title={demo ? 'No pull requests in the demo yet.' : 'No pull requests.'}
+              >
+                {demo
+                  ? 'The demo fleet has nothing open right now. On your machine, Fleet reads PRs and CI with your GitHub token.'
+                  : 'Fleet reads PRs and CI with your GitHub token. Run fleet doctor to check it.'}
               </Empty>
             )}
           </section>
@@ -705,7 +735,11 @@ export default function Dashboard({
                   </li>
                 ))}
             </ul>
-            {!snapshot.releases.length && <p className="dashboard-empty quiet">No releases published yet.</p>}
+            {!snapshot.releases.length && (
+              <p className="dashboard-empty quiet">
+                {demo ? 'No releases in the demo yet.' : 'No releases published yet.'}
+              </p>
+            )}
           </section>
           <section className="block">
             <h3 className="block-title">Deploys</h3>
@@ -727,7 +761,9 @@ export default function Dashboard({
             </ul>
             {!snapshot.deploys.length && (
               <p className="dashboard-empty quiet">
-                No deploys. Connect Vercel in the collector config to see them.
+                {demo
+                  ? 'No deploys in the demo yet.'
+                  : 'No deploys. Connect Vercel in the collector config to see them.'}
               </p>
             )}
           </section>
@@ -838,13 +874,10 @@ export default function Dashboard({
               ))}
             </ul>
             {!urgent.length && (
-              <div className="needs needs-calm">
-                <h2 className="needs-title">Nothing needs you.</h2>
-                <p className="needs-body">
-                  {lastAlert ? `Last alert ${relativeTime(lastAlert, now)}.` : 'No alerts recorded yet.'}{' '}
-                  Blocked agents, failed CI and spend spikes land here first.
-                </p>
-              </div>
+              <Empty quiet icon="check" title="Nothing needs you.">
+                {lastAlert ? `Last alert ${relativeTime(lastAlert, now)}.` : 'No alerts recorded yet.'}{' '}
+                Blocked agents, failed CI and spend spikes land here first.
+              </Empty>
             )}
             {!alerts.length && urgent.length > 0 && (
               <p className="dashboard-empty quiet">No active alerts.</p>

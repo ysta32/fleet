@@ -263,7 +263,7 @@ export function HeroChart({ m }: { m: MonthModel }) {
                 />
                 <span
                   className="fls-callout fls-num fls-late"
-                  data-edge={crossX > 80 ? 'end' : crossX < 20 ? 'start' : undefined}
+                  data-edge={crossX < 25 ? 'start' : undefined}
                   style={{ left: `${crossX}%`, top: `${Y(m.budget)}%` }}
                 >
                   {crossLabel}

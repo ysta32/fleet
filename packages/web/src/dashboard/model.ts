@@ -89,6 +89,36 @@ export function aggregateFleet(snapshot: FleetSnapshot, now: number) {
   return { tokens, costTotal, costToday, projects };
 }
 
+export type WorkingRow = ReturnType<typeof aggregateFleet>['projects'][number] & {
+  /** why a project with no working agent still counts as working */
+  reason: 'agents' | 'session' | 'army';
+};
+
+/**
+ * The one selector behind "Now working": its rows and its header totals come from the same pass
+ * over the given snapshot (live, demo or replay playhead), so the header can never disagree with
+ * the rows. `agents` is the sum of the rows' working agents.
+ */
+export function nowWorking(
+  snapshot: FleetSnapshot,
+  now: number,
+): { rows: WorkingRow[]; agents: number; projects: number } {
+  const rows = aggregateFleet(snapshot, now)
+    .projects.filter((item) => item.working)
+    .map((item): WorkingRow => ({
+      ...item,
+      reason:
+        item.activeAgents > 0
+          ? 'agents'
+          : snapshot.sessions.some(
+                (session) => session.projectId === item.project.id && session.status === 'active',
+              )
+            ? 'session'
+            : 'army',
+    }));
+  return { rows, agents: rows.reduce((sum, row) => sum + row.activeAgents, 0), projects: rows.length };
+}
+
 export type SessionSortKey =
   'project' | 'title' | 'model' | 'status' | 'lastTool' | 'tokens' | 'cost' | 'lastActivity';
 

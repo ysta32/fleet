@@ -2,7 +2,7 @@ import type { IconName } from '@fleet/ui';
 
 export interface PaletteItem {
   id: string;
-  group: 'Commands' | 'Projects' | 'Sessions' | 'Agents';
+  group: 'Recent' | 'Commands' | 'Projects' | 'Sessions' | 'Agents';
   label: string;
   meta?: string;
   icon: IconName;
@@ -34,9 +34,41 @@ export function fuzzyScore(query: string, text: string): number {
 
 const ORDER: PaletteItem['group'][] = ['Commands', 'Sessions', 'Projects', 'Agents'];
 
-export function rankPalette(items: readonly PaletteItem[], query: string, limit = 40): PaletteItem[] {
-  if (!query.trim())
-    return items.filter((item) => item.group === 'Commands' || item.group === 'Projects').slice(0, limit);
+export interface PaletteOptions {
+  /** ids of recently run items, most recent first; shown as a Recent group when the query is empty */
+  recent?: readonly string[];
+  /** touch-first device: entities (sessions, projects) lead the empty state, commands follow */
+  touch?: boolean;
+}
+
+export const RECENT_LIMIT = 5;
+
+/** Most-recent-first id list after running `id`, deduplicated and capped. */
+export function pushRecent(recent: readonly string[], id: string, limit = RECENT_LIMIT): string[] {
+  return [id, ...recent.filter((entry) => entry !== id)].slice(0, limit);
+}
+
+export function rankPalette(
+  items: readonly PaletteItem[],
+  query: string,
+  limit = 40,
+  options: PaletteOptions = {},
+): PaletteItem[] {
+  if (!query.trim()) {
+    const byId = new Map(items.map((item) => [item.id, item]));
+    const recent = (options.recent ?? [])
+      .map((id) => byId.get(id))
+      .filter((item): item is PaletteItem => item !== undefined)
+      .slice(0, RECENT_LIMIT);
+    const taken = new Set(recent.map((item) => item.id));
+    const groups: PaletteItem['group'][] = options.touch
+      ? ['Sessions', 'Projects', 'Commands']
+      : ['Commands', 'Projects'];
+    const rest = groups.flatMap((group) =>
+      items.filter((item) => item.group === group && !taken.has(item.id)),
+    );
+    return [...recent.map((item) => ({ ...item, group: 'Recent' as const })), ...rest].slice(0, limit);
+  }
   return items
     .map((item) => ({ item, score: fuzzyScore(query, `${item.label} ${item.meta ?? ''}`) }))
     .filter((entry) => entry.score >= 0)

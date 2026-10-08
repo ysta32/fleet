@@ -7,6 +7,7 @@ import {
   dagLayout,
   formatCost,
   formatCount,
+  nowWorking,
   relativeTime,
   sortSessions,
   totalTokens,
@@ -209,5 +210,40 @@ describe('alert labels', () => {
   it('falls back to the raw kind when unknown', () => {
     expect(alertKindLabel('army.blocked')).toBe('Army blocked');
     expect(alertKindLabel('future.kind')).toBe('future.kind');
+  });
+});
+
+describe('nowWorking', () => {
+  it('derives the header totals from the same rows it returns, with a reason for agent-less rows', () => {
+    const data = snapshot();
+    data.sessions = [session({ projectId: 'beta' })];
+    const agent: Agent = {
+      id: 'worker',
+      sessionId: 'synthetic-session',
+      projectId: 'alpha',
+      role: 'coder',
+      model: 'opus',
+      label: 'synthetic coder',
+      status: 'working',
+      location: { kind: 'project', projectId: 'alpha' },
+      tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      startedAt: now,
+      lastActivity: now,
+    };
+    data.agents = [agent, { ...agent, id: 'worker2' }, { ...agent, id: 'idle', status: 'idle' }];
+    const result = nowWorking(data, now);
+    expect(result.rows.map((row) => [row.project.id, row.activeAgents, row.reason])).toEqual([
+      ['alpha', 2, 'agents'],
+      ['beta', 0, 'session'],
+    ]);
+    expect(result.projects).toBe(result.rows.length);
+    expect(result.agents).toBe(result.rows.reduce((sum, row) => sum + row.activeAgents, 0));
+    expect(result.agents).toBe(2);
+  });
+  it('reports zero of both when nothing works, as during an empty replay frame', () => {
+    const data = snapshot();
+    data.sessions = [];
+    data.agents = [];
+    expect(nowWorking(data, now)).toEqual({ rows: [], agents: 0, projects: 0 });
   });
 });

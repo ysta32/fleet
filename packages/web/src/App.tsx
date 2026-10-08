@@ -1,7 +1,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Selection } from './data/contract';
 import type { DashboardTab } from './dashboard/Dashboard';
-import { TABS } from './shell/tabs';
+import { PHONE_PRIMARY, TABS } from './shell/tabs';
 import { formatCost, needsYou } from './dashboard/model';
 import { useFleet } from './data/useFleet';
 import { Dashboard, FleetScene } from './shell/slots';
@@ -16,6 +16,8 @@ import { StatusBanner } from './shell/StatusBanner';
 import { TokenGate } from './shell/TokenGate';
 import { Onboarding } from './shell/Onboarding';
 import { SelectionCard } from './shell/SelectionCard';
+import { MoreSheet } from './shell/MoreSheet';
+import { PhoneAlerts } from './push/PhoneAlerts';
 import { useConnection } from './shell/connection';
 import { modeOf } from './shell/mode';
 import { useShareUrl } from './shell/share';
@@ -50,7 +52,7 @@ function Shell() {
   const [selection, setSelection] = useState<Selection>(null);
   const [tab, setTab] = useState<DashboardTab>('overview');
   const [query, setQuery] = useState('');
-  const [layer, setLayer] = useState<'palette' | 'help' | null>(null);
+  const [layer, setLayer] = useState<'palette' | 'help' | 'push' | 'more' | null>(null);
   const [sheet, setSheet] = useState(false);
   const [dismissed, setDismissed] = useState(readDismissed);
   const search = useRef<HTMLInputElement>(null);
@@ -230,6 +232,14 @@ function Shell() {
             run: linkHint,
           },
       {
+        id: 'push',
+        group: 'Commands',
+        label: 'Phone alerts',
+        meta: 'notify this device',
+        icon: 'bell',
+        run: () => setLayer('push'),
+      },
+      {
         id: 'help',
         group: 'Commands',
         label: 'Keyboard shortcuts',
@@ -314,7 +324,7 @@ function Shell() {
           }
         >
           <i aria-hidden="true" />
-          {pill.label}
+          <span className="mode-label">{pill.label}</span>
         </span>
         <div className="search" role="search">
           <Icon name="search" />
@@ -402,7 +412,7 @@ function Shell() {
             <button
               key={entry.id}
               type="button"
-              className="rail-item"
+              className={`rail-item${PHONE_PRIMARY.includes(entry.id) ? '' : ' rail-secondary'}`}
               aria-current={tab === entry.id ? 'page' : undefined}
               onClick={() => go(entry.id)}
               title={`${entry.label} (G ${entry.key.toUpperCase()})`}
@@ -417,6 +427,25 @@ function Shell() {
             </button>
           );
         })}
+        <button
+          type="button"
+          className={`rail-item rail-more${PHONE_PRIMARY.includes(tab) ? '' : ' is-current'}`}
+          aria-haspopup="dialog"
+          aria-expanded={layer === 'more'}
+          onClick={() => setLayer('more')}
+        >
+          <span className="more-dots" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+          </span>
+          <span className="rail-label">
+            More
+            {!PHONE_PRIMARY.includes(tab) && (
+              <span className="sr-only">, current: {TABS.find((entry) => entry.id === tab)?.label}</span>
+            )}
+          </span>
+        </button>
       </nav>
 
       <main className="stage" aria-label="Fleet view">
@@ -461,12 +490,6 @@ function Shell() {
         >
           <i aria-hidden="true" />
         </button>
-        <SelectionCard
-          snapshot={snapshot}
-          selection={selection}
-          now={now}
-          onClose={() => setSelection(null)}
-        />
         <ErrorBoundary area="The dashboard" fallbackHint="The harbour view keeps updating.">
           <Suspense fallback={null}>
             <Dashboard
@@ -483,8 +506,25 @@ function Shell() {
         </ErrorBoundary>
       </aside>
 
+      <SelectionCard
+        snapshot={snapshot}
+        selection={selection}
+        events={view.events}
+        now={view.mode === 'replay' ? view.replay.at : now}
+        onClose={() => setSelection(null)}
+      />
+
       {layer === 'palette' && <CommandPalette items={paletteItems} onClose={() => setLayer(null)} />}
       {layer === 'help' && <HelpOverlay onClose={() => setLayer(null)} />}
+      {layer === 'push' && <PhoneAlerts onClose={() => setLayer(null)} />}
+      {layer === 'more' && (
+        <MoreSheet
+          current={tab}
+          onGo={go}
+          onPhoneAlerts={() => setLayer('push')}
+          onClose={() => setLayer(null)}
+        />
+      )}
     </div>
   );
 }

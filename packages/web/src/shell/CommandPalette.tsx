@@ -1,7 +1,31 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Icon, Kbd } from './Icon';
-import { rankPalette, type PaletteItem } from './palette';
+import { pushRecent, rankPalette, type PaletteItem } from './palette';
 import { useModal } from './modal';
+
+const RECENT_KEY = 'fleet.paletteRecent';
+
+function readRecent(): string[] {
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(RECENT_KEY) ?? '[]') as unknown;
+    return Array.isArray(raw) ? raw.filter((id): id is string => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRecent(recent: readonly string[]) {
+  try {
+    window.localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
+  } catch {
+    // Recents stay in memory for this session when storage is unavailable.
+  }
+}
+
+/** Touch-first devices get entities first and no keyboard hints. */
+function coarsePointer(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches === true;
+}
 
 export function CommandPalette({ items, onClose }: { items: readonly PaletteItem[]; onClose(): void }) {
   const [query, setQuery] = useState('');
@@ -12,7 +36,12 @@ export function CommandPalette({ items, onClose }: { items: readonly PaletteItem
   const overlay = useRef<HTMLDivElement>(null);
   const dialog = useRef<HTMLDivElement>(null);
   useModal(dialog, overlay);
-  const results = useMemo(() => rankPalette(items, query), [items, query]);
+  const [recent] = useState(readRecent);
+  const [touch] = useState(coarsePointer);
+  const results = useMemo(
+    () => rankPalette(items, query, 40, { recent, touch }),
+    [items, query, recent, touch],
+  );
   useEffect(() => {
     input.current?.focus();
   }, []);
@@ -22,6 +51,7 @@ export function CommandPalette({ items, onClose }: { items: readonly PaletteItem
   }, [active]);
   const run = (item: PaletteItem | undefined) => {
     if (!item) return;
+    saveRecent(pushRecent(recent, item.id));
     onClose();
     item.run();
   };
@@ -42,7 +72,8 @@ export function CommandPalette({ items, onClose }: { items: readonly PaletteItem
             aria-controls={`${id}-list`}
             aria-activedescendant={results[active] ? `${id}-${active}` : undefined}
             aria-autocomplete="list"
-            placeholder="Jump to a session, project or command"
+            placeholder="Jump to…"
+            aria-label="Jump to a session, project or command"
             value={query}
             spellCheck={false}
             onChange={(event) => setQuery(event.target.value)}
@@ -59,7 +90,12 @@ export function CommandPalette({ items, onClose }: { items: readonly PaletteItem
               }
             }}
           />
-          <Kbd>Esc</Kbd>
+          <span className="palette-hint">
+            <Kbd>Esc</Kbd>
+          </span>
+          <button type="button" className="icon-button palette-close" aria-label="Close" onClick={onClose}>
+            <Icon name="close" />
+          </button>
         </div>
         <ul ref={list} id={`${id}-list`} role="listbox" className="palette-list" aria-label="Results">
           {results.map((item, index) => {
