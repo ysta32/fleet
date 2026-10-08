@@ -222,3 +222,20 @@ export async function fetchDigest(
     throw invalid();
   }
 }
+
+const pad = (value: number) => String(value).padStart(2, '0');
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** "Oct 6, 22:00 → Oct 7, 07:30 · 9h 30m" in local time; the date is omitted on the end when same-day. */
+export function formatWindow(from: number, to: number): string {
+  const a = new Date(from);
+  const b = new Date(to);
+  const day = (d: Date) => `${MONTHS[d.getMonth()]} ${d.getDate()}`;
+  const time = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const sameDay = a.toDateString() === b.toDateString();
+  const minutes = Math.max(0, Math.round((to - from) / 60_000));
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  const span = hours ? (rest ? `${hours}h ${rest}m` : `${hours}h`) : `${rest}m`;
+  return `${day(a)}, ${time(a)} → ${sameDay ? '' : `${day(b)}, `}${time(b)} · ${span}`;
+}

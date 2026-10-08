@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createServer } from 'vite';
 import { fleetSpendPlugin } from '../../vite.config';
 import { TABS } from '../shell/tabs';
+import { initialSpend } from './Spend';
 import { KEYMAP } from '../shell/hotkeys';
 
 import type { FleetSnapshot } from '@fleet/shared';
@@ -12,7 +13,7 @@ import type { FleetView } from '../data/contract';
 import Dashboard from './Dashboard';
 import type { DashboardTab } from './Dashboard';
 
-vi.mock('virtual:fleet-spend', () => ({ SpendTab: null }));
+vi.mock('virtual:fleet-spend', () => ({ SpendTab: null, DEMO_SUMMARY: null }));
 
 const now = 1791374400000;
 function fixture(): FleetView {
@@ -136,9 +137,9 @@ describe('Dashboard', () => {
   it('renders the demo overnight digest even before the snapshot arrives', () => {
     const html = render('overnight', { ...fixture(), snapshot: null });
     expect(html).toContain('Since you left');
-    expect(html).toContain('OVERNIGHT / DEMO');
+    expect(html).toContain('>Synthetic<');
     expect(html).toContain('Replay the night');
-    expect(html).toContain('Across your projects');
+    expect(html).toContain('5 need attention');
   });
   it('registers both panels in the shared rail, palette and hotkey tab list', () => {
     expect(TABS).toContainEqual({ id: 'overnight', label: 'Overnight', icon: 'moon', key: 'n' });
@@ -168,6 +169,7 @@ describe('Dashboard', () => {
     try {
       const module = await server.ssrLoadModule('virtual:fleet-spend');
       expect(module.SpendTab).toBeNull();
+      expect(module.DEMO_SUMMARY).toBeNull();
     } finally {
       await server.close();
     }
@@ -219,7 +221,7 @@ describe('Dashboard', () => {
   });
   it('renders PR CI, releases, and deploys with safe links', () => {
     const html = render('prs');
-    expect(html).toContain('CI failure');
+    expect(html).toContain('CI failed');
     expect(html).toContain('Synthetic release');
     expect(html).toContain('preview');
     expect(html).not.toContain('javascript:');
@@ -257,5 +259,14 @@ describe('Dashboard', () => {
       alerts: [],
     };
     expect(render('alerts', { ...base, snapshot })).toContain('Nothing needs you.');
+  });
+});
+
+describe('initialSpend', () => {
+  it('uses the shipped example only for demo fleets', () => {
+    const example = { generatedAt: 1 };
+    expect(initialSpend(true, example)).toBe(example);
+    expect(initialSpend(false, example)).toBeUndefined();
+    expect(initialSpend(true, null)).toBeUndefined();
   });
 });

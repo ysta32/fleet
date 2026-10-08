@@ -20,7 +20,7 @@ export function fleetSpendPlugin(
       if (id === virtualId) return entry ?? stubId;
     },
     load(id) {
-      if (id === stubId) return 'export const SpendTab = null;';
+      if (id === stubId) return 'export const SpendTab = null; export const DEMO_SUMMARY = null;';
     },
   };
 }

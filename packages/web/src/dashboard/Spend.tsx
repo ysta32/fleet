@@ -1,16 +1,35 @@
 import { useEffect, useState } from 'react';
-import { SpendTab as Tab } from 'virtual:fleet-spend';
+import { DEMO_SUMMARY, SpendTab as Tab } from 'virtual:fleet-spend';
+import { Icon } from '../shell/Icon';
+import { CopyCommand } from '../shell/Onboarding';
 
 export interface SpendTabProps {
   summary: Record<string, unknown> | null | undefined;
   error?: string;
 }
 
-export function Spend() {
-  const [summary, setSummary] = useState<SpendTabProps['summary']>();
+/**
+ * The summary to show before any fetch: demo fleets use the synthetic example that ships with
+ * fleet-spend (never the collector's real spend); everything else starts loading (undefined).
+ */
+export function initialSpend(
+  demo: boolean,
+  example: Record<string, unknown> | null | undefined,
+): SpendTabProps['summary'] {
+  return demo && example ? example : undefined;
+}
+
+export function Spend({ demo = false }: { demo?: boolean }) {
+  const [summary, setSummary] = useState<SpendTabProps['summary']>(() => initialSpend(demo, DEMO_SUMMARY));
   const [error, setError] = useState<string>();
   useEffect(() => {
     if (!Tab) return;
+    const example = initialSpend(demo, DEMO_SUMMARY);
+    if (example) {
+      setSummary(example);
+      setError(undefined);
+      return;
+    }
     const controller = new AbortController();
     async function load() {
       try {
@@ -35,43 +54,32 @@ export function Spend() {
     }
     void load();
     return () => controller.abort();
-  }, []);
+  }, [demo]);
 
-  if (Tab) return <Tab summary={summary} error={error} />;
+  if (Tab)
+    return (
+      <section className="dashboard spend-host" aria-label="Spend">
+        <header className="panel-head">
+          <h2 className="panel-title">Spend</h2>
+          {demo && summary && <span className="tag">Synthetic</span>}
+        </header>
+        <Tab summary={summary} error={error} />
+      </section>
+    );
   return (
-    <section
-      aria-label="Spend tracking"
-      style={{
-        fontFamily: 'var(--fl-font-sans)',
-        color: 'var(--fl-fg)',
-        background: 'var(--fl-gradient-surface), var(--fl-surface-1)',
-        padding: 'var(--fl-space-7)',
-        border: 'var(--fl-hairline) solid var(--fl-border)',
-        borderRadius: 'var(--fl-radius-lg)',
-      }}
-    >
-      <p
-        style={{
-          fontFamily: 'var(--fl-font-mono)',
-          color: 'var(--fl-fg-muted)',
-          fontSize: 'var(--fl-text-xs)',
-        }}
-      >
-        SPEND
-      </p>
-      <h2
-        style={{
-          fontFamily: 'var(--fl-font-display)',
-          fontWeight: 400,
-          fontSize: 'var(--fl-text-2xl)',
-          lineHeight: 'var(--fl-leading-tight)',
-        }}
-      >
-        Spend tracking not installed
-      </h2>
-      <p style={{ color: 'var(--fl-fg-muted)', maxWidth: 'var(--fl-measure)' }}>
-        Connect Fleet Spend to see where your model budget goes, across projects and providers.
-      </p>
+    <section className="dashboard" aria-label="Spend tracking">
+      <header className="panel-head">
+        <h2 className="panel-title">Spend</h2>
+      </header>
+      <div className="empty">
+        <Icon name="cost" className="empty-icon" />
+        <p className="empty-title">Spend tracking not installed</p>
+        <p className="empty-body">
+          Connect Fleet Spend to see where your model budget goes, by day, model and project. It reads usage
+          logs on this machine and never uploads them. Run it once, then reload Fleet.
+        </p>
+        <CopyCommand command="npx fleet-spend" />
+      </div>
     </section>
   );
 }

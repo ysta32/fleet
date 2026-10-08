@@ -8,6 +8,8 @@ import { Overnight } from './Overnight.jsx';
 import { Spend } from './Spend';
 import {
   aggregateFleet,
+  alertKindLabel,
+  alertTitle,
   clockTime,
   matches,
   needsYou,
@@ -61,8 +63,7 @@ function TaskDag({ tasks }: { tasks: OrchTask[] }) {
     <>
       <div className="dashboard-dag" tabIndex={0} aria-label="Scrollable task dependency graph">
         <svg
-          width={layout.width}
-          height={layout.height}
+          style={{ width: '100%', minWidth: layout.width * 0.75, maxWidth: layout.width, height: 'auto' }}
           viewBox={`0 0 ${layout.width} ${layout.height}`}
           role="img"
           aria-label="Task dependencies, from left to right"
@@ -131,6 +132,13 @@ const STATUS_ICON: Record<string, IconName> = {
   done: 'check',
   failed: 'x',
   blocked: 'blocked',
+};
+
+const CI_LABEL: Record<string, string> = {
+  success: 'CI passed',
+  failure: 'CI failed',
+  pending: 'CI running',
+  none: 'No CI',
 };
 
 function Status({ value }: { value: string }) {
@@ -258,7 +266,7 @@ export default function Dashboard({
     return () => window.clearInterval(timer);
   }, []);
   if (tab === 'overnight') return <Overnight view={view} />;
-  if (tab === 'spend') return <Spend />;
+  if (tab === 'spend') return <Spend demo={view.mode === 'demo' || view.snapshot?.demo === true} />;
   const snapshot = view.snapshot;
   if (!snapshot) return <DashboardSkeleton />;
   const now = view.mode === 'replay' ? view.replay.at : view.mode === 'demo' ? snapshot.generatedAt : clock;
@@ -358,54 +366,60 @@ export default function Dashboard({
                   {snapshot.sessions.length ? 'Nothing needs you.' : 'Waiting for the first session.'}
                 </h2>
                 <p className="needs-body">
-                  {workingAgents} {workingAgents === 1 ? 'agent' : 'agents'} working across {working.length}{' '}
-                  {working.length === 1 ? 'project' : 'projects'}.{' '}
-                  {lastAlert ? `Last alert ${relativeTime(lastAlert, now)}.` : 'No alerts recorded.'}
+                  {snapshot.sessions.length
+                    ? `${workingAgents} ${workingAgents === 1 ? 'agent' : 'agents'} working across ${working.length} ${working.length === 1 ? 'project' : 'projects'}. `
+                    : 'Blocked agents, failed CI and spend spikes surface here first. '}
+                  {lastAlert ? `Last alert ${relativeTime(lastAlert, now)}.` : 'No alerts yet.'}
                 </p>
               </>
             )}
           </div>
 
-          <dl className="kpis">
-            <div className="kpi kpi-hero">
-              <dt className="micro">Spend today</dt>
-              <dd className="numeral">{formatCost(totals.costToday)}</dd>
-              <dd className="kpi-note">
-                {formatCost(totals.costTotal)} across {snapshot.sessions.length}{' '}
-                {snapshot.sessions.length === 1 ? 'session' : 'sessions'}
-              </dd>
-            </div>
-            <div className="kpi">
-              <dt className="micro">Tokens</dt>
-              <dd className="numeral numeral-sm">
-                {formatCount(tokenTotal)}
-                <span className="unit">tok</span>
-              </dd>
-              <dd className={`token-bar${tokenTotal ? '' : ' is-empty'}`} aria-hidden="true">
-                {TOKEN_PARTS.map((part) => (
-                  <i
-                    key={part.key}
-                    className={`token-${part.key}`}
-                    style={{ flexGrow: tokenTotal ? totals.tokens[part.key] / tokenTotal : 0 }}
-                  />
-                ))}
-              </dd>
-              <dd className="kpi-note sr-only">
-                {TOKEN_PARTS.map((part) => `${part.label} ${formatCount(totals.tokens[part.key])}`).join(
-                  ' · ',
-                )}
-              </dd>
-            </div>
-          </dl>
-          <ul className="token-legend" aria-label="Token mix">
-            {TOKEN_PARTS.map((part) => (
-              <li key={part.key}>
-                <i className={`token-${part.key}`} aria-hidden="true" />
-                {part.label}
-                <span className="num">{formatCount(totals.tokens[part.key])}</span>
-              </li>
-            ))}
-          </ul>
+          {snapshot.sessions.length > 0 && (
+            <dl className="kpis">
+              <div className="kpi kpi-hero">
+                <dt className="micro">Spend today</dt>
+                <dd className="numeral">{formatCost(totals.costToday)}</dd>
+                <dd className="kpi-note">
+                  {Math.abs(totals.costTotal - totals.costToday) >= 0.005
+                    ? `${formatCost(totals.costTotal)} across all ${snapshot.sessions.length} ${snapshot.sessions.length === 1 ? 'session' : 'sessions'}`
+                    : `Across ${snapshot.sessions.length} ${snapshot.sessions.length === 1 ? 'session' : 'sessions'}`}
+                </dd>
+              </div>
+              <div className="kpi">
+                <dt className="micro">Tokens</dt>
+                <dd className="numeral numeral-sm">
+                  {formatCount(tokenTotal)}
+                  <span className="unit">tok</span>
+                </dd>
+                <dd className={`token-bar${tokenTotal ? '' : ' is-empty'}`} aria-hidden="true">
+                  {TOKEN_PARTS.map((part) => (
+                    <i
+                      key={part.key}
+                      className={`token-${part.key}`}
+                      style={{ flexGrow: tokenTotal ? totals.tokens[part.key] / tokenTotal : 0 }}
+                    />
+                  ))}
+                </dd>
+                <dd className="kpi-note sr-only">
+                  {TOKEN_PARTS.map((part) => `${part.label} ${formatCount(totals.tokens[part.key])}`).join(
+                    ' · ',
+                  )}
+                </dd>
+              </div>
+            </dl>
+          )}
+          {tokenTotal > 0 && (
+            <ul className="token-legend" aria-label="Token mix">
+              {TOKEN_PARTS.map((part) => (
+                <li key={part.key}>
+                  <i className={`token-${part.key}`} aria-hidden="true" />
+                  {part.label}
+                  <span className="num">{formatCount(totals.tokens[part.key])}</span>
+                </li>
+              ))}
+            </ul>
+          )}
 
           <section className="block">
             <h3 className="block-title">
@@ -414,18 +428,22 @@ export default function Dashboard({
             {working.length ? (
               <ul className="rows">
                 {working.map(({ project, activeByModel, activeAgents }) => (
-                  <li key={project.id} className="row" data-selected={selected('project', project.id)}>
+                  <li
+                    key={project.id}
+                    className="row row-working"
+                    data-selected={selected('project', project.id)}
+                  >
                     <span className="row-main">{projectButton(project.id)}</span>
+                    <span className="num row-num">
+                      {activeAgents} <span className="unit">{activeAgents === 1 ? 'agent' : 'agents'}</span>
+                    </span>
                     <span className="dashboard-chips">
                       {MODEL_FAMILIES.filter((model) => activeByModel[model] > 0).map((model) => (
                         <ModelChip key={model} model={model}>
                           <span className="num"> {activeByModel[model]}</span>
                         </ModelChip>
                       ))}
-                    </span>
-                    {project.orch && <span className="row-meta">army {project.orch.phase}</span>}
-                    <span className="num row-num">
-                      {activeAgents} <span className="unit">{activeAgents === 1 ? 'agent' : 'agents'}</span>
+                      {project.orch && <span className="row-meta">army {project.orch.phase}</span>}
                     </span>
                   </li>
                 ))}
@@ -652,9 +670,9 @@ export default function Dashboard({
                       <span className="num">#{pr.number}</span> {pr.title}
                     </ExternalLink>
                   </span>
-                  <span className={`dashboard-chip ci ci-${pr.ci}`}>
+                  <span className={`ci ci-${pr.ci}`}>
                     <Icon name={pr.ci === 'failure' ? 'x' : pr.ci === 'success' ? 'check' : 'ci'} />
-                    CI {pr.ci}
+                    {CI_LABEL[pr.ci] ?? `CI ${pr.ci}`}
                   </span>
                   <span className="row-meta">
                     {projectButton(pr.projectId)} · {pr.state}
@@ -717,7 +735,7 @@ export default function Dashboard({
       )}
       {tab === 'alerts' && (
         <>
-          <PanelHead title="Alerts" meta={`${urgent.length} waiting on you`}>
+          <PanelHead title="Alerts" meta={urgent.length ? `${urgent.length} waiting on you` : undefined}>
             {alerts.length > 1 && onDismissAlerts && (
               <button
                 type="button"
@@ -790,18 +808,20 @@ export default function Dashboard({
             </section>
           )}
           <section className="block">
-            <h3 className="block-title">
-              Active <span className="num count">{alerts.length}</span>
-            </h3>
+            {urgent.length > 0 && (
+              <h3 className="block-title">
+                Active <span className="num count">{alerts.length}</span>
+              </h3>
+            )}
             <ul className="dashboard-list rows">
               {alerts.map((alert) => (
                 <li key={alert.id} className="alert-row">
                   <Icon name="alert" />
                   <div className="alert-text">
-                    <strong>{alert.title}</strong>
+                    <strong>{alertTitle(alert)}</strong>
                     <p>{alert.body}</p>
                     <small className="row-meta">
-                      {projectButton(alert.projectId)} · <span className="num">{alert.kind}</span> ·{' '}
+                      {projectButton(alert.projectId)} · {alertKindLabel(alert.kind)} ·{' '}
                       <time dateTime={new Date(alert.at).toISOString()}>{relativeTime(alert.at, now)}</time>
                     </small>
                   </div>

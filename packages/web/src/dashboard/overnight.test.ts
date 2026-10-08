@@ -7,6 +7,7 @@ import {
   parseDigest,
   safeDigestUrl,
   summarizeDigest,
+  formatWindow,
 } from './overnight';
 
 describe('overnight digest', () => {
@@ -135,5 +136,22 @@ describe('overnight digest', () => {
     await expect(fetchDigest(undefined, request)).rejects.toThrow(
       /^The overnight digest could not be read\.$/,
     );
+  });
+});
+
+describe('formatWindow', () => {
+  it('formats a cross-midnight window with its span', () => {
+    const from = new Date(2026, 9, 6, 22, 0).getTime();
+    const to = new Date(2026, 9, 7, 7, 30).getTime();
+    expect(formatWindow(from, to)).toBe('Oct 6, 22:00 → Oct 7, 07:30 · 9h 30m');
+  });
+  it('drops the repeated date for a same-day window', () => {
+    const from = new Date(2026, 9, 7, 1, 0).getTime();
+    const to = new Date(2026, 9, 7, 3, 0).getTime();
+    expect(formatWindow(from, to)).toBe('Oct 7, 01:00 → 03:00 · 2h');
+  });
+  it('never shows a negative span', () => {
+    const at = new Date(2026, 9, 7, 3, 0).getTime();
+    expect(formatWindow(at, at - 1000)).toBe('Oct 7, 03:00 → 02:59 · 0m');
   });
 });
