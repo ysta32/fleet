@@ -10,7 +10,7 @@ references fail comparison if dimensions differ or more than 0.5% of pixels diff
 
 After reviewing the screenshots, run `npm run visual:update` to create or replace
 the reference PNGs in this directory. Add `-- --only=typical` to update just that
-scenario. Baselines are intentionally absent until the restyled output is approved.
+scenario. The committed baseline was approved after design rounds 4-8 (see DESIGN.md).
 
 The runner requires Chrome or Chromium; set `CHROME_PATH` if it is not found
 automatically. Generated HTML, screenshots, diffs, and the contact sheet are in
