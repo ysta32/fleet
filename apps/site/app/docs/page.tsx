@@ -181,8 +181,10 @@ export default function Docs() {
                 counts, not status or handoff excerpts.
               </li>
               <li>
-                <strong>Outbound only when you ask.</strong> GitHub through your own <code>gh</code>, and ntfy if you
-                set a topic. Nothing else leaves the machine.
+                <strong>Two outbound calls, both through your own accounts.</strong> GitHub status is on by default.
+                It runs read-only through your signed-in <code>gh</code>, only for repos with activity in the last 24
+                hours, and turns off with <code>&quot;github&quot;: false</code>. ntfy runs only if you set a topic.
+                Nothing else leaves the machine.
               </li>
             </ul>
           </section>

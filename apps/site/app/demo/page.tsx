@@ -15,7 +15,7 @@ export default function Demo() {
       <div className="demo-bar">
         <span>
           <strong>Synthetic fleet.</strong>{' '}
-          <span style={{ color: 'var(--fl-fg-muted)' }}>Drag to orbit, scroll to zoom, click a vessel for details.</span>
+          <span style={{ color: 'var(--fl-fg-muted)' }}>Drag to orbit, scroll to zoom, click a vessel, or use the index for the keyboard.</span>
         </span>
         <Link className="link-arrow" href="/docs#install">
           Install Fleet <Icon name="chevron" />

@@ -228,7 +228,7 @@ export default function Home() {
                 <dt>
                   <code>github</code>
                 </dt>
-                <dd>Read-only, through your own gh login.</dd>
+                <dd>true. Read-only PR and CI status through your own gh, for repos active in the last 24h.</dd>
                 <dt>
                   <code>config</code>
                 </dt>

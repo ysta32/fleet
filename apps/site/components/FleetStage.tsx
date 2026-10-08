@@ -2,7 +2,10 @@
 import { useEffect, useRef, useState } from 'react';
 
 interface Island {
-  mount(el: HTMLElement, opts: { seed?: number; projects?: number; onReady?: () => void }): { unmount(): void };
+  mount(
+    el: HTMLElement,
+    opts: { seed?: number; projects?: number; interactive?: boolean; onReady?: () => void },
+  ): { unmount(): void };
 }
 
 type Why = 'pending' | 'live' | 'reduced' | 'no-webgl' | 'error' | 'save-data';
@@ -107,13 +110,17 @@ export function FleetStage({
     if (!webglAvailable()) return setWhy('no-webgl');
     let handle: { unmount(): void } | null = null;
     let disposed = false;
+    // `disposed` covers unmount; reduced motion is re-read at every step because it can switch on while the
+    // startup is still waiting for idle/interaction or while the island module is downloading.
     const start = () => {
+      if (disposed || mq.matches) return;
       import(/* webpackIgnore: true */ '/island/fleet-scene.js' as string)
         .then((mod: Island) => {
-          if (disposed) return;
+          if (disposed || mq.matches) return;
           handle = mod.mount(el, {
             seed,
             projects,
+            interactive,
             onReady: () => {
               if (!disposed) {
                 setReady(true);
@@ -122,11 +129,12 @@ export function FleetStage({
             },
           });
         })
-        .catch(() => !disposed && setWhy('error'));
+        .catch(() => !disposed && !mq.matches && setWhy('error'));
     };
     const cancel = interactive ? (start(), () => undefined) : afterLcp(start);
     const onChange = () => {
       if (mq.matches) {
+        cancel();
         handle?.unmount();
         handle = null;
         setReady(false);

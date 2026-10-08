@@ -1608,3 +1608,79 @@ pre.code .c {
     padding-top: 46svh;
   }
 }
+
+/* ---- /demo keyboard index of the scene (island/entry.tsx FleetIndex) ---- */
+.fleet-index {
+  position: absolute;
+  z-index: 2;
+  top: var(--fl-space-5);
+  left: var(--site-gutter);
+  width: min(300px, calc(100% - 2 * var(--site-gutter)));
+  font-size: var(--fl-text-sm);
+}
+.fleet-index button {
+  display: flex;
+  width: 100%;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--fl-space-3);
+  min-height: 32px;
+  padding: var(--fl-space-1) var(--fl-space-3);
+  border: 0;
+  border-radius: var(--fl-radius-xs);
+  background: transparent;
+  color: var(--fl-fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.fleet-index button:hover {
+  background: var(--fl-surface-2);
+}
+.fleet-index button[aria-pressed='true'] {
+  background: var(--fl-accent-soft);
+  box-shadow: inset 2px 0 0 var(--fl-accent);
+}
+.fleet-index .fleet-index-toggle {
+  min-height: 40px;
+  align-items: center;
+  background: var(--fl-glass);
+  backdrop-filter: blur(var(--fl-blur-md));
+  -webkit-backdrop-filter: blur(var(--fl-blur-md));
+  border: var(--fl-hairline) solid var(--fl-border);
+  border-radius: var(--fl-radius-sm);
+  font-weight: 600;
+}
+.fleet-index-list {
+  margin: var(--fl-space-2) 0 0;
+  padding: var(--fl-space-2);
+  list-style: none;
+  max-height: min(56vh, 520px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--fl-glass);
+  backdrop-filter: blur(var(--fl-blur-md));
+  -webkit-backdrop-filter: blur(var(--fl-blur-md));
+  border: var(--fl-hairline) solid var(--fl-border);
+  border-radius: var(--fl-radius-md);
+  box-shadow: var(--fl-elev-2);
+}
+.fleet-index-list ul {
+  margin: 0 0 var(--fl-space-2);
+  padding: 0 0 0 var(--fl-space-3);
+  list-style: none;
+}
+.fleet-index-station {
+  font-family: var(--fl-font-display);
+  font-size: var(--fl-text-md);
+}
+.fleet-index-meta,
+.fleet-index .num {
+  font-family: var(--fl-font-mono);
+  font-size: var(--fl-text-2xs);
+  color: var(--fl-fg-muted);
+  white-space: nowrap;
+}
+.fleet-index button[data-status='waiting'] .fleet-index-meta {
+  color: var(--fl-accent);
+}

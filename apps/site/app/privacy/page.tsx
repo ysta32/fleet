@@ -25,8 +25,11 @@ export default function Privacy() {
             machine. We operate no server that receives your data, and the app has no telemetry.
           </p>
           <p>
-            Fleet contacts other services only when you turn them on: GitHub through your own <code>gh</code> login, and
-            the ntfy topic you configure. Those services have their own privacy policies.
+            Fleet talks to two outside services. <strong>GitHub is on by default</strong>: through your own signed-in{' '}
+            <code>gh</code> CLI, it reads PR, CI and deploy status, but only for repos with Claude Code activity in the
+            last 24 hours. The results stay in memory on your machine. To turn it off, set{' '}
+            <code>&quot;github&quot;: false</code> in <code>~/.config/fleet/config.json</code>. <strong>ntfy is off</strong>{' '}
+            until you set a topic. GitHub and ntfy have their own privacy policies.
           </p>
           <p>
             See the <Link href="/docs#privacy">privacy model</Link> in the docs for the technical details.

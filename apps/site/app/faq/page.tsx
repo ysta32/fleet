@@ -8,7 +8,7 @@ export const metadata = pageMeta('faq', 'FAQ', 'Short answers about what Fleet r
 const QA: [string, React.ReactNode][] = [
   [
     'Does Fleet send my transcripts anywhere?',
-    'No. The collector reads them on your Mac and serves a summary on 127.0.0.1. There is no Fleet server and no telemetry. GitHub and ntfy are contacted only if you enable them.',
+    'No. The collector reads them on your Mac and serves a summary on 127.0.0.1. There is no Fleet server and no telemetry. By default it asks GitHub, read-only through your own gh CLI, for PR and CI status of repos you worked in during the last 24 hours. Set "github": false in ~/.config/fleet/config.json to stop that. ntfy is contacted only if you set a topic.',
   ],
   [
     'Does it change how Claude Code runs?',
