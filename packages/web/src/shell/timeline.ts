@@ -65,7 +65,7 @@ export interface TimelineRow {
   time: string;
   /** events in this row's same-second run, counting itself (1 when it stands alone); 0 on followers */
   run: number;
-  /** happened within the same second as the row before, so it joins that row's run with no time */
+  /** in the same clock second as its run's first row, so it joins that run with no time of its own */
   follows: boolean;
 }
 
@@ -77,9 +77,11 @@ export interface TimelineRow {
 export function timelineRows(events: readonly FleetEvent[]): TimelineRow[] {
   const rows: TimelineRow[] = [];
   let head: TimelineRow | undefined;
+  const second = (at: number) => Math.floor(at / 1000);
   events.forEach((event, index) => {
     const previous = index > 0 ? events[index - 1] : undefined;
-    if (head && previous && Math.floor((event.ts - previous.ts) / 1000) <= 0) {
+    // the same clock second as the run's first event: gaps alone would chain 0, 0.9, 1.8, 2.7s into one
+    if (head && second(event.ts) === second(head.event.ts)) {
       head.run++;
       rows.push({ event, time: '', run: 0, follows: true });
       return;

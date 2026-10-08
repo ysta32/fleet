@@ -599,6 +599,15 @@ describe('spendNote', () => {
     const odd = spendNote(spend(0.125, 10.13, 2, 4));
     expect(odd.title).toContain('$0.13. Sessions started before it add $10.00, for $10.13');
   });
+  it('rounds the split the way the shown figures round, not with Math.round', () => {
+    // formatCost shows 1.005 as $1.01 (Math.round(1.005 * 100) is 100), so earlier must be $0.99
+    expect(formatCost(1.005)).toBe('$1.01');
+    const note = spendNote(spend(1.005, 2, 1, 2));
+    expect(note.title).toBe(
+      'Today counts sessions started since local midnight: $1.01. ' +
+        'Sessions started before it add $0.99, for $2.00 in all.',
+    );
+  });
   it('counts every session when all of them started today', () => {
     expect(spendNote(spend(4, 4, 3, 3))).toEqual({ text: 'Across 3 sessions' });
     expect(spendNote(spend(0, 0, 0, 1))).toEqual({ text: 'Across 1 session' });

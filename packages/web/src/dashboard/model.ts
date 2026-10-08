@@ -87,6 +87,11 @@ export function aggregateFleet(snapshot: FleetSnapshot, now: number) {
   return { tokens, costTotal: spend.totalUsd, costToday: spend.todayUsd, spend, projects };
 }
 
+/** Whole cents of a cost as formatCost shows it ("$1.01" for 1.005), so shown figures add up. */
+function shownCents(value: number): number {
+  return Math.round(Number(formatCost(value).replace(/[^0-9.-]/g, '')) * 100);
+}
+
 /**
  * The note under the Overview's spend headline. The headline already shows today's spend, so the note
  * adds what it leaves out: how many sessions it covers and, when sessions started before midnight are
@@ -95,8 +100,9 @@ export function aggregateFleet(snapshot: FleetSnapshot, now: number) {
 export function spendNote(spend: SessionSpend): { text: string; title?: string } {
   const plural = (count: number) => `${count} ${count === 1 ? 'session' : 'sessions'}`;
   if (spend.earlierUsd < 0.005) return { text: `Across ${plural(spend.sessions)}` };
-  // Split in whole cents of the shown figures, so today plus earlier reads exactly as the total.
-  const earlier = (Math.round(spend.totalUsd * 100) - Math.round(spend.todayUsd * 100)) / 100;
+  // Split in whole cents of the shown figures (as formatCost rounds them, not Math.round), so today
+  // plus earlier reads exactly as the total.
+  const earlier = (shownCents(spend.totalUsd) - shownCents(spend.todayUsd)) / 100;
   return {
     text: `${plural(spend.todaySessions)} since midnight · ${formatCost(spend.totalUsd)} including older sessions`,
     title:

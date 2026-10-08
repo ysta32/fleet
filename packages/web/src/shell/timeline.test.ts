@@ -86,6 +86,18 @@ describe('timelineRows', () => {
     expect(rows.map((row) => row.time)).toEqual(['02:05:31', '+1s', '+1m']);
     expect(rows.every((row) => row.run === 1 && !row.follows)).toBe(true);
   });
+  it('groups by clock second, so sub-second gaps never chain across seconds', () => {
+    const rows = timelineRows([ev(at, 1), ev(at + 900, 2), ev(at + 1_800, 3), ev(at + 2_700, 4)]);
+    expect(rows.map((row) => [row.time, row.run, row.follows])).toEqual([
+      ['02:05:31', 2, false],
+      ['', 0, true],
+      ['+0s', 1, false],
+      ['+0s', 1, false],
+    ]);
+    // a run never spans two clock seconds, even when each gap is under a second
+    const late = timelineRows([ev(at + 700, 1), ev(at + 1_200, 2)]);
+    expect(late.map((row) => row.follows)).toEqual([false, false]);
+  });
   it('returns no rows for no events', () => {
     expect(timelineRows([])).toEqual([]);
   });

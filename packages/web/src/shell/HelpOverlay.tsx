@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import type { ReactNode } from 'react';
 import { Icon, Kbd } from './Icon';
 import { KEYMAP } from './hotkeys';
 import { useMediaQuery, useModal } from './modal';
@@ -12,15 +13,7 @@ export function HelpOverlay({ onClose, demo = false }: { onClose(): void; demo?:
   useEffect(() => {
     dialog.current?.focus({ preventScroll: true });
   }, []);
-  const groups = [...new Set(KEYMAP.map((entry) => entry.group))];
-  // Phones rarely have a keyboard, so there the phone-alerts switch leads (in reading and tab order)
-  // and the shortcuts follow; on a 375px screen the switch would otherwise sit below the fold.
   const phone = useMediaQuery('(max-width: 767px)');
-  const push = (
-    <div className={`help-push${phone ? ' help-push-first' : ''}`}>
-      <PushToggle demo={demo} />
-    </div>
-  );
   return (
     <div
       ref={overlay}
@@ -43,30 +36,51 @@ export function HelpOverlay({ onClose, demo = false }: { onClose(): void; demo?:
             <Icon name="close" />
           </button>
         </header>
-        <div className="help-body">
-          {phone && push}
-          <div className="help-groups">
-            {groups.map((group) => (
-              <section key={group}>
-                <h3 className="micro">{group}</h3>
-                <dl>
-                  {KEYMAP.filter((entry) => entry.group === group).map((entry) => (
-                    <div key={entry.label} className="help-row">
-                      <dt>{entry.label}</dt>
-                      <dd>
-                        {entry.keys.map((key) => (
-                          <Kbd key={key}>{key}</Kbd>
-                        ))}
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
-              </section>
-            ))}
-          </div>
-          {!phone && push}
-        </div>
+        <HelpBody phone={phone} demo={demo} />
       </div>
+    </div>
+  );
+}
+
+function Shortcuts(): ReactNode {
+  const groups = [...new Set(KEYMAP.map((entry) => entry.group))];
+  return (
+    <div className="help-groups">
+      {groups.map((group) => (
+        <section key={group}>
+          <h3 className="micro">{group}</h3>
+          <dl>
+            {KEYMAP.filter((entry) => entry.group === group).map((entry) => (
+              <div key={entry.label} className="help-row">
+                <dt>{entry.label}</dt>
+                <dd>
+                  {entry.keys.map((key) => (
+                    <Kbd key={key}>{key}</Kbd>
+                  ))}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Phones rarely have a keyboard, so there the phone-alerts switch leads (in reading and tab order)
+ * and the shortcuts follow; on a 375px screen the switch would otherwise sit below the fold. The
+ * switch keeps one fixed slot, and the stateless shortcut list renders on either side of it, so
+ * crossing the breakpoint never remounts or moves the switch (its focus and demo state survive).
+ */
+export function HelpBody({ phone, demo }: { phone: boolean; demo: boolean }) {
+  return (
+    <div className="help-body">
+      {phone ? null : <Shortcuts />}
+      <div className={`help-push${phone ? ' help-push-first' : ''}`}>
+        <PushToggle demo={demo} />
+      </div>
+      {phone ? <Shortcuts /> : null}
     </div>
   );
 }
