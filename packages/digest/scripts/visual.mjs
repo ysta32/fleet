@@ -1,6 +1,6 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { constants } from 'node:fs';
-import { access, copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { access, copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { delimiter, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -49,6 +49,43 @@ async function chromeBinary() {
     }
   }
   throw new Error('Chrome not found; set CHROME_PATH to an executable Chrome or Chromium binary.');
+}
+
+/**
+ * Runs headless Chrome until the screenshot is on disk. Recent Chrome builds sometimes keep running
+ * after `--screenshot` has written the file, so a finished, size-stable PNG counts as success and
+ * the process is killed instead of waiting for an exit that never comes.
+ */
+function capture(chrome, args, screenshot, timeoutMs = 60_000) {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(chrome, args, { stdio: 'ignore' });
+    let lastSize = -1;
+    let settled = false;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearInterval(poll);
+      clearTimeout(timer);
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      if (error) reject(error);
+      else resolvePromise();
+    };
+    const sizeOf = async () => (await stat(screenshot).catch(() => undefined))?.size ?? 0;
+    const poll = setInterval(async () => {
+      const size = await sizeOf();
+      if (size > 0 && size === lastSize) finish();
+      lastSize = size;
+    }, 400);
+    const timer = setTimeout(
+      () => finish(Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' })),
+      timeoutMs,
+    );
+    child.on('error', (error) => finish(error));
+    child.on('exit', async (code) => {
+      if ((await sizeOf()) > 0) finish();
+      else finish(new Error(`Chrome exited with ${code} and no screenshot`));
+    });
+  });
 }
 
 async function compare(filename) {
@@ -129,7 +166,7 @@ try {
           await rm(screenshot, { force: true });
           await rm(join(diffs, filename), { force: true });
           try {
-            execFileSync(
+            await capture(
               chrome,
               [
                 '--headless=new',
@@ -137,7 +174,7 @@ try {
                 '--hide-scrollbars',
                 '--force-device-scale-factor=1',
                 `--window-size=${width},${surface === 'page' ? 2400 : 1600}`,
-                `--user-data-dir=${profile}`,
+                `--user-data-dir=${join(profile, filename)}`,
                 '--no-first-run',
                 '--no-default-browser-check',
                 '--disable-background-networking',
@@ -145,7 +182,7 @@ try {
                 `--screenshot=${screenshot}`,
                 pathToFileURL(htmlPath).href,
               ],
-              { timeout: 60_000, killSignal: 'SIGKILL', stdio: 'pipe' },
+              screenshot,
             );
             const png = PNG.sync.read(await readFile(screenshot));
             if (png.width !== width || png.height !== (surface === 'page' ? 2400 : 1600)) {
