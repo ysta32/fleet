@@ -79,7 +79,7 @@ export function loadConfig(
     if (typeof notify[key] === 'boolean') config.notify[key] = notify[key];
   }
   if (typeof notify.ntfyUrl === 'string') config.notify.ntfyUrl = notify.ntfyUrl;
-  if (typeof raw.port === 'number' && Number.isInteger(raw.port) && raw.port >= 4900 && raw.port <= 4999) {
+  if (typeof raw.port === 'number' && Number.isInteger(raw.port) && raw.port >= 4500 && raw.port <= 4999) {
     config.port = raw.port;
   }
   return config;

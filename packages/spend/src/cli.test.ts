@@ -157,9 +157,9 @@ describe('fleet-spend cli', () => {
     expect(await done).toBe(0);
   });
 
-  it('serve rejects ports outside 4900-4999', async () => {
+  it('serve rejects ports outside 4500-4999', async () => {
     const r = await run(['serve', '--port', '8080']);
     expect(r.code).toBe(1);
-    expect(r.stderr).toContain('4900');
+    expect(r.stderr).toContain('4500');
   });
 });

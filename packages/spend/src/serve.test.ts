@@ -1,7 +1,7 @@
 import { request } from 'node:http';
 import { describe, expect, it } from 'vitest';
 import { DEMO_SUMMARY } from './web/index.js';
-import { loopbackHost, startServer, type RunningServer } from './serve.js';
+import { loopbackHost, startServer, validPort, type RunningServer } from './serve.js';
 import type { SpendBrief } from './contracts.js';
 
 const brief: SpendBrief = {
@@ -61,10 +61,14 @@ describe('serve', () => {
     expect(loopbackHost(undefined, 4917)).toBe(false);
   });
 
-  it('refuses ports outside 4900-4999', async () => {
+  it('refuses ports outside 4500-4999', async () => {
     const load = async () => ({ summary: DEMO_SUMMARY, brief });
     await expect(startServer({ port: 0, load })).rejects.toThrow(RangeError);
     await expect(startServer({ port: 5000, load })).rejects.toThrow(RangeError);
+  });
+
+  it('accepts the whole 4500-4999 range', () => {
+    expect([4499, 4500, 4585, 4917, 4999, 5000].map(validPort)).toEqual([false, true, true, true, true, false]);
   });
 
   it('serves JSON, the page, guards Host, and caches for 30s', async () => {

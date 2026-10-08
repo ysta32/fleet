@@ -4,7 +4,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { createRequire } from 'node:module';
 import type { SpendBrief, SpendSummary } from './contracts.js';
 
-export const PORT_MIN = 4900;
+export const PORT_MIN = 4500;
 export const PORT_MAX = 4999;
 export const CACHE_MS = 30_000;
 const HOST = '127.0.0.1';

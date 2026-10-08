@@ -39,7 +39,7 @@ export interface SpendConfig {
     /** optional direct ntfy topic URL for standalone use; default "" (disabled) */
     ntfyUrl: string;
   };
-  /** standalone `fleet-spend serve` port, must be within 4900-4999. default 4917 */
+  /** standalone `fleet-spend serve` port, must be within 4500-4999. default 4917 */
   port: number;
 }
 

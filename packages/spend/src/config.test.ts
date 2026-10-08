@@ -46,7 +46,7 @@ describe('spend config', () => {
     });
   });
 
-  it.each([4899, 5000, 4917.5, '4917', null])('defaults invalid port %s', (port) => {
+  it.each([4499, 5000, 4917.5, '4917', null])('defaults invalid port %s', (port) => {
     writeFileSync(path, JSON.stringify({ port }));
     expect(loadConfig(path).port).toBe(4917);
   });
