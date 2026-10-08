@@ -2,6 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createReadStream, promises as fsp } from 'node:fs';
 import http from 'node:http';
 import { isIP } from 'node:net';
+import { networkInterfaces } from 'node:os';
 import path from 'node:path';
 import { PROTOCOL_VERSION } from '@fleet/shared';
 import type { Alert, FleetConfig, FleetEvent, FleetSnapshot, HistoryResponse } from '@fleet/shared';
@@ -29,6 +30,8 @@ export interface CreateServerOptions {
   onExternalAlert?: (alert: ExternalAlert) => void;
   /** extra GET JSON routes keyed by exact path (e.g. "/api/spend"); remote access only with shareContent */
   extraGet?: Record<string, (req: http.IncomingMessage) => Promise<unknown> | unknown>;
+  /** host other devices can reach this collector at (LAN/Tailscale IP); defaults to the first external IPv4 */
+  shareHost?: () => string | undefined;
 }
 
 /**
@@ -91,6 +94,14 @@ const CONTENT_TYPES: Record<string, string> = {
   '.hdr': 'application/octet-stream',
   '.ktx2': 'image/ktx2',
 };
+
+/** First non-internal IPv4 address (LAN or Tailscale), or undefined when offline. */
+function defaultShareHost(): string | undefined {
+  for (const list of Object.values(networkInterfaces())) {
+    for (const i of list ?? []) if (i.family === 'IPv4' && !i.internal) return i.address;
+  }
+  return undefined;
+}
 
 function defaultIsLoopback(req: http.IncomingMessage): boolean {
   const addr = req.socket.remoteAddress;
@@ -381,6 +392,24 @@ export function createServer(opts: CreateServerOptions): http.Server {
       return true;
     }
     return host !== String(req.headers.host ?? '').toLowerCase();
+  }
+
+  /**
+   * URL another device on the LAN/tailnet can open (no token: the device still has to unlock).
+   * Only computed for local requests when remote access is enabled.
+   */
+  function shareUrl(req: http.IncomingMessage): string | undefined {
+    const host = (opts.shareHost ?? defaultShareHost)();
+    const port = req.socket.localPort;
+    if (!host || !port) return undefined;
+    const literal = isIP(host) === 6 ? `[${host}]` : host;
+    let url: URL;
+    try {
+      url = new URL(`http://${literal}:${port}/`);
+    } catch {
+      return undefined;
+    }
+    return url.toString();
   }
 
   /** Failed POST /api/session attempts per client address, to slow token guessing. */
@@ -726,16 +755,27 @@ export function createServer(opts: CreateServerOptions): http.Server {
       return sendError(res, 405, 'method not allowed');
     }
     const local = isLocal(req);
-    if (!local && !authorize(req, query, res)) {
+    const api = rawPath === '/api' || rawPath.startsWith('/api/');
+    // Remote clients may load the static web shell (it holds no fleet data) so a fresh browser can
+    // reach the token gate; every /api route still requires the token. authorize() also turns a
+    // valid ?token= link on a shell path into the session cookie.
+    if (!local && !authorize(req, query, res) && api) {
       res.removeHeader('Set-Cookie');
       res.setHeader('WWW-Authenticate', 'Bearer');
       return sendError(res, 401, 'unauthorized');
     }
 
-    if (rawPath === '/api' || rawPath.startsWith('/api/')) {
+    if (api) {
       switch (rawPath) {
-        case '/api/health':
-          return sendJson(res, 200, { ok: true, version: SERVER_VERSION, protocol: PROTOCOL_VERSION });
+        case '/api/health': {
+          const share = local && config.lan ? shareUrl(req) : undefined;
+          return sendJson(res, 200, {
+            ok: true,
+            version: SERVER_VERSION,
+            protocol: PROTOCOL_VERSION,
+            ...(share ? { shareUrl: share } : {}),
+          });
+        }
         case '/api/snapshot': {
           if (!local) return sendRawJson(res, 200, remoteSnapshot().json);
           return sendJson(res, 200, store.snapshot());

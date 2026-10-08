@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { IconName } from '@fleet/ui';
 import type { ModelFamily, OrchTask } from '@fleet/shared';
@@ -147,6 +147,45 @@ function PanelHead({ title, meta, children }: { title: string; meta?: ReactNode;
       {meta && <p className="panel-meta">{meta}</p>}
       {children}
     </header>
+  );
+}
+
+type SessionSort = { key: SessionSortKey; direction: 'asc' | 'desc' };
+
+/**
+ * Sort control for the compact (card) layout, where the table header and its sort buttons are
+ * hidden. Shown only by the narrow-width container query in dashboard.css.
+ */
+function CompactSort({ sort, onSort }: { sort: SessionSort; onSort: (sort: SessionSort) => void }) {
+  const id = useId();
+  const descending = sort.direction === 'desc';
+  return (
+    <div className="compact-sort">
+      <label htmlFor={id}>Sort</label>
+      <select
+        id={id}
+        value={sort.key}
+        onChange={(event) => onSort({ key: event.target.value as SessionSortKey, direction: sort.direction })}
+      >
+        {columns.map((column) => (
+          <option key={column.key} value={column.key}>
+            {column.label}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        aria-label={
+          descending ? 'Sorted descending, switch to ascending' : 'Sorted ascending, switch to descending'
+        }
+        onClick={() => onSort({ key: sort.key, direction: descending ? 'asc' : 'desc' })}
+      >
+        <span className={`sort-caret ${sort.direction}`} aria-hidden="true">
+          <Icon name="chevron" />
+        </span>
+        {descending ? 'Desc' : 'Asc'}
+      </button>
+    </div>
   );
 }
 
@@ -439,7 +478,9 @@ export default function Dashboard({
                 {query ? ` matching “${query}”` : ` of ${snapshot.sessions.length}`}
               </>
             }
-          />
+          >
+            {sessions.length > 0 && <CompactSort sort={sort} onSort={setSort} />}
+          </PanelHead>
           {sessions.length > 0 && (
             <div className="dashboard-table-wrap">
               <table className="dashboard-table">

@@ -145,6 +145,27 @@ describe('Dashboard', () => {
     expect(html).toContain('Edit · example.ts');
     expect(html).toContain('data-label="Tokens"');
   });
+  it('renders a compact sort control covering every column for the card layout', () => {
+    const html = render('sessions');
+    const control = /<div class="compact-sort">([\s\S]*?)<\/div>/.exec(html)?.[1] ?? '';
+    expect(control).toContain('<select');
+    for (const label of [
+      'Session',
+      'Project',
+      'Model',
+      'Status',
+      'Last tool',
+      'Tokens',
+      'Cost',
+      'Last activity',
+    ])
+      expect(control).toContain(`>${label}</option>`);
+    expect(control).toMatch(/<option value="lastActivity" selected="">Last activity<\/option>/);
+    expect(control).toContain('aria-label="Sorted descending, switch to ascending"');
+    expect(
+      render('sessions', { ...fixture(), snapshot: { ...fixture().snapshot!, sessions: [] } }),
+    ).not.toContain('compact-sort');
+  });
   it('renders army progress, state-colored SVG tasks, and inflight state', () => {
     const html = render('armies');
     expect(html).toContain('<progress');

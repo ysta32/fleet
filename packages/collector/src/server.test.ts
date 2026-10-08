@@ -264,9 +264,9 @@ describe('endpoints (loopback)', () => {
 });
 
 describe('auth matrix', () => {
-  it('remote without token -> 401 everywhere', async () => {
+  it('remote without token -> 401 on every API route (the static shell is public)', async () => {
     await start({ remote: true, webDir: tmp });
-    for (const p of ['/api/health', '/api/snapshot', '/api/events', '/api/history', '/']) {
+    for (const p of ['/api/health', '/api/snapshot', '/api/events', '/api/history']) {
       expect((await get(p)).status).toBe(401);
     }
     expect((await get('/api/snapshot', { authorization: 'Bearer wrong' })).status).toBe(401);

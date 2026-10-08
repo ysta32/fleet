@@ -580,7 +580,43 @@
   color: var(--fl-fg-muted);
   font-weight: 400;
 }
+/* compact sort: replaces the hidden table header in the card layout below */
+.compact-sort {
+  display: none;
+  align-items: center;
+  gap: var(--fl-space-2);
+  margin-left: auto;
+  align-self: center;
+  color: var(--fl-fg-muted);
+  font: 500 var(--fl-text-2xs) / 1 var(--fl-font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.compact-sort select,
+.compact-sort button {
+  height: 32px;
+  padding: 0 var(--fl-space-3);
+  border: var(--fl-hairline) solid var(--fl-border-strong);
+  border-radius: var(--fl-radius-sm);
+  background: var(--fl-surface-2);
+  color: var(--fl-fg);
+  font: inherit;
+}
+.compact-sort button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fl-space-1);
+  cursor: pointer;
+}
+.compact-sort select:focus-visible,
+.compact-sort button:focus-visible {
+  outline: 2px solid var(--fl-accent, currentColor);
+  outline-offset: 1px;
+}
 @container inspector (max-width: 640px) {
+  .compact-sort {
+    display: flex;
+  }
   .dashboard-table thead {
     position: absolute;
     width: 1px;

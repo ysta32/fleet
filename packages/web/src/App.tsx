@@ -17,6 +17,7 @@ import { TokenGate } from './shell/TokenGate';
 import { Onboarding } from './shell/Onboarding';
 import { SelectionCard } from './shell/SelectionCard';
 import { useConnection } from './shell/connection';
+import { useShareUrl } from './shell/share';
 import { useTheme } from './shell/theme';
 import type { PaletteItem } from './shell/palette';
 import './styles.css';
@@ -122,23 +123,28 @@ function Shell() {
     },
     [view, toast],
   );
+  const shareUrl = useShareUrl(view.mode !== 'demo');
   const copyLink = useCallback(() => {
-    const url = new URL(window.location.href);
-    url.searchParams.delete('token');
+    if (!shareUrl) return;
     void navigator.clipboard
-      ?.writeText(url.toString())
+      ?.writeText(shareUrl)
       .then(() =>
         toast.push({
-          message:
-            'Link copied. Phones on your network also need the token: run fleet token on this machine.',
+          message: 'Link copied. The other device also needs the token: run fleet token on this machine.',
         }),
       )
       .catch(() =>
         toast.push({
           tone: 'danger',
-          message: 'Clipboard blocked by the browser. Copy the address bar instead.',
+          message: `Clipboard blocked by the browser. Open ${shareUrl} on the other device.`,
         }),
       );
+  }, [shareUrl, toast]);
+  const linkHint = useCallback(() => {
+    toast.push({
+      message:
+        'No network address to share: remote access is off or this machine is offline. Run fleet token on this machine to get a link.',
+    });
   }, [toast]);
 
   useHotkeys({
@@ -214,7 +220,22 @@ function Shell() {
         shortcut: ['T'],
         run: theme.toggle,
       },
-      { id: 'lan', group: 'Commands', label: 'Copy link for another device', icon: 'phone', run: copyLink },
+      shareUrl
+        ? {
+            id: 'lan',
+            group: 'Commands',
+            label: 'Copy link for another device',
+            icon: 'phone',
+            run: copyLink,
+          }
+        : {
+            id: 'lan',
+            group: 'Commands',
+            label: 'Open on another device',
+            meta: 'run fleet token',
+            icon: 'phone',
+            run: linkHint,
+          },
       {
         id: 'help',
         group: 'Commands',
@@ -255,7 +276,18 @@ function Shell() {
         });
     }
     return items;
-  }, [snapshot, view.mode, view.replay.exit, theme.resolved, theme.toggle, go, startReplay, copyLink]);
+  }, [
+    snapshot,
+    view.mode,
+    view.replay.exit,
+    theme.resolved,
+    theme.toggle,
+    go,
+    startReplay,
+    copyLink,
+    shareUrl,
+    linkHint,
+  ]);
 
   if (link.state === 'unauthorized') return <TokenGate />;
 
