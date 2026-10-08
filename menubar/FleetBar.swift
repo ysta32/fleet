@@ -93,15 +93,32 @@ private func templateIcon() -> NSImage {
     return image
 }
 
-private func configuredPort() -> Int {
+/// FLEET_PORT / FLEET_CONFIG persisted by `fleet install` in the launchd plist.
+private func launchdEnvironment() -> [String: String] {
     let url = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".config/fleet/config.json")
+        .appendingPathComponent("Library/LaunchAgents/dev.fleet.collector.plist")
+    guard let data = try? Data(contentsOf: url),
+          let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil)
+            as? [String: Any],
+          let env = plist["EnvironmentVariables"] as? [String: Any]
+    else { return [:] }
+    return env.compactMapValues { $0 as? String }
+}
+
+private func validPort(_ value: Double) -> Bool {
+    value >= 1 && value <= 65535 && value.rounded() == value
+}
+
+private func configuredPort() -> Int {
+    let env = launchdEnvironment()
+    if let raw = env["FLEET_PORT"], let n = Double(raw), validPort(n) { return Int(n) }
+    let url = env["FLEET_CONFIG"].map { URL(fileURLWithPath: $0) }
+        ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config/fleet/config.json")
     guard let data = try? Data(contentsOf: url),
           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
           let port = json["port"] as? NSNumber,
           CFGetTypeID(port) != CFBooleanGetTypeID(),
-          port.doubleValue >= 1, port.doubleValue <= 65535,
-          port.doubleValue.rounded() == port.doubleValue
+          validPort(port.doubleValue)
     else { return 4747 }
     return port.intValue
 }

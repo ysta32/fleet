@@ -152,7 +152,9 @@ describe('Dashboard', () => {
   it('renders the spend not-installed state without needing a snapshot', () => {
     const html = render('spend', { ...fixture(), snapshot: null });
     expect(html).toContain('Spend tracking not installed');
-    expect(html).toContain('Connect Fleet Spend');
+    expect(html).toContain('npm i fleet-spend');
+    expect(html).toContain('fleet install');
+    expect(html).not.toContain('npx');
     expect(html).not.toContain('Loading spend tracking');
   });
   it('resolves the optional spend module to a real null export when absent', async () => {

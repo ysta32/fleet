@@ -85,10 +85,11 @@ export function Spend({ demo = false }: { demo?: boolean }) {
         <Icon name="cost" className="empty-icon" />
         <p className="empty-title">Spend tracking not installed</p>
         <p className="empty-body">
-          Connect Fleet Spend to see where your model budget goes, by day, model and project. It reads usage
-          logs on this machine and never uploads them. Run it once, then reload Fleet.
+          Add Fleet Spend to see where your model budget goes, by day, model and project. It reads usage logs
+          on this machine and never uploads them. Install it in your Fleet checkout, rebuild, then run fleet
+          install to restart the collector.
         </p>
-        <CopyCommand command="npx fleet-spend" />
+        <CopyCommand command="npm i fleet-spend" />
       </div>
     </section>
   );
