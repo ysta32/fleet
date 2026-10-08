@@ -1,10 +1,16 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
+import anchors from '@/lib/poster-anchors.json';
+import world from '@/lib/world.generated.json';
 
 interface Island {
   mount(
     el: HTMLElement,
-    opts: { seed?: number; projects?: number; interactive?: boolean; onReady?: () => void },
+    opts: {
+      world?: { seed: number; start: number; steps: number };
+      interactive?: boolean;
+      onReady?: () => void;
+    },
   ): { unmount(): void };
 }
 
@@ -78,28 +84,90 @@ function afterLcp(cb: () => void): () => void {
   };
 }
 
+/** Poster anchors as CSS custom properties: the stylesheet picks the pair for the poster on screen. */
+const ANCHOR_VARS = Object.fromEntries(
+  Object.entries(anchors).flatMap(([k, a]) => [
+    [`--fx-${k}`, String(a.x)],
+    [`--fy-${k}`, String(a.y)],
+  ]),
+) as React.CSSProperties;
+
+/**
+ * Follows the live scene's waiting station: its tag anchor (the signal pennant), measured each frame in the
+ * stage's own, untransformed coordinates and handed to the stylesheet, which frames it and raises the beacon.
+ * No waiting station on screen: data-signal="none" (beacon down, frame eases back to the whole harbour).
+ */
+function trackSignal(stage: HTMLElement, frame: HTMLElement, host: HTMLElement): () => void {
+  let raf = 0;
+  let visible = true;
+  let last = '';
+  const io = new IntersectionObserver(([e]) => {
+    visible = Boolean(e?.isIntersecting);
+    if (visible && !raf) raf = requestAnimationFrame(step);
+  });
+  io.observe(stage);
+  function step() {
+    raf = 0;
+    if (!visible) return;
+    const tag = [...host.querySelectorAll<HTMLElement>('.fl-viz-tag[data-needs="1"]')].find(
+      (el) => el.style.visibility !== 'hidden' && el.style.display !== 'none',
+    );
+    const sr = stage.getBoundingClientRect();
+    const fr = frame.getBoundingClientRect();
+    if (tag && sr.width > 0 && fr.width > 0) {
+      const z = fr.width / sr.width;
+      const r = tag.getBoundingClientRect();
+      const x = (r.left - fr.left) / z;
+      const y = (r.bottom - fr.top) / z;
+      stage.style.setProperty('--live-ax', `${x.toFixed(1)}px`);
+      stage.style.setProperty('--live-ay', `${y.toFixed(1)}px`);
+      if (last !== 'live') stage.dataset.signal = last = 'live';
+    } else if (last !== 'none') stage.dataset.signal = last = 'none';
+    raf = requestAnimationFrame(step);
+  }
+  raf = requestAnimationFrame(step);
+  return () => {
+    io.disconnect();
+    cancelAnimationFrame(raf);
+  };
+}
+
 /**
  * The real Fleet visualizer over a poster. The poster is a still render of the same scene.
  * Reduced motion, Save-Data or no WebGL keep the poster. The island (public/island/fleet-scene.js)
- * is the FleetScene from packages/web driven by createDemoFleet: synthetic data, no network.
+ * is the FleetScene from packages/web driven by createDemoFleet: synthetic data, no network, the site's
+ * one world (lib/world.mjs). With `signal` (the home hero), a beacon rises from the waiting station and
+ * phones frame that station; both come from the poster's recorded anchor first, then the live scene.
  */
 export function FleetStage({
   posterAlt,
   interactive = false,
-  seed = 7,
-  projects,
+  signal = false,
   onState,
 }: {
   posterAlt: string;
   interactive?: boolean;
-  seed?: number;
-  projects?: number;
+  signal?: boolean;
   onState?: (why: Why) => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
+  const stage = useRef<HTMLDivElement>(null);
+  const frame = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
   const [why, setWhy] = useState<Why>('pending');
   const forced = useForcedTheme();
+
+  useEffect(() => {
+    const st = stage.current;
+    const fr = frame.current;
+    const el = host.current;
+    if (!signal || !ready || !st || !fr || !el) return;
+    const stop = trackSignal(st, fr, el);
+    return () => {
+      stop();
+      st.dataset.signal = 'poster';
+    };
+  }, [signal, ready]);
 
   useEffect(() => onState?.(why), [why, onState]);
 
@@ -121,8 +189,7 @@ export function FleetStage({
         .then((mod: Island) => {
           if (disposed || mq.matches) return;
           handle = mod.mount(el, {
-            seed,
-            projects,
+            world,
             interactive,
             onReady: () => {
               if (!disposed) {
@@ -151,36 +218,51 @@ export function FleetStage({
       mq.removeEventListener('change', onChange);
       handle?.unmount();
     };
-  }, [interactive, seed, projects]);
+  }, [interactive]);
 
   return (
-    <>
-      <picture>
-        {/* Phones get a square still rendered at phone size, so its station labels stay legible. */}
-        {forced ? null : (
-          <source
-            media="(max-width: 720px) and (prefers-color-scheme: light)"
-            srcSet={phonePoster('light')}
+    <div
+      ref={stage}
+      className="stage"
+      data-signal={signal ? 'poster' : undefined}
+      style={signal ? ANCHOR_VARS : undefined}
+    >
+      <div ref={frame} className="stage-frame">
+        <picture>
+          {/* Phones get a square still rendered at phone size, so its station labels stay legible. */}
+          {forced ? null : (
+            <source
+              media="(max-width: 720px) and (prefers-color-scheme: light)"
+              srcSet={phonePoster('light')}
+            />
+          )}
+          <source media="(max-width: 720px)" srcSet={phonePoster(forced ?? 'dark')} />
+          {forced ? null : (
+            <source media="(prefers-color-scheme: light)" srcSet={srcSet('light')} sizes="100vw" />
+          )}
+          <img
+            className="hero-poster"
+            src={`/poster/fleet-${forced ?? 'dark'}-1920.webp`}
+            srcSet={srcSet(forced ?? 'dark')}
+            sizes="100vw"
+            alt={posterAlt}
+            fetchPriority="high"
+            decoding="async"
+            width={1920}
+            height={1080}
+            aria-hidden={ready ? true : undefined}
           />
-        )}
-        <source media="(max-width: 720px)" srcSet={phonePoster(forced ?? 'dark')} />
-        {forced ? null : (
-          <source media="(prefers-color-scheme: light)" srcSet={srcSet('light')} sizes="100vw" />
-        )}
-        <img
-          className="hero-poster"
-          src={`/poster/fleet-${forced ?? 'dark'}-1920.webp`}
-          srcSet={srcSet(forced ?? 'dark')}
-          sizes="100vw"
-          alt={posterAlt}
-          fetchPriority="high"
-          decoding="async"
-          width={1920}
-          height={1080}
-          aria-hidden={ready ? true : undefined}
-        />
-      </picture>
-      <div ref={host} className="hero-live" data-ready={ready} aria-hidden={!interactive} />
-    </>
+        </picture>
+        <div ref={host} className="hero-live" data-ready={ready} aria-hidden={!interactive} />
+      </div>
+      {signal ? (
+        <span className="beacon" aria-hidden="true">
+          <span className="beacon-beam" />
+          <span className="beacon-ring" />
+          <span className="beacon-ring beacon-ring-2" />
+          <span className="beacon-core" />
+        </span>
+      ) : null}
+    </div>
   );
 }

@@ -25,7 +25,10 @@ export default function Home() {
       {/* 1. Hook */}
       <section className="hero grain" aria-labelledby="hero-title">
         <div className="hero-stage">
-          <FleetStage posterAlt="A night harbour of glowing vessels: a synthetic fleet of Claude Code agents grouped by project" />
+          <FleetStage
+            signal
+            posterAlt="A night harbour of glowing vessels: a synthetic fleet of Claude Code agents grouped by project, one station raising an orange signal"
+          />
         </div>
         <div className="hero-horizon" aria-hidden="true" />
         <div className="hero-shade" aria-hidden="true" />
@@ -110,7 +113,7 @@ export default function Home() {
                   last tool call.
                 </p>
               </div>
-              <div className="media" style={{ flex: 1, minHeight: 280 }}>
+              <div className="media media-fixed">
                 <img
                   src="/poster/fleet-close-1280.webp"
                   alt="Close view of the Fleet 3D scene: vessels around project stations, one glowing orange"

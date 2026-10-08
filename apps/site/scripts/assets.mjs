@@ -1,9 +1,14 @@
 // Generates the site's binary assets into public/ (committed; not part of `next build`, which has no browser):
 //   poster/fleet-<dark|light>-<768|1280|1920>.webp  stills of the REAL hero island (FleetScene + createDemoFleet,
 //                                                   synthetic data) rendered by headless Chromium
-//   poster/fleet-<dark|light>-m.webp                square phone still: rendered at 420x420 CSS px and 2x, so
-//                                                   station labels keep their real size on a 375px screen
-//   poster/fleet-close-1280.webp                    a tighter dark still with fewer projects
+//   poster/fleet-<dark|light>-m.webp                square phone still: rendered at 420x420 CSS px and 3x, so
+//                                                   station labels keep their real size on a 375px screen and
+//                                                   stay sharp when the hero frames the waiting station
+//   poster/fleet-close-1280.webp                    a 16:10 dark still for the product panels
+//   lib/poster-anchors.json                         where the waiting station's signal sits in each hero
+//                                                   poster (fractions of the frame), so the page can frame it
+//                                                   and raise its beacon there before any script runs
+// Every still is the site's one world (lib/world.generated.json, written by scripts/prebuild.mjs).
 //   og/<slug>.png                                   1200x630 social cards, one per pageMeta() call in app/
 //   icons/*.png, manifest.webmanifest               favicon + PWA set rasterised from packages/ui/brand
 // Usage: node scripts/prebuild.mjs && ~/.claude/orch/bin/serial e2e -- node scripts/assets.mjs [--only=posters,og,icons]
@@ -94,14 +99,26 @@ async function newPage(browser, { width, height, scheme, scale = 1 }, pages) {
   return { page, ctx, errors };
 }
 
-async function renderScene(browser, { theme, width, height, projects, settleMs, scale = 1 }) {
+const world = JSON.parse(await readFile(path.join(site, 'lib/world.generated.json'), 'utf8'));
+
+/** The waiting station's tag anchor (its signal pennant) as fractions of the viewport, or null. */
+const NEEDS_ANCHOR = () => {
+  const tag = [...document.querySelectorAll('.fl-viz-tag[data-needs="1"]')].find(
+    (el) => el.style.visibility !== 'hidden' && el.style.display !== 'none',
+  );
+  if (!tag) return null;
+  const r = tag.getBoundingClientRect();
+  return { x: r.left / innerWidth, y: r.bottom / innerHeight };
+};
+
+async function renderScene(browser, { theme, width, height, settleMs, scale = 1 }) {
   const html = `<!doctype html><html data-theme="${theme}"><head><meta charset="utf-8">
 <link rel="stylesheet" href="${FONTS_CSS}">
 <style>html,body{margin:0;height:100%;overflow:hidden}#h{position:fixed;inset:0}</style></head>
 <body><div id="h"></div><script type="module">
 import { mount } from '/island/fleet-scene.js';
 await document.fonts.ready;
-mount(document.getElementById('h'), { seed: 7, ${projects ? `projects: ${projects},` : ''} onReady: () => { window.__ready = true; } });
+mount(document.getElementById('h'), { world: ${JSON.stringify(world)}, onReady: () => { window.__ready = true; } });
 </script></body></html>`;
   const { page, ctx, errors } = await newPage(
     browser,
@@ -118,34 +135,40 @@ mount(document.getElementById('h'), { seed: 7, ${projects ? `projects: ${project
   await page.waitForTimeout(settleMs);
   if (errors.length) throw new Error(`scene (${theme}) errors:\n${errors.join('\n')}`);
   const png = await page.screenshot({ type: 'png' });
+  const anchor = await page.evaluate(NEEDS_ANCHOR);
   await ctx.close();
-  return png;
+  return { png, anchor };
 }
 
 async function posters(browser) {
   await mkdir(path.join(pub, 'poster'), { recursive: true });
+  const anchors = {};
+  const need = (a, what) => {
+    if (!a) throw new Error(`${what}: no station needs you in the world at this moment (lib/world.mjs)`);
+    const r = (n) => Math.round(n * 10_000) / 10_000;
+    return { x: r(a.x), y: r(a.y) };
+  };
   for (const theme of ['dark', 'light']) {
-    const png = await renderScene(browser, { theme, width: 1920, height: 1080, settleMs: 7000 });
+    const { png, anchor } = await renderScene(browser, { theme, width: 1920, height: 1080, settleMs: 7000 });
+    anchors[`${theme}-wide`] = need(anchor, `poster ${theme}`);
     for (const w of [768, 1280, 1920]) {
       await sharp(png)
         .resize({ width: w })
         .webp({ quality: w <= 768 ? 70 : 74, effort: 6 })
         .toFile(path.join(pub, `poster/fleet-${theme}-${w}.webp`));
     }
-    const phone = await renderScene(browser, { theme, width: 420, height: 420, scale: 2, settleMs: 7000 });
-    await sharp(phone)
-      .webp({ quality: 72, effort: 6 })
+    const phone = await renderScene(browser, { theme, width: 420, height: 420, scale: 3, settleMs: 7000 });
+    anchors[`${theme}-m`] = need(phone.anchor, `phone poster ${theme}`);
+    await sharp(phone.png)
+      .webp({ quality: 70, effort: 6 })
       .toFile(path.join(pub, `poster/fleet-${theme}-m.webp`));
     console.log(`[assets] poster ${theme}`);
   }
-  const close = await renderScene(browser, {
-    theme: 'dark',
-    width: 1280,
-    height: 800,
-    projects: 3,
-    settleMs: 7000,
-  });
-  await sharp(close).webp({ quality: 76, effort: 6 }).toFile(path.join(pub, 'poster/fleet-close-1280.webp'));
+  await writeFile(path.join(site, 'lib/poster-anchors.json'), JSON.stringify(anchors, null, 2) + '\n');
+  const close = await renderScene(browser, { theme: 'dark', width: 1280, height: 800, settleMs: 7000 });
+  await sharp(close.png)
+    .webp({ quality: 76, effort: 6 })
+    .toFile(path.join(pub, 'poster/fleet-close-1280.webp'));
   console.log('[assets] poster close');
 }
 

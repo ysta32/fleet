@@ -7,9 +7,12 @@ import { createRoot } from 'react-dom/client';
 import { createDemoFleet } from '@fleet/shared';
 import type { DemoFleet, FleetEvent, FleetSnapshot } from '@fleet/shared';
 import FleetScene from '@fleet/web/src/viz/FleetScene';
+import { advanceWorld } from '../lib/world.mjs';
 import type { FleetView, ReplayControls, Selection } from '@fleet/web/src/data/contract';
 
 export interface MountOptions {
+  /** the site's world (lib/world.generated.json): seed, start clock and steps; wins over `seed` */
+  world?: { seed: number; start: number; steps: number };
   seed?: number;
   projects?: number;
   /** /demo: add the keyboard index of stations and agents next to the canvas */
@@ -163,8 +166,12 @@ function FleetIndex({
   );
 }
 
-function Island({ seed, projects, interactive, onReady }: MountOptions) {
-  const [fleet] = useState(() => createDemoFleet({ seed, projects }));
+function Island({ world, seed, projects, interactive, onReady }: MountOptions) {
+  const [fleet] = useState(() =>
+    world
+      ? advanceWorld(createDemoFleet({ seed: world.seed, now: world.start, projects }), world.steps)
+      : createDemoFleet({ seed, projects }),
+  );
   const view = useDemoView(fleet);
   const [selection, setSelection] = useState<Selection>(null);
   useEffect(() => {

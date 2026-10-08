@@ -1,7 +1,8 @@
 // Sections that exist only when their packages resolve at build time (see scripts/prebuild.mjs).
 import { Icon } from '@/components/Icon';
+import { LocalizeTimes } from '@/components/LocalTime';
 import { SpendChart } from '@/components/SpendChart';
-import { digestCss, digestHtml, spendBeat } from '@/lib/optional.generated';
+import { digestCss, digestHtml, digestWindow, spendBeat } from '@/lib/optional.generated';
 import { REPO_URL } from '@/lib/site';
 
 export function DigestSection() {
@@ -19,7 +20,8 @@ export function DigestSection() {
           </h2>
           <p className="lead" style={{ marginTop: 'var(--fl-space-5)' }}>
             One page each morning: merged PRs, deploys, CI failures and what needs you first, across every
-            repo. Rendered at build time by the real digest renderer from its synthetic demo fixture.
+            repo. This one is rendered at build time by the real digest renderer from the demo fleet's last
+            eight hours.
           </p>
           <dl className="keys digest-keys">
             <dt>
@@ -42,15 +44,19 @@ export function DigestSection() {
         </div>
         <figure className="digest-frame">
           {digestCss ? <style dangerouslySetInnerHTML={{ __html: digestCss }} /> : null}
-          <div
-            className="digest-scroll"
-            data-fade=""
-            tabIndex={0}
-            role="region"
-            aria-label="Example overnight digest (synthetic data)"
-            dangerouslySetInnerHTML={{ __html: digestHtml }}
-          />
-          <figcaption className="digest-cap">Synthetic example: acme-dev is not a real account.</figcaption>
+          <LocalizeTimes window={digestWindow ?? undefined}>
+            <div
+              className="digest-scroll"
+              data-fade=""
+              tabIndex={0}
+              role="region"
+              aria-label="Example overnight digest (synthetic data)"
+              dangerouslySetInnerHTML={{ __html: digestHtml }}
+            />
+          </LocalizeTimes>
+          <figcaption className="digest-cap">
+            Synthetic: the same demo fleet as every preview on this site. Times in your time zone.
+          </figcaption>
         </figure>
       </div>
     </section>
@@ -109,7 +115,8 @@ export function SpendSection() {
           </div>
           <SpendChart beat={s} />
           <figcaption className="caption mono">
-            Example data from fleet-spend&apos;s built-in demo month. Not a real account.
+            The demo fleet&apos;s month, as the app&apos;s Spend tab shows it in demo mode. Not a real
+            account.
           </figcaption>
         </figure>
       </div>

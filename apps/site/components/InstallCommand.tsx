@@ -2,11 +2,35 @@
 import { useEffect, useRef, useState } from 'react';
 import { icons } from '@fleet/ui';
 
-/** Copyable install command. Feedback is announced politely; the button keeps its width. */
+/**
+ * Copyable install command, always shown in full: the box grows to the command where there is room, and where
+ * there is not the line scrolls sideways with a fade on the side that has more (never a silent ellipsis).
+ * Copy always copies the whole command. Feedback is announced politely; the button keeps its width.
+ */
 export function InstallCommand({ cmd, quiet = false, id }: { cmd: string; quiet?: boolean; id?: string }) {
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const [more, setMore] = useState<{ start: boolean; end: boolean }>({ start: false, end: false });
   const timer = useRef<number | undefined>(undefined);
+  const line = useRef<HTMLElement>(null);
   useEffect(() => () => window.clearTimeout(timer.current), []);
+  useEffect(() => {
+    const el = line.current;
+    if (!el) return;
+    const read = () => {
+      const start = el.scrollLeft > 1;
+      const end = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+      setMore((m) => (m.start === start && m.end === end ? m : { start, end }));
+    };
+    read();
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    el.addEventListener('scroll', read, { passive: true });
+    return () => {
+      ro.disconnect();
+      el.removeEventListener('scroll', read);
+    };
+  }, []);
+  const scrolls = more.start || more.end;
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(cmd);
@@ -19,11 +43,17 @@ export function InstallCommand({ cmd, quiet = false, id }: { cmd: string; quiet?
   };
   return (
     <div className="install" data-quiet={quiet ? '' : undefined} id={id}>
-      <code>
+      <code
+        ref={line}
+        data-more-start={more.start ? '' : undefined}
+        data-more-end={more.end ? '' : undefined}
+        // Keyboard users can scroll the line when it does not fit.
+        tabIndex={scrolls ? 0 : undefined}
+      >
         <span className="prompt" aria-hidden="true">
           $
         </span>
-        {cmd}
+        <span className="cmd">{cmd}</span>
       </code>
       <button type="button" onClick={copy} aria-label={`Copy install command: ${cmd}`}>
         <span
