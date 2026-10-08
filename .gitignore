@@ -12,3 +12,5 @@ coverage/
 !packages/shared/fixtures/**/*.jsonl
 captures/
 *.tsbuildinfo
+.vercel
+.env*
