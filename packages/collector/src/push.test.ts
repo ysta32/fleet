@@ -162,24 +162,75 @@ describe('push storage and delivery', () => {
     expect(webPush.sendNotification).toHaveBeenCalledTimes(7);
   });
 
-  it.each([404, 410])('prunes expired subscriptions on %s', async (statusCode) => {
+  it.each([403, 404, 410])('prunes expired subscriptions on %s', async (statusCode) => {
     const push = new PushManager(dir);
     await push.subscribe(sub('expired'));
     await push.subscribe(sub('good'));
-    vi.mocked(webPush.sendNotification).mockRejectedValueOnce({ statusCode });
+    vi.mocked(webPush.sendNotification).mockRejectedValueOnce(
+      new webPush.WebPushError(
+        'invalid subscription or VAPID key mismatch',
+        statusCode,
+        {},
+        '',
+        sub('expired').endpoint,
+      ),
+    );
     await push.send(alert, snapshot);
     expect(JSON.parse(await fs.readFile(path.join(dir, 'push/subs.json'), 'utf8'))).toEqual([sub('good')]);
   });
 
-  it('retains subscriptions after transient errors and does not expose service errors', async () => {
-    const push = new PushManager(dir);
+  it.each([429, 500, 503])(
+    'retains subscriptions after %s and permits retry without exposing service errors',
+    async (statusCode) => {
+      const push = new PushManager(dir);
+      await push.subscribe(sub());
+      vi.mocked(webPush.sendNotification).mockRejectedValueOnce({
+        statusCode,
+        message: 'secret endpoint',
+      });
+      await expect(push.send(alert, snapshot)).rejects.toThrow(/^push delivery failed$/);
+      expect(JSON.parse(await fs.readFile(path.join(dir, 'push/subs.json'), 'utf8'))).toEqual([sub()]);
+      await push.send(alert, snapshot);
+      expect(webPush.sendNotification).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it('permits retry after setup fails', async () => {
+    const push = new PushManager(dir, () => 1000);
+    await fs.writeFile(path.join(dir, 'push'), 'not a directory');
+    await expect(push.send(alert, snapshot)).rejects.toThrow();
+    await fs.rm(path.join(dir, 'push'));
     await push.subscribe(sub());
-    vi.mocked(webPush.sendNotification).mockRejectedValueOnce({
-      statusCode: 500,
-      message: 'secret endpoint',
-    });
-    await expect(push.send(alert, snapshot)).rejects.toThrow('push delivery failed');
-    expect(JSON.parse(await fs.readFile(path.join(dir, 'push/subs.json'), 'utf8'))).toEqual([sub()]);
+    await push.send(alert, snapshot);
+    expect(webPush.sendNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it('coalesces when there are no subscriptions', async () => {
+    const push = new PushManager(dir, () => 1000);
+    await push.send(alert, snapshot);
+    await push.subscribe(sub());
+    await push.send(alert, snapshot);
+    expect(webPush.sendNotification).not.toHaveBeenCalled();
+  });
+
+  it('permits retry when every subscription is pruned', async () => {
+    const push = new PushManager(dir, () => 1000);
+    await push.subscribe(sub());
+    vi.mocked(webPush.sendNotification).mockRejectedValueOnce({ statusCode: 403 });
+    await push.send(alert, snapshot);
+    await push.subscribe(sub('replacement'));
+    await push.send(alert, snapshot);
+    expect(webPush.sendNotification).toHaveBeenCalledTimes(2);
+  });
+
+  it('coalesces after partial success even when another delivery fails', async () => {
+    const push = new PushManager(dir, () => 1000);
+    await push.subscribe(sub('bad'));
+    await push.subscribe(sub('good'));
+    vi.mocked(webPush.sendNotification).mockRejectedValueOnce({ statusCode: 500 });
+    await expect(push.send(alert, snapshot)).rejects.toThrow(/^push delivery failed$/);
+    await push.send(alert, snapshot);
+    expect(webPush.sendNotification).toHaveBeenCalledTimes(2);
   });
 
   it('does not prune a renewed subscription when an old delivery expires', async () => {
