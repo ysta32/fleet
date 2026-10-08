@@ -171,13 +171,14 @@ export function useFleet(): FleetView {
       at: replayAt,
       playing,
       speed,
+      history: history ?? null,
       seek,
       setPlaying,
       setSpeed,
       load,
       exit,
     }),
-    [from, to, replayAt, playing, speed, seek, setPlaying, setSpeed, load, exit],
+    [from, to, replayAt, playing, speed, history, seek, setPlaying, setSpeed, load, exit],
   );
   return {
     mode: playback ? 'replay' : demo ? 'demo' : 'live',

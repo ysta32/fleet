@@ -186,6 +186,7 @@ function StationImpl({
   const blockW = useRef(0);
   const tagFlip = useRef(false);
   const tagShift = useRef(0);
+  const tagHidden = useRef(false);
   const mast = useRef<THREE.Group>(null);
   const pennant = useRef<THREE.Mesh>(null);
   const raisedAt = useRef<number | null>(null);
@@ -257,8 +258,17 @@ function StationImpl({
     const lab = label.current;
     const blk = block.current;
     const anchor = tagAnchor.current;
-    if (lab && blk && anchor && blockW.current > 0) {
+    // a tag whose station is off-screen (or behind the camera) hides instead of pinning to the edge
+    let offscreen = false;
+    if (lab && anchor) {
       anchor.getWorldPosition(tmpProj).project(camera);
+      offscreen = !(tmpProj.z < 1 && Math.abs(tmpProj.x) <= 1 && Math.abs(tmpProj.y) <= 1);
+      if (offscreen !== tagHidden.current) {
+        tagHidden.current = offscreen;
+        lab.style.visibility = offscreen ? 'hidden' : '';
+      }
+    }
+    if (lab && blk && anchor && !offscreen && blockW.current > 0) {
       const ax = (tmpProj.x * 0.5 + 0.5) * size.width;
       const w = blockW.current;
       const narrow = compactRef.current;
@@ -302,10 +312,10 @@ function StationImpl({
       core.current.rotation.y += dt * busy * 0.5;
     }
     if (wire.current) {
-      tmpColor.copy(alerting ? alertColor : colors.line);
+      tmpColor.copy(alerting ? alertColor : needs && !vt.dark ? colors.accent : colors.line);
       wire.current.color.copy(tmpColor);
       wire.current.opacity =
-        (vt.dark ? 0.16 : 0.3) * (live ? 1 : 0.6) + recent * 0.22 + glow * 0.5 + (needs ? 0.2 : 0);
+        (vt.dark ? 0.16 : 0.42) * (live ? 1 : 0.6) + recent * 0.22 + glow * 0.5 + (needs ? 0.2 : 0);
     }
     // motion means work: rings turn only while the station is busy
     const spin = busy * 0.25;
@@ -352,12 +362,13 @@ function StationImpl({
   const tagShown = d.labelled || needs || selected;
   // idle stations recede: their instruments draw at a lower level so live work leads the eye
   const awake = (d.orch && d.phase !== 'idle') || d.working > 0 || needs;
-  const lineOp = (vt.dark ? 1 : 2.3) * (awake ? 1 : 0.55);
+  const lineOp = vt.lineGain * (awake ? 1 : vt.dark ? 0.55 : 0.7);
+  const ink = (opacity: number) => Math.min(vt.lineCap, opacity * lineOp);
   const hairline = (opacity: number) => (
     <meshBasicMaterial
       color={colors.line}
       transparent
-      opacity={Math.min(1, opacity * lineOp)}
+      opacity={ink(opacity)}
       depthWrite={false}
       toneMapped={false}
     />
@@ -368,13 +379,19 @@ function StationImpl({
       <group ref={intro}>
         {/* tether + floor footprint */}
         <lineSegments geometry={shared.tether} position={[0, -d.y, 0]} scale={[1, d.y - 0.6 * s, 1]}>
-          <lineBasicMaterial color={colors.line} transparent opacity={0.14 * lineOp} depthWrite={false} />
+          <lineBasicMaterial color={colors.line} transparent opacity={ink(0.14)} depthWrite={false} />
         </lineSegments>
         <mesh geometry={shared.floor} position={[0, -d.y + 0.01, 0]} scale={1.15 * s}>
           {hairline(0.08)}
         </mesh>
+        {/* paper: an accent rim under a station that needs you (dark carries this with bloom) */}
+        {needs && !vt.dark && (
+          <mesh geometry={geos.ring1} rotation={[Math.PI / 2, 0, 0]} scale={1.3}>
+            <meshBasicMaterial color={colors.accent} transparent opacity={0.85} toneMapped={false} />
+          </mesh>
+        )}
         <lineSegments geometry={geos.cross} position={[0, -d.y + 0.01, 0]} scale={0.6}>
-          <lineBasicMaterial color={colors.line} transparent opacity={0.1 * lineOp} depthWrite={false} />
+          <lineBasicMaterial color={colors.line} transparent opacity={ink(0.1)} depthWrite={false} />
         </lineSegments>
 
         {/* core: a dark faceted hull around one emissive pip (the only bloom source) */}
@@ -423,7 +440,7 @@ function StationImpl({
           </mesh>
         </group>
         <lineSegments ref={dial} geometry={geos.dial} position={[0, -0.02, 0]}>
-          <lineBasicMaterial color={colors.line} transparent opacity={0.26 * lineOp} depthWrite={false} />
+          <lineBasicMaterial color={colors.line} transparent opacity={ink(0.26)} depthWrite={false} />
         </lineSegments>
 
         {/* selection: four focus brackets */}
@@ -479,7 +496,7 @@ function StationImpl({
         {/* CI / deploy beacon (only when there is a PR to report on) */}
         <group position={ciPos} visible={d.ci !== 'none'}>
           <lineSegments geometry={shared.pillar}>
-            <lineBasicMaterial color={colors.line} transparent opacity={0.3 * lineOp} depthWrite={false} />
+            <lineBasicMaterial color={colors.line} transparent opacity={ink(0.3)} depthWrite={false} />
           </lineSegments>
           <mesh geometry={shared.orb} position={[0, 0.6, 0]} onClick={click}>
             <meshBasicMaterial ref={orbMat} color={colors.ci} toneMapped={false} />
