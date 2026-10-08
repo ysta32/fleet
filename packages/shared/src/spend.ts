@@ -1,3 +1,5 @@
+import { localStartOfDay } from './time.js';
+
 /**
  * FROZEN Fleet Spend contract (agreed with the Fleet lead).
  * Produced by the `fleet-spend` package; consumed by the collector (snapshot.spend, GET /api/spend),
@@ -120,4 +122,45 @@ export function burnTint(usdPerHour: number): BurnTint {
   if (usdPerHour < 2) return 'cool';
   if (usdPerHour < 10) return 'warm';
   return 'hot';
+}
+
+/** Today's and all-time session spend, from one pass, so every surface agrees. */
+export interface SessionSpend {
+  /** cost of sessions started since `startOfDay(now)` (and not after `now`) */
+  todayUsd: number;
+  /** cost of every listed session */
+  totalUsd: number;
+  /** `totalUsd - todayUsd`: sessions that started before today */
+  earlierUsd: number;
+  todaySessions: number;
+  sessions: number;
+}
+
+/**
+ * The single definition of "spend today" for the top bar, the Overview card and the Spend tab: a
+ * session counts toward the day it started. `startOfDay` defaults to local midnight.
+ */
+export function sessionSpend(
+  sessions: readonly { startedAt: number; costUsd: number }[],
+  now: number,
+  startOfDay: (at: number) => number = localStartOfDay,
+): SessionSpend {
+  const dayStart = startOfDay(now);
+  let todayUsd = 0;
+  let totalUsd = 0;
+  let todaySessions = 0;
+  for (const session of sessions) {
+    totalUsd += session.costUsd;
+    if (session.startedAt >= dayStart && session.startedAt <= now) {
+      todayUsd += session.costUsd;
+      todaySessions++;
+    }
+  }
+  return {
+    todayUsd,
+    totalUsd,
+    earlierUsd: Math.max(0, totalUsd - todayUsd),
+    todaySessions,
+    sessions: sessions.length,
+  };
 }

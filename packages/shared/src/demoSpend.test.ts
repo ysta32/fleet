@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createDemoFleet, DEMO_PROJECT_NAMES } from './demo.js';
-import { demoSpendSummary } from './demoSpend.js';
+import { createDemoWorld, DEMO_SEED, demoSpendSummary } from './demoSpend.js';
+import { sessionSpend } from './spend.js';
 
 const NOW = new Date(2026, 9, 7, 15, 30).getTime();
 
@@ -56,5 +57,20 @@ describe('demoSpendSummary', () => {
   it('is deterministic for a given snapshot and seed', () => {
     const snapshot = createDemoFleet({ now: NOW, seed: 3 }).snapshot();
     expect(demoSpendSummary(snapshot, { seed: 3 })).toEqual(demoSpendSummary(snapshot, { seed: 3 }));
+  });
+
+  it('builds one world for app and site: Spend today agrees with the sessions, digest with the night', () => {
+    const now = new Date(2026, 9, 8, 0, 20).getTime();
+    const world = createDemoWorld({ now });
+    const again = createDemoWorld({ seed: DEMO_SEED, now });
+    expect(again.spend).toEqual(world.spend);
+    expect(again.digest).toEqual(world.digest);
+    const spend = sessionSpend(world.snapshot.sessions, now);
+    expect(world.spend.todayUsd).toBe(spend.todayUsd);
+    expect(world.spend.todayUsd + spend.earlierUsd).toBeCloseTo(spend.totalUsd, 6);
+    expect(world.spend.daily.at(-1)!.key).toBe('2026-10-08');
+    expect(world.digest.window.until).toBe(new Date(now).toISOString());
+    expect(world.digest.projects.map((project) => project.name)).toEqual(DEMO_PROJECT_NAMES);
+    expect(world.snapshot).toEqual(world.fleet.snapshot());
   });
 });

@@ -20,6 +20,7 @@ import {
   MODEL_FAMILIES,
   relativeTime,
   sortSessions,
+  timeTitle,
   totalTokens,
 } from './model';
 import type { SessionSortKey } from './model';
@@ -353,7 +354,11 @@ export default function Dashboard({
                         {projectButton(item.projectId)}
                         <span>{item.title}</span>
                       </span>
-                      <time className="num" dateTime={new Date(item.at).toISOString()}>
+                      <time
+                        className="num"
+                        dateTime={new Date(item.at).toISOString()}
+                        title={timeTitle(item.at, now)}
+                      >
                         {relativeTime(item.at, now)}
                       </time>
                     </li>
@@ -385,8 +390,8 @@ export default function Dashboard({
                 <dt className="micro">Spend today</dt>
                 <dd className="numeral">{formatCost(totals.costToday)}</dd>
                 <dd className="kpi-note">
-                  {Math.abs(totals.costTotal - totals.costToday) >= 0.005
-                    ? `${formatCost(totals.costTotal)} across all ${snapshot.sessions.length} ${snapshot.sessions.length === 1 ? 'session' : 'sessions'}`
+                  {totals.spend.earlierUsd >= 0.005
+                    ? `${totals.spend.todaySessions} of ${totals.spend.sessions} sessions started today; ${formatCost(totals.spend.earlierUsd)} before midnight`
                     : `Across ${snapshot.sessions.length} ${snapshot.sessions.length === 1 ? 'session' : 'sessions'}`}
                 </dd>
               </div>
@@ -487,7 +492,7 @@ export default function Dashboard({
                   <time
                     className="num"
                     dateTime={new Date(event.ts).toISOString()}
-                    title={relativeTime(event.ts, now)}
+                    title={timeTitle(event.ts, now)}
                   >
                     {clockTime(event.ts)}
                   </time>
@@ -604,7 +609,10 @@ export default function Dashboard({
                         {formatCost(session.costUsd)}
                       </td>
                       <td data-label="Last activity" className="numeric cell-time">
-                        <time dateTime={new Date(session.lastActivity).toISOString()}>
+                        <time
+                          dateTime={new Date(session.lastActivity).toISOString()}
+                          title={timeTitle(session.lastActivity, now)}
+                        >
                           {relativeTime(session.lastActivity, now)}
                         </time>
                       </td>
@@ -729,7 +737,11 @@ export default function Dashboard({
                       </ExternalLink>
                     </span>
                     <span className="row-meta">{projectButton(release.projectId)}</span>
-                    <time className="num row-num" dateTime={new Date(release.publishedAt).toISOString()}>
+                    <time
+                      className="num row-num"
+                      dateTime={new Date(release.publishedAt).toISOString()}
+                      title={timeTitle(release.publishedAt, now)}
+                    >
                       {relativeTime(release.publishedAt, now)}
                     </time>
                   </li>
@@ -753,7 +765,11 @@ export default function Dashboard({
                       <span className="row-meta"> · {projectButton(deploy.projectId)}</span>
                     </span>
                     <span className={`dashboard-chip deploy-${deploy.state}`}>{deploy.state}</span>
-                    <time className="num row-num" dateTime={new Date(deploy.createdAt).toISOString()}>
+                    <time
+                      className="num row-num"
+                      dateTime={new Date(deploy.createdAt).toISOString()}
+                      title={timeTitle(deploy.createdAt, now)}
+                    >
                       {relativeTime(deploy.createdAt, now)}
                     </time>
                   </li>
@@ -833,7 +849,10 @@ export default function Dashboard({
                       <small className="row-meta">
                         {projectButton(session.projectId)} · <span className="num">{session.model}</span> ·
                         waiting{' '}
-                        <time dateTime={new Date(session.lastActivity).toISOString()}>
+                        <time
+                          dateTime={new Date(session.lastActivity).toISOString()}
+                          title={timeTitle(session.lastActivity, now)}
+                        >
                           {relativeTime(session.lastActivity, now)}
                         </time>
                       </small>
@@ -858,7 +877,9 @@ export default function Dashboard({
                     <p>{alert.body}</p>
                     <small className="row-meta">
                       {projectButton(alert.projectId)} · {alertKindLabel(alert.kind)} ·{' '}
-                      <time dateTime={new Date(alert.at).toISOString()}>{relativeTime(alert.at, now)}</time>
+                      <time dateTime={new Date(alert.at).toISOString()} title={timeTitle(alert.at, now)}>
+                        {relativeTime(alert.at, now)}
+                      </time>
                     </small>
                   </div>
                   {onDismissAlerts && (

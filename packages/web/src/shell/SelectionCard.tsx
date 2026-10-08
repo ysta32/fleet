@@ -2,7 +2,7 @@ import { useId, useRef } from 'react';
 import type { ReactNode } from 'react';
 import type { FleetEvent, FleetSnapshot } from '@fleet/shared';
 import type { Selection } from '../data/contract';
-import { clockTime, formatCost, formatCount, relativeTime, totalTokens } from '../dashboard/model';
+import { clockTime, formatCost, formatCount, relativeTime, timeTitle, totalTokens } from '../dashboard/model';
 import { Icon } from './Icon';
 import { useDrawer, useMediaQuery } from './modal';
 
@@ -208,7 +208,7 @@ export function SelectionCard({
                 <time
                   className="num"
                   dateTime={new Date(event.ts).toISOString()}
-                  title={relativeTime(event.ts, now)}
+                  title={timeTitle(event.ts, now)}
                 >
                   {clockTime(event.ts)}
                 </time>

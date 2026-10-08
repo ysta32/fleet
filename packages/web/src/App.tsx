@@ -2,6 +2,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import type { Selection } from './data/contract';
 import type { DashboardTab } from './dashboard/Dashboard';
 import { PHONE_PRIMARY, TABS } from './shell/tabs';
+import { sessionSpend } from '@fleet/shared';
 import { formatCost, needsYou } from './dashboard/model';
 import { useFleet } from './data/useFleet';
 import { Dashboard, FleetScene } from './shell/slots';
@@ -79,12 +80,7 @@ function Shell() {
   const now = view.mode === 'live' ? Date.now() : (snapshot?.generatedAt ?? Date.now());
   const urgent = useMemo(() => (snapshot ? needsYou(snapshot, dismissed) : []), [snapshot, dismissed]);
   const working = snapshot?.agents.filter((agent) => agent.status === 'working').length ?? 0;
-  const startOfDay = new Date(snapshot?.generatedAt ?? Date.now());
-  startOfDay.setHours(0, 0, 0, 0);
-  const costToday =
-    snapshot?.sessions
-      .filter((session) => session.startedAt >= startOfDay.getTime())
-      .reduce((total, session) => total + session.costUsd, 0) ?? 0;
+  const costToday = snapshot ? sessionSpend(snapshot.sessions, snapshot.generatedAt).todayUsd : 0;
   const firstRun = !!snapshot && snapshot.sessions.length === 0 && snapshot.projects.length === 0;
 
   const go = useCallback((next: DashboardTab) => {

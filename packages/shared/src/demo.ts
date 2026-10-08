@@ -1,4 +1,5 @@
 import { addTokens, estimateCostUsd, ZERO_TOKENS } from './pricing.js';
+import { formatLocalTime } from './time.js';
 import type {
   Agent,
   AgentLocation,
@@ -129,6 +130,113 @@ const SLUGS: string[][] = [
     'release',
   ],
 ];
+/** What each project's armies work on, one theme per run (fictional products, no real names). */
+const THEMES: string[][] = [
+  [
+    'Billing webhooks v2',
+    'Rate limiter rollout',
+    'Cursor pagination for orders',
+    'Session token rotation',
+    'OpenAPI 3.1 migration',
+  ],
+  [
+    'Design tokens refresh',
+    'Settings page rebuild',
+    'Accessible date picker',
+    'Dark mode polish',
+    'Usage charts',
+  ],
+  ['Config file v2', 'Shell completions', 'Interactive init', 'Self-update channel', 'JSON output mode'],
+  ['Online index builds', 'WAL compaction', 'Snapshot restore', 'Read replicas', 'Connection pooling'],
+  [
+    'Quickstart rewrite',
+    'Reference generator',
+    'Versioned docs',
+    'Search relevance',
+    'Architecture diagrams',
+  ],
+  ['Eval harness', 'Feature backfill', 'Batch inference', 'Drift monitoring', 'Model cards'],
+];
+/** PR titles per task slug; the PR number picks a variant. */
+const PR_TITLES: Record<string, [string, string]> = {
+  schema: ['Tighten request schema validation', 'Version the storage schema'],
+  auth: ['Rotate session tokens on privilege change', 'Reject expired API keys early'],
+  router: ['Split the router by resource', 'Add route-level timeouts'],
+  'rate-limit': ['Token-bucket rate limiting for public routes', 'Return Retry-After on 429s'],
+  handlers: ['Move handlers onto the shared error envelope', 'Trim duplicate handler middleware'],
+  errors: ['Consistent error codes across commands', 'Surface root causes in error messages'],
+  openapi: ['Generate OpenAPI from route types', 'Publish OpenAPI examples for every endpoint'],
+  pagination: ['Cursor pagination for list endpoints', 'Stable sort keys for paginated lists'],
+  cache: ['Cache hot lookups with a 60s TTL', 'Invalidate cache on writes'],
+  webhooks: ['Sign outgoing webhooks', 'Retry failed webhook deliveries with backoff'],
+  metrics: ['Export latency histograms', 'Track eval metrics per run'],
+  checks: ['Run typecheck and lint in CI', 'Cache dependencies in CI'],
+  docs: ['Document configuration options', 'Refresh README examples'],
+  release: ['Prepare release notes', 'Bump version and changelog'],
+  tokens: ['Introduce color and spacing tokens', 'Replace hard-coded colors with tokens'],
+  layout: ['Responsive grid for the settings page', 'Fix sidebar overflow on small screens'],
+  widget: ['Usage summary widget', 'Keyboard support for the widget menu'],
+  forms: ['Inline validation for account forms', 'Preserve form state on navigation'],
+  a11y: ['Label icon-only buttons', 'Restore focus after closing dialogs'],
+  theme: ['Dark theme contrast fixes', 'Follow the system color scheme'],
+  charts: ['Accessible tooltips for usage charts', 'Lazy-load chart bundles'],
+  routing: ['Prefetch routes on hover', 'Typed route params'],
+  'empty-states': ['Helpful empty states for lists', 'Empty state for first-run projects'],
+  motion: ['Respect reduced-motion preferences', 'Shorten page transitions'],
+  i18n: ['Extract UI strings for translation', 'Locale-aware number formatting'],
+  parser: ['Faster argument parser', 'Better errors for unknown flags'],
+  flags: ['Add --dry-run to destructive commands', 'Deprecate legacy short flags'],
+  config: ['Load config from the project root', 'Validate config with clear messages'],
+  prompts: ['Interactive prompts for init', 'Skip prompts when stdin is not a TTY'],
+  output: ['JSON output mode', 'Align table output columns'],
+  completions: ['Shell completions for bash and zsh', 'Complete profile names'],
+  update: ['Self-update with checksum verification', 'Notify when a new version is available'],
+  'telemetry-off': ['Telemetry off by default', 'Document the telemetry opt-in'],
+  'man-page': ['Generate man pages from help text', 'Add examples to man pages'],
+  packaging: ['Build static binaries for arm64', 'Reproducible release archives'],
+  migrations: ['Online migration for the events table', 'Make migrations idempotent'],
+  indexes: ['Build indexes without blocking writes', 'Drop unused indexes'],
+  wal: ['Batch WAL fsyncs', 'Checksum WAL segments'],
+  compaction: ['Leveled compaction for cold data', 'Throttle compaction under load'],
+  snapshots: ['Incremental snapshots', 'Verify snapshots on restore'],
+  replication: ['Read replicas with bounded lag', 'Resume replication after failover'],
+  vacuum: ['Background vacuum scheduling', 'Report vacuum progress'],
+  bench: ['Benchmark suite for point reads', 'Track write amplification in benchmarks'],
+  backup: ['Point-in-time backup restore', 'Encrypt backups at rest'],
+  pooling: ['Connection pool with idle timeouts', 'Fair queueing for pooled connections'],
+  outline: ['Restructure the docs outline', 'Merge duplicate guides'],
+  quickstart: ['Rewrite the quickstart', 'Five-minute quickstart for the CLI'],
+  reference: ['Generate API reference pages', 'Link reference pages to source'],
+  examples: ['Runnable examples for common tasks', 'Test docs examples in CI'],
+  search: ['Improve docs search ranking', 'Search across all doc versions'],
+  nav: ['Sticky navigation for long pages', 'Breadcrumbs for nested guides'],
+  versioning: ['Versioned docs for each release', 'Version switcher in the header'],
+  redirects: ['Redirect moved guide URLs', 'Check redirects in CI'],
+  diagrams: ['Architecture diagrams for the data path', 'Dark-mode friendly diagrams'],
+  glossary: ['Add a glossary of core terms', 'Link glossary terms inline'],
+  links: ['Fix broken internal links', 'Check external links weekly'],
+  faq: ['FAQ for billing and limits', 'Troubleshooting FAQ'],
+  dataset: ['Deduplicate the training dataset', 'Versioned dataset manifests'],
+  features: ['Backfill derived features', 'Feature freshness checks'],
+  trainer: ['Mixed-precision trainer', 'Resume training from checkpoints'],
+  eval: ['Eval harness with held-out splits', 'Regression gate on eval scores'],
+  export: ['Export models to a portable format', 'Smaller exported model artifacts'],
+  serving: ['Health checks for the model server', 'Warm model replicas on deploy'],
+  batching: ['Dynamic batching for inference', 'Cap batch latency at 50ms'],
+  drift: ['Drift monitoring on input features', 'Alert on prediction drift'],
+  tuning: ['Hyperparameter sweep config', 'Early stopping for sweeps'],
+  cards: ['Model cards for released models', 'Add eval results to model cards'],
+};
+/** Why an army stops and asks a person: realistic approvals, not failures. */
+const WAIT_REASONS = [
+  'Approve the staging database migration',
+  'Confirm a breaking change to a public API',
+  'Allow network access for integration tests',
+  'Choose between two retry strategies',
+  'Approve a new runtime dependency',
+  'Review a flaky test before quarantining it',
+  'Grant write access to the release bucket',
+];
 const STEP_MS = 800;
 const MAX_CATCH_UP_MS = 120_000;
 const HOUR_MS = 3_600_000;
@@ -182,10 +290,13 @@ class EventRing {
 const MAX_ENDED_SESSIONS = 12;
 const ROLLUP_RETENTION_MS = 36 * HOUR_MS;
 const LEDGER_RETENTION_MS = 24 * HOUR_MS;
-/** Needs-you waits: each lane waits 5-45 min, then works 70-150 min before its next wait (~8 per 6h fleet-wide). */
+/**
+ * Needs-you waits are scheduled fleet-wide, one at a time: each lasts 5-45 min, and the next starts
+ * 170-230 min after it ends, so a 12h night has 3-5 incidents (including the one left open at load).
+ */
 const MINUTE_MS = 60_000;
 const waitLength = (random: () => number) => 5 * MINUTE_MS + Math.floor(random() * 40 * MINUTE_MS);
-const waitGap = (random: () => number) => 70 * MINUTE_MS + Math.floor(random() * 80 * MINUTE_MS);
+const waitGap = (random: () => number) => 170 * MINUTE_MS + Math.floor(random() * 60 * MINUTE_MS);
 const between = (random: () => number, minMinutes: number, maxMinutes: number) =>
   Math.floor((minMinutes + random() * (maxMinutes - minMinutes)) * MINUTE_MS);
 /**
@@ -193,8 +304,9 @@ const between = (random: () => number, minMinutes: number, maxMinutes: number) =
  * lane per hour (~20 per 8h), 1-3 CI failures and 0-2 releases per night, a deploy every 50-110 min.
  * Tool calls are priced at TOKEN_SCALE so the fleet burns ~$3/hour while active (~$40/day).
  */
-const TOKEN_SCALE = 0.12;
-const PR_VERBS = ['Add', 'Refactor', 'Harden', 'Speed up', 'Document', 'Simplify'];
+const TOKEN_SCALE = 0.105;
+const prTitle = (slug: string, number: number): string =>
+  PR_TITLES[slug]?.[number % 2] ?? `Improve ${slug.replace(/-/g, ' ')}`;
 
 interface PrJob {
   projectId: string;
@@ -384,8 +496,9 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
     projects: Array.from({ length: projectCount }, (_, index) => {
       const name = NAMES[index % NAMES.length]! + (index >= NAMES.length ? `-${index + 1}` : '');
       return {
-        id: `-synthetic-${name}`,
+        id: name,
         name,
+        // Never shown in the UI; the /synthetic/ root marks demo data as not from this machine.
         path: `/synthetic/${name}`,
         branch: 'main',
         lastActivity: now,
@@ -401,7 +514,9 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
 
   function start(project: Project, generation: number): Army {
     const id = `${project.id}:run-${generation}`;
-    const slugs = SLUGS[state.projects.indexOf(project) % SLUGS.length]!;
+    const projectIndex = state.projects.indexOf(project);
+    const slugs = SLUGS[projectIndex % SLUGS.length]!;
+    const themes = THEMES[projectIndex % THEMES.length]!;
     const count = 8 + Math.floor(random() * 7);
     // Vary the DAG per run: a chain, a fan-out/fan-in, or layers of parallel work.
     const shape = Math.floor(random() * 3);
@@ -428,7 +543,7 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
     });
     project.orch = {
       projectId: project.id,
-      branch: `orch/demo-${generation}`,
+      branch: `orch/run-${generation}`,
       phase: 'running',
       statusText: '',
       handoffText: '',
@@ -454,7 +569,7 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
     const session: Session = {
       id,
       projectId: project.id,
-      title: `Synthetic ${project.name} build`,
+      title: themes[generation % themes.length]!,
       model: agents[0]!.model,
       startedAt: now,
       lastActivity: now,
@@ -526,8 +641,8 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
   }
 
   const armies = state.projects.slice(0, Math.min(3, projectCount)).map((project) => start(project, 0));
-  // Per-lane wait schedule; survives army relocation so waits stay rare and spread out.
-  const nextWaitAt = armies.map(() => origin + 10 * MINUTE_MS + Math.floor(random() * 140 * MINUTE_MS));
+  // One fleet-wide wait schedule (not per lane), so needs-you incidents stay rare and never overlap.
+  let nextWaitAt = origin + between(random, 40, 120);
   const nextPrAt = armies.map(() => origin + between(random, 5, 60));
   let nextCiFailAt = origin + between(random, 60, 240);
   let nextDeployAt = origin + between(random, 20, 90);
@@ -582,7 +697,7 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
             kind: 'ci.failed',
             projectId: project.id,
             title: 'ci.failed',
-            body: `Synthetic checks failed on #${pr.number}`,
+            body: `Checks failed on #${pr.number}: ${pr.title}`,
             at: now,
           });
           state.alerts = state.alerts.slice(-12);
@@ -609,13 +724,13 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
           state.deploys.push({
             id,
             projectId: project.id,
-            environment: 'demo',
+            environment: 'preview',
             state: 'ready',
             createdAt: now,
           });
           state.deploys = state.deploys.slice(-12);
           record('deploy');
-          emit('deploy', 'Synthetic deployment ready', 'success', { state: 'ready', id });
+          emit('deploy', 'Preview deployment ready', 'success', { state: 'ready', id });
         }
         if (now >= nextReleaseAt) {
           nextReleaseAt = now + between(random, 270, 480);
@@ -625,7 +740,7 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
           state.releases.push({
             projectId: project.id,
             tag,
-            name: `Demo ${tag}`,
+            name: `${project.name} ${tag}`,
             url: `https://example.invalid/${project.name}/releases/${tag}`,
             publishedAt: now,
           });
@@ -643,6 +758,7 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
     const task = orch.tasks[army.taskIndex]!;
     const lead = agents[0]!;
     const coder = agents[1 + (army.taskIndex % 2)]!;
+    const reason = WAIT_REASONS[(army.generation * 3 + army.taskIndex) % WAIT_REASONS.length]!;
 
     function emit(
       kind: FleetEvent['kind'],
@@ -673,13 +789,13 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
         state: value,
       });
     }
-    function alert(kind: 'session.waiting' | 'army.blocked' | 'ci.failed'): void {
+    function alert(kind: 'session.waiting' | 'army.blocked', body: string): void {
       state.alerts.push({
         id: `alert-${now}-${alertSeq++}`,
         kind,
         projectId: project.id,
         title: kind,
-        body: `Synthetic ${task.id} checkpoint`,
+        body,
         at: now,
       });
       state.alerts = state.alerts.slice(-12);
@@ -700,10 +816,10 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
       taskState('blocked');
       orch.phase = 'blocked';
       orch.blocked = [task.id];
-      emit('session.waiting', 'Waiting for your approval on a synthetic dependency', coder, 'warn');
-      emit('blocked', `${task.id} dependency paused`, coder, 'warn');
-      alert('session.waiting');
-      alert('army.blocked');
+      emit('session.waiting', `Needs you: ${reason.toLowerCase()}`, coder, 'warn');
+      emit('blocked', `${task.id} paused until you reply`, coder, 'warn');
+      alert('session.waiting', `${reason} (${task.id} ${task.slug})`);
+      alert('army.blocked', `${session.title} is paused until you reply`);
     }
     function endWait(): void {
       army.waiting = false;
@@ -715,7 +831,7 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
       taskState(army.resumeState);
       for (const entry of state.alerts)
         if (entry.projectId === project.id && entry.kind !== 'ci.failed') entry.cleared = true;
-      emit('agent.status', 'Dependency ready', coder, 'info', { status: 'working' });
+      emit('agent.status', 'Approved, resuming', coder, 'info', { status: 'working' });
     }
     return {
       project,
@@ -741,7 +857,7 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
       if (now >= army.waitUntil) ctx.endWait();
       return;
     }
-    const { project, session, agents, orch, task, lead, coder, emit, taskState, alert, record } = ctx;
+    const { project, session, agents, orch, task, lead, coder, emit, taskState, record } = ctx;
     const critic = agents[3]!;
     const scout = agents[4]!;
     const tester = agents[5]!;
@@ -770,7 +886,7 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
     }
     switch (army.stage++) {
       case 0:
-        if (army.taskIndex === 0) emit('session.start', 'Synthetic army started');
+        if (army.taskIndex === 0) emit('session.start', `Army started: ${session.title}`);
         // The lead reads the task brief before dispatching, so the lead's own usage is never zero.
         tool(lead, 'Read', `TASKS/${task.id}-${task.slug}.md`, 2);
         emit('agent.spawn', `${coder.role} assigned ${task.id}`, coder);
@@ -782,14 +898,14 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
             agent: coder.id,
             worktree: task.id,
             baseSha: '0000000',
-            started: new Date(now).toISOString().slice(11, 16),
+            started: formatLocalTime(now),
           },
         ];
         move(coder, 'task', task.id);
         break;
       case 1:
         move(scout, 'task', task.id);
-        tool(scout, 'Read', 'constellation.ts');
+        tool(scout, 'Read', 'README.md');
         break;
       case 2:
         move(coder, 'worktree', task.id);
@@ -801,10 +917,10 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
         tool(coder, 'Edit', `${task.slug}.ts`);
         break;
       case 5:
-        if (now >= nextWaitAt[armies.indexOf(army)]!) {
+        if (now >= nextWaitAt && !armies.some((other) => other.waiting)) {
           const length = waitLength(random);
           ctx.beginWait(length);
-          nextWaitAt[armies.indexOf(army)] = now + length + waitGap(random);
+          nextWaitAt = now + length + waitGap(random);
         } else tool(coder, 'Bash', 'npm');
         break;
       case 6:
@@ -812,7 +928,7 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
         tool(tester, 'Bash', 'vitest');
         break;
       case 7:
-        emit('test.run', 'Synthetic checks passed', tester, 'success', { passed: 12, failed: 0 });
+        emit('test.run', 'Unit tests passed', tester, 'success', { passed: 12, failed: 0 });
         break;
       case 8: {
         taskState('review');
@@ -827,18 +943,18 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
           if (fail) nextCiFailAt = now + between(random, 170, 330);
           const ciAt = now + between(random, 4, 12);
           const repairAt = fail ? ciAt + between(random, 20, 80) : ciAt;
-          // A third of PRs wait for a human merge for a few hours, so several are open at any time.
-          const mergeAt = repairAt + (random() < 0.35 ? between(random, 120, 360) : between(random, 8, 40));
+          // Some PRs wait for a human merge for a few hours, so several are open at any time.
+          const mergeAt = repairAt + (random() < 0.3 ? between(random, 100, 300) : between(random, 8, 40));
           const commits = 2 + Math.floor(random() * 4);
           prJobs.push({ projectId: project.id, number, phase: 'ci', ciAt, repairAt, mergeAt, fail, commits });
           state.prs.push({
             projectId: project.id,
             number,
-            title: `${PR_VERBS[number % PR_VERBS.length]} ${task.slug}`,
+            title: prTitle(task.slug, number),
             state: 'open',
             ci: 'pending',
             url: `https://example.invalid/${project.name}/pull/${number}`,
-            headRef: `demo/${task.slug}`,
+            headRef: `feat/${task.slug}`,
             updatedAt: now,
           });
           state.prs = state.prs.slice(-30);
@@ -885,8 +1001,8 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
           orch.phase = 'done';
           session.status = 'ended';
           for (const agent of agents) agent.status = 'done';
-          emit('army.done', 'All synthetic tasks landed', lead, 'success');
-          emit('session.end', 'Synthetic session ended', lead, 'success');
+          emit('army.done', `All ${orch.tasks.length} tasks landed`, lead, 'success');
+          emit('session.end', 'Session ended', lead, 'success');
           // Keep the completed army visible until its next scheduled turn.
           army.taskIndex--;
         }
@@ -939,8 +1055,7 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
     const hold = 10 * MINUTE_MS + Math.floor(random() * 20 * MINUTE_MS);
     if (chosen.waiting) chosen.waitUntil = Math.max(chosen.waitUntil, now + hold);
     else context(chosen, events).beginWait(hold);
-    const lane = armies.indexOf(chosen);
-    nextWaitAt[lane] = Math.max(nextWaitAt[lane]!, chosen.waitUntil + waitGap(random));
+    nextWaitAt = Math.max(nextWaitAt, chosen.waitUntil + waitGap(random));
   }
 
   // Warm-up: simulate the hours before `createdAt`, keeping a frame every minute for replay.
@@ -1067,7 +1182,7 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
         })),
         releases: recent('release', project.id, 3).map((entry) => ({
           tag: entry.tag!,
-          name: `Demo ${entry.tag}`,
+          name: `${project.name} ${entry.tag}`,
           url: `https://example.invalid/${project.name}/releases/${entry.tag}`,
           at: iso(entry.at),
         })),
