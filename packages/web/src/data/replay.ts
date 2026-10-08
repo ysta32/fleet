@@ -186,6 +186,8 @@ export function needsYouMoments(history: HistoryResponse): NeedsYouMoment[] {
   return out;
 }
 
+const NO_DISMISSALS: ReadonlySet<string> = new Set();
+
 /** One incident's span on the tape, read from the history's frames with the dashboard's incidents(). */
 export interface IncidentMoment extends NeedsYouMoment {
   /** the incident id (see `incidents`) */
@@ -200,13 +202,16 @@ export interface IncidentMoment extends NeedsYouMoment {
  * (seeking there shows it), ends at the first later frame that no longer lists it, and is open when the
  * last frame at or before `to` still lists it. Incidents already open before `from` start at `from`.
  */
-export function incidentMoments(history: HistoryResponse): IncidentMoment[] {
+export function incidentMoments(
+  history: HistoryResponse,
+  dismissed: ReadonlySet<string> = NO_DISMISSALS,
+): IncidentMoment[] {
   const out: IncidentMoment[] = [];
   const open = new Map<string, IncidentMoment>();
   for (const frame of history.frames) {
     if (frame.generatedAt > history.to) break;
     const listed = new Set<string>();
-    for (const incident of incidents(frame)) {
+    for (const incident of incidents(frame, dismissed)) {
       listed.add(incident.id);
       if (open.has(incident.id)) continue;
       const moment: IncidentMoment = {
@@ -227,14 +232,20 @@ export function incidentMoments(history: HistoryResponse): IncidentMoment[] {
       open.delete(id);
     }
   }
-  return out
-    .filter((moment) => moment.end >= history.from && moment.ts <= history.to)
-    .map((moment) => (moment.ts < history.from ? { ...moment, ts: history.from } : moment));
+  return (
+    out
+      // a span that closed at or before the window start is not on this tape
+      .filter((moment) => (moment.open || moment.end > history.from) && moment.ts <= history.to)
+      .map((moment) => (moment.ts < history.from ? { ...moment, ts: history.from } : moment))
+  );
 }
 
 /** Incident ids still open at the end of the history (what the dashboard lists at `to`). */
-export function openIncidentIds(history: HistoryResponse): string[] {
-  return incidentMoments(history)
+export function openIncidentIds(
+  history: HistoryResponse,
+  dismissed: ReadonlySet<string> = NO_DISMISSALS,
+): string[] {
+  return incidentMoments(history, dismissed)
     .filter((moment) => moment.open)
     .map((moment) => moment.id);
 }
@@ -246,7 +257,13 @@ export function openIncidentIds(history: HistoryResponse): string[] {
  * comb rather than a solid bar and Shift-stepping always moves visibly. Deterministic: depends only on
  * the history.
  */
-export function buildTimeline(history: HistoryResponse, columns = 120, notchSlots = 48): TimelineModel {
+export function buildTimeline(
+  history: HistoryResponse,
+  columns = 120,
+  notchSlots = 48,
+  /** alerts the operator cleared: their incidents leave the tape as they leave the Alerts list */
+  dismissed: ReadonlySet<string> = NO_DISMISSALS,
+): TimelineModel {
   const span = history.to - history.from;
   const n = Math.max(1, Math.floor(columns));
   const buckets: TimelineBucket[] = Array.from({ length: n }, () => ({ count: 0, severity: null }));
@@ -267,7 +284,7 @@ export function buildTimeline(history: HistoryResponse, columns = 120, notchSlot
   const width = span > 0 ? span / Math.max(1, notchSlots) : Infinity;
   /** first moment of the current cluster: clusters never chain wider than one slot */
   let clusterStart = -Infinity;
-  for (const moment of span > 0 ? incidentMoments(history) : []) {
+  for (const moment of span > 0 ? incidentMoments(history, dismissed) : []) {
     const waitedMs = moment.end - moment.since;
     const last = notches.at(-1);
     if (last && moment.ts - clusterStart < width) {

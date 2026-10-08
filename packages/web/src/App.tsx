@@ -492,7 +492,7 @@ function Shell() {
             </span>
           </div>
         )}
-        <ReplayBar view={view} />
+        <ReplayBar view={view} dismissed={dismissed} />
       </main>
 
       <aside className="inspector" id="inspector" ref={inspector} aria-label="Dashboard" tabIndex={-1}>

@@ -182,6 +182,52 @@ describe('timeline model', () => {
     expect(nearestNotch(model.notches, 68 * MIN, 3 * MIN)?.ts).toBe(70 * MIN);
     expect(nearestNotch(model.notches, 40 * MIN, 3 * MIN)).toBeUndefined();
   });
+  it('drops the notch of an alert the operator dismissed, as the Alerts list does', () => {
+    const red: FleetSnapshot['alerts'] = [
+      {
+        id: 'a1',
+        kind: 'ci.failed',
+        projectId: 'p1',
+        title: 'ci.failed',
+        body: 'Checks failed on #4',
+        at: 20 * MIN,
+      },
+    ];
+    const tape = normalizeHistory({
+      from: 0,
+      to: 100 * MIN,
+      frames: [frame(0), frame(20 * MIN, red), frame(60 * MIN)],
+      events: [],
+    });
+    expect(buildTimeline(tape, 10, 10).notches.map((notch) => [notch.ts, notch.waitedMs])).toEqual([
+      [20 * MIN, 40 * MIN],
+    ]);
+    expect(buildTimeline(tape, 10, 10, new Set(['a1'])).notches).toEqual([]);
+    expect(buildTimeline(tape, 10, 10, new Set(['other'])).notches).toHaveLength(1);
+  });
+
+  it('leaves out a closed incident that ended exactly where the window starts', () => {
+    const tape = (from: number) =>
+      normalizeHistory({
+        from,
+        to: 100 * MIN,
+        frames: [
+          waitingFrame(0, [['s1', 'p1', 0]]),
+          frame(30 * MIN),
+          waitingFrame(70 * MIN, [['s2', 'p2', 70 * MIN]]),
+        ],
+        events: [],
+      });
+    // the first wait spans 0-30m: inside a window from 29m, gone from one starting at 30m
+    expect(buildTimeline(tape(29 * MIN), 10, 10).notches.map((notch) => notch.projectName)).toEqual([
+      'helix-db',
+      'orbit-docs',
+    ]);
+    expect(buildTimeline(tape(30 * MIN), 10, 10).notches.map((notch) => notch.projectName)).toEqual([
+      'orbit-docs',
+    ]);
+  });
+
   it('is empty and safe for a zero-length window', () => {
     const model = buildTimeline({ from: 5, to: 5, frames: [], events: [event(5, 'blocked')] }, 8);
     expect(model.buckets).toHaveLength(8);

@@ -9,7 +9,15 @@ import {
   reconstruct,
 } from '../data/replay';
 import { liveHistory } from '../data/liveTape';
-import { aggregateFleet, headerVitals, needsYou, nowWorking, stationNeeds, withDismissed } from './model';
+import {
+  aggregateFleet,
+  headerVitals,
+  incidentsByProject,
+  needsYou,
+  nowWorking,
+  stationNeeds,
+  withDismissed,
+} from './model';
 
 const NOW = new Date(2026, 9, 8, 1, 4).getTime();
 const MIN = 60_000;
@@ -30,37 +38,39 @@ function surfaces(snapshot: FleetSnapshot, dismissed: ReadonlySet<string> = new 
   };
 }
 
-/** Mirrors FleetScene's station `needs` (the tag shows only when the project has live needs-you state). */
-function stationTagShown(snapshot: FleetSnapshot, projectId: string): boolean {
-  const project = snapshot.projects.find((entry) => entry.id === projectId)!;
-  return (
-    (project.orch?.tasks.filter((task) => task.state === 'blocked').length ?? 0) +
-      snapshot.agents.filter((agent) => agent.projectId === projectId && agent.status === 'waiting').length >
-    0
-  );
+/** Mirrors FleetScene's station `needs`: the per-project incident count of the snapshot it is given. */
+function stationTagShown(scene: FleetSnapshot, projectId: string): boolean {
+  return (incidentsByProject(scene).get(projectId) ?? 0) > 0;
 }
 
 describe('one incident list behind every needs-you surface (demo world)', () => {
   it('station, Overview, Alerts, nav badge and the live tape agree at load and through a day', () => {
     const fleet = createDemoWorld({ now: NOW }).fleet;
-    let sawIncident = false;
+    let sawWait = false;
+    let sawCi = false;
     let sawCalm = false;
-    for (let step = 0; step < 36; step++) {
+    for (let step = 0; step < 72; step++) {
       const snapshot = fleet.snapshot();
       const seen = surfaces(snapshot);
       expect(seen.stations).toBe(seen.overview);
       expect(seen.badge).toBe(seen.overview);
       expect(seen.alerts).toHaveLength(seen.overview);
-      // one wait at a time in the demo, and it is one row: its task, never a separate "Army blocked"
+      // one incident at a time in the demo, and it is one row: a wait is its task (never a separate
+      // "Army blocked"); a CI failure is its alert alone, with no blocked task or waiting agent behind it
       expect(seen.overview).toBeLessThanOrEqual(1);
       for (const incident of seen.list) {
-        expect(incident.taskId).toBeTruthy();
-        expect(incident.title).toMatch(/is waiting on you$/);
-        expect(incident.reasons.map((reason) => reason.label).sort()).toEqual([
-          'Army blocked',
-          'Waiting on you',
-        ]);
-        expect(stationTagShown(snapshot, incident.projectId)).toBe(true);
+        const labels = incident.reasons.map((reason) => reason.label).sort();
+        if (incident.kind === 'alert') {
+          expect(labels).toEqual(['CI failed']);
+          expect(incident.taskId).toBeUndefined();
+          sawCi = true;
+        } else {
+          expect(incident.taskId).toBeTruthy();
+          expect(incident.title).toMatch(/is waiting on you$/);
+          expect(labels).toEqual(['Army blocked', 'Waiting on you']);
+          sawWait = true;
+        }
+        expect(stationTagShown(withDismissed(snapshot, new Set()), incident.projectId)).toBe(true);
         expect(seen.byProject.get(incident.projectId)).toBe(1);
       }
       // the live tape's open notch is the incident listed right now
@@ -68,12 +78,37 @@ describe('one incident list behind every needs-you surface (demo world)', () => 
       expect(openIncidentIds(normalizeHistory(tape)).sort()).toEqual([...seen.alerts].sort());
       const notches = buildTimeline(normalizeHistory(tape)).notches;
       expect(notches.some((notch) => notch.open)).toBe(seen.overview > 0);
-      if (seen.overview) sawIncident = true;
-      else sawCalm = true;
-      fleet.tick(41 * MIN);
+      if (!seen.overview) sawCalm = true;
+      fleet.tick(20 * MIN);
     }
-    expect(sawIncident).toBe(true);
+    expect(sawWait).toBe(true);
+    expect(sawCi).toBe(true);
     expect(sawCalm).toBe(true);
+  });
+
+  it('a CI-only incident lights its station badge, and clearing the alert clears the station', () => {
+    const fleet = createDemoFleet({ now: NOW, seed: 42 });
+    const history = normalizeHistory(fleet.history(12));
+    const ciAt = history.events.find((event) => event.kind === 'ci' && event.data?.alert === true)?.ts;
+    expect(ciAt).toBeDefined();
+    const snapshot = reconstruct(history, ciAt! + MIN).snapshot!;
+    const list = needsYou(snapshot);
+    expect(list).toHaveLength(1);
+    const incident = list[0]!;
+    expect(incident.kind).toBe('alert');
+    // nothing live (no blocked task, no waiting agent) backs it: the badge comes from the alert alone
+    const project = snapshot.projects.find((entry) => entry.id === incident.projectId)!;
+    expect(project.orch?.tasks.some((task) => task.state === 'blocked') ?? false).toBe(false);
+    expect(
+      snapshot.agents.some((agent) => agent.projectId === project.id && agent.status === 'waiting'),
+    ).toBe(false);
+    expect(stationTagShown(snapshot, project.id)).toBe(true);
+    expect(stationNeeds(snapshot, project.id)).toBe(1);
+    expect(surfaces(snapshot).stations).toBe(1);
+    const cleared = surfaces(snapshot, new Set(incident.alertIds));
+    expect(cleared.overview).toBe(0);
+    expect(cleared.stations).toBe(0);
+    expect(stationTagShown(withDismissed(snapshot, new Set(incident.alertIds)), project.id)).toBe(false);
   });
 
   it('clearing an incident drops it from the station as well as the Overview', () => {

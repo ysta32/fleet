@@ -11,7 +11,7 @@ const TAPE_REFRESH_MS = 30_000;
 
 /**
  * The last hour of history for the live (non-replay) tape: the demo fleet's own history, or
- * /api/history from the collector, refreshed every 30s while live. Null in replay, before the first
+ * /api/history from the collector, refreshed every 30s while live and the tab is visible. Null in replay, before the first
  * load, and after a failed fetch (the tape then falls back to the streamed events).
  */
 export function useLiveTape(mode: FleetMode): HistoryResponse | null {
@@ -23,6 +23,8 @@ export function useLiveTape(mode: FleetMode): HistoryResponse | null {
     }
     let controller: AbortController | null = null;
     const load = () => {
+      // a hidden tab does not poll; it reloads the moment it is shown again
+      if (document.hidden) return;
       if (mode === 'demo') {
         setTape(currentDemoFleet().history(LIVE_WINDOW_MS / 3_600_000));
         return;
@@ -44,9 +46,14 @@ export function useLiveTape(mode: FleetMode): HistoryResponse | null {
     // after the commit's effects, so the demo fleet useFleet creates exists before the first read
     const first = window.setTimeout(load, 0);
     const timer = window.setInterval(load, TAPE_REFRESH_MS);
+    const shown = () => {
+      if (!document.hidden) load();
+    };
+    document.addEventListener('visibilitychange', shown);
     return () => {
       window.clearTimeout(first);
       window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', shown);
       controller?.abort();
     };
   }, [mode]);

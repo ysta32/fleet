@@ -421,6 +421,8 @@ interface PrJob {
   commits: number;
   /** waits hours for a human merge */
   held: boolean;
+  /** this failure is a needs-you incident (raises a ci.failed alert) */
+  alert?: boolean;
 }
 
 /** Model id used when pricing a synthetic agent of the given family. */
@@ -765,6 +767,9 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
   let nextWaitAt = origin + between(random, 40, 120);
   const nextPrAt = armies.map(() => origin + between(random, 5, 60));
   let nextCiFailAt = origin + between(random, 60, 240);
+  /** when the last CI failure was decided, and when the last one that needed the operator was raised */
+  let lastCiFailAt = -Infinity;
+  let lastCiIncidentAt = -Infinity;
   let nextDeployAt = origin + between(random, 20, 90);
   let nextReleaseAt = origin + between(random, 120, 360);
   const prJobs: PrJob[] = [];
@@ -809,16 +814,30 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
         emit('ci', job.fail ? 'CI failed' : 'CI passed', job.fail ? 'error' : 'success', {
           state: pr.ci,
           number: pr.number,
+          ...(job.alert ? { alert: true } : {}),
         });
-        // The army repairs its own red CI (see 'repair'), so a failure is recorded and shown on the PR
-        // but raises no needs-you alert: the only incidents are the scheduled waits (3-5 a night).
         if (job.fail) record('ci.failed', { number: pr.number, title: pr.headRef });
+        // The army repairs most red CI itself (see 'repair'). At most one failure a night needs the
+        // operator: it takes a needs-you slot (see stage 5), so it counts in the 3-5 incidents a night.
+        if (job.alert) {
+          state.alerts.push({
+            id: `alert-${now}-${alertSeq++}`,
+            kind: 'ci.failed',
+            projectId: project.id,
+            title: 'ci.failed',
+            body: `Checks failed on #${pr.number}: ${pr.title}`,
+            at: now,
+          });
+          state.alerts = state.alerts.slice(-12);
+        }
         job.phase = job.fail ? 'repair' : 'merge';
       } else if (job.phase === 'repair' && now >= job.repairAt) {
         pr.ci = 'success';
         pr.updatedAt = now;
         record('commit');
         emit('ci', 'CI repaired', 'success', { state: 'success', number: pr.number });
+        for (const entry of state.alerts)
+          if (entry.projectId === project.id && entry.kind === 'ci.failed') entry.cleared = true;
         job.phase = 'merge';
       } else if (job.phase === 'merge' && now >= job.mergeAt) {
         pr.state = 'merged';
@@ -969,6 +988,19 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
     return span ? Math.floor(span[0] + vary() * (span[1] - span[0])) : 0;
   }
 
+  /**
+   * A merged-ready PR of this project whose CI can fail as this slot's needs-you incident, if a CI
+   * incident is due: at most one per 12h (the first eligible slot), never within ~3h of another CI
+   * failure (so a night keeps 1-3), and never open across the load moment (the load leaves a wait).
+   */
+  function ciIncidentJob(projectId: string): PrJob | undefined {
+    if (now - lastCiIncidentAt < MAX_HISTORY_MS || now - lastCiFailAt < 185 * MINUTE_MS) return undefined;
+    if (now <= createdAt && now + 50 * MINUTE_MS >= createdAt) return undefined;
+    const ready = prJobs.filter((entry) => entry.phase === 'merge');
+    const job = ready.find((entry) => entry.projectId === projectId) ?? ready[0];
+    return job;
+  }
+
   function advance(army: Army, events: FleetEvent[]): void {
     const ctx = context(army, events);
     if (army.waiting) {
@@ -1052,9 +1084,25 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
         break;
       case 5:
         if (now >= nextWaitAt && !armies.some((other) => other.waiting)) {
-          const length = waitLength(random);
-          ctx.beginWait(length);
-          nextWaitAt = now + waitSpacing(random);
+          const job = ciIncidentJob(project.id);
+          if (job) {
+            // This slot's incident is red CI on a passed PR (a flaky rebase): the failure lands on the
+            // next step and the repair follows within 8-45 minutes, like a wait.
+            job.phase = 'ci';
+            job.fail = true;
+            job.alert = true;
+            job.ciAt = now + STEP_MS;
+            job.repairAt = job.ciAt + between(random, 8, 45);
+            job.mergeAt = Math.max(job.mergeAt, job.repairAt + between(random, 8, 40));
+            lastCiFailAt = lastCiIncidentAt = now;
+            nextCiFailAt = Math.max(nextCiFailAt, now + between(random, 170, 330));
+            nextWaitAt = job.ciAt + waitSpacing(random);
+            tool(coder, 'Bash', pick(stack.build));
+          } else {
+            const length = waitLength(random);
+            ctx.beginWait(length);
+            nextWaitAt = now + waitSpacing(random);
+          }
         } else tool(coder, 'Bash', pick(stack.build));
         break;
       case 6:
@@ -1074,7 +1122,10 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
           const number = prCounter.get(project.id)! + 1;
           prCounter.set(project.id, number);
           const fail = now >= nextCiFailAt;
-          if (fail) nextCiFailAt = now + between(random, 170, 330);
+          if (fail) {
+            nextCiFailAt = now + between(random, 170, 330);
+            lastCiFailAt = now;
+          }
           const ciAt = now + between(random, 4, 12);
           const repairAt = fail ? ciAt + between(random, 20, 80) : ciAt;
           // Some PRs wait for a human merge for a few hours, so several are open at any time; while fewer

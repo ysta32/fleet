@@ -14,6 +14,7 @@ import * as THREE from 'three';
 import type { Agent, FleetSnapshot } from '@fleet/shared';
 import { easing, ease } from '@fleet/ui';
 import type { FleetView, Selection } from '../data/contract';
+import { incidentsByProject } from '../dashboard/model';
 import { Bots, type BotEntry } from './Bots';
 import { useVizDevView } from './devView';
 import { Effects } from './Effects';
@@ -423,6 +424,7 @@ function buildStations(snap: FleetSnapshot, store: SceneStore): StationData[] {
     if (l) l.push(a);
     else agentsBy.set(a.projectId, [a]);
   }
+  const needsBy = incidentsByProject(snap);
   for (const p of snap.projects) {
     const l = store.layouts.get(p.id);
     if (!l) continue;
@@ -445,9 +447,8 @@ function buildStations(snap: FleetSnapshot, store: SceneStore): StationData[] {
       running: tasks.filter((t) => t.state === 'running').length,
       ci: pr?.ci ?? 'none',
       index: l.index,
-      needs:
-        tasks.filter((t) => t.state === 'blocked').length +
-        agents.filter((a) => a.status === 'waiting').length,
+      // the dashboard's incident list: the same count the Overview, Alerts and nav badge show
+      needs: needsBy.get(p.id) ?? 0,
       labelled: true,
     });
   }

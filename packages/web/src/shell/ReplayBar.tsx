@@ -78,7 +78,16 @@ function typing(target: EventTarget | null): boolean {
   return target.tagName === 'INPUT' && (target as HTMLInputElement).type !== 'range';
 }
 
-export function ReplayBar({ view }: { view: FleetView }) {
+const NO_DISMISSALS: ReadonlySet<string> = new Set();
+
+export function ReplayBar({
+  view,
+  dismissed = NO_DISMISSALS,
+}: {
+  view: FleetView;
+  /** alerts the operator cleared; their incidents leave the tape as they leave Alerts */
+  dismissed?: ReadonlySet<string>;
+}) {
   const { replay } = view;
   const active = view.mode === 'replay';
   const history = active ? (replay.history ?? null) : null;
@@ -89,11 +98,11 @@ export function ReplayBar({ view }: { view: FleetView }) {
   const liveSnapshot = active ? null : view.snapshot;
   const liveKey = liveSnapshot ? Math.floor(liveSnapshot.generatedAt / LIVE_REBUILD_MS) : null;
   const model = useMemo<TimelineModel | null>(() => {
-    if (history) return buildTimeline(history, COLUMNS);
+    if (history) return buildTimeline(history, COLUMNS, undefined, dismissed);
     const { snapshot, events } = live.current;
     if (liveKey === null || !snapshot) return null;
-    return buildTimeline(liveHistory(tape, snapshot, events), COLUMNS);
-  }, [history, tape, liveKey]);
+    return buildTimeline(liveHistory(tape, snapshot, events), COLUMNS, undefined, dismissed);
+  }, [history, tape, liveKey, dismissed]);
   const ticks = useMemo(() => (model ? <Ticks model={model} /> : null), [model]);
   const notches = useMemo(() => (model ? <Notches model={model} /> : null), [model]);
 
