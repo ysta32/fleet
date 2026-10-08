@@ -56,6 +56,12 @@ beforeEach(() => {
   writeFileSync(path.join(web, '.env'), 'SECRET_DOT');
   writeFileSync(path.join(tmp, 'secret.txt'), 'SECRET_OUTSIDE');
   symlinkSync(path.join(tmp, 'secret.txt'), path.join(web, 'link.txt'));
+  mkdirSync(path.join(web, '.git'));
+  writeFileSync(path.join(web, '.git', 'config.txt'), 'SECRET_GIT');
+  symlinkSync('.env', path.join(web, 'public.txt'));
+  symlinkSync(path.join(web, '.env'), path.join(web, 'abs.txt'));
+  symlinkSync('.git', path.join(web, 'gitdir'));
+  symlinkSync('index.html', path.join(web, 'alias.html'));
 });
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((s) => new Promise((r) => s.close(r))));
@@ -172,6 +178,20 @@ describe('remote web shell without a token', () => {
       const r = await get(port, p);
       expect(r.status, p).not.toBe(200);
       expect(r.body, p).not.toContain('SECRET');
+    }
+  });
+
+  it('never serves a dotfile through an in-root symlink alias (public.txt -> .env)', async () => {
+    for (const remote of [true, false]) {
+      const port = await start({ remote });
+      const headers: Record<string, string> = remote ? {} : { host: '127.0.0.1' };
+      for (const p of ['/public.txt', '/abs.txt', '/gitdir/config.txt', '/alias.html']) {
+        const r = await get(port, p, headers);
+        expect(r.status, p).not.toBe(200);
+        expect(r.body, p).not.toContain('SECRET');
+        expect(r.body, p).not.toContain('<title>fleet</title>');
+      }
+      expect((await get(port, '/index.html', headers)).status).toBe(200);
     }
   });
 

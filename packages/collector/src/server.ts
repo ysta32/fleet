@@ -609,6 +609,16 @@ export function createServer(opts: CreateServerOptions): http.Server {
       return undefined;
     }
     if (!isWithin(root, real)) return undefined;
+    // Never serve through an alias: an in-root symlink (e.g. public.txt -> a dotfile) would bypass
+    // the dotfile check on the requested path. Also re-check the resolved path for dot segments.
+    if (real !== candidate) return undefined;
+    if (
+      path
+        .relative(root, real)
+        .split(path.sep)
+        .some((segment) => segment.startsWith('.'))
+    )
+      return undefined;
     const st = await fsp.stat(real).catch(() => undefined);
     if (st?.isDirectory()) {
       return statInRoot(root, path.join(path.relative(root, real), 'index.html'));
