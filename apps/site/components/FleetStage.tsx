@@ -106,20 +106,28 @@ function afterLcp(cb: () => void): () => void {
   };
 }
 
-/** Poster anchors as CSS custom properties: the stylesheet picks the pair for the poster on screen. */
+/** Poster anchors (the waiting vessel) as CSS custom properties: the stylesheet picks the pair for the poster on screen. */
 const ANCHOR_VARS = Object.fromEntries(
   Object.entries(anchors).flatMap(([k, a]) => [
     [`--fx-${k}`, String(a.x)],
     [`--fy-${k}`, String(a.y)],
   ]),
 ) as React.CSSProperties;
+/** What the waiting station's tag reads in every poster (scripts/assets.mjs checks they agree). */
+const POSTER_TAG = anchors['dark-m'];
 
 /**
- * Follows the live scene's waiting station: its tag anchor (the signal pennant), measured each frame in the
- * stage's own, untransformed coordinates and handed to the stylesheet, which frames it and raises the beacon.
- * No waiting station on screen: data-signal="none" (beacon down, frame eases back to the whole harbour).
+ * Follows the live scene's waiting station: its vessel (the island's host data-vessel-x/y), measured each frame in
+ * the stage's own, untransformed coordinates and handed to the stylesheet, which seats the beacon there, and its
+ * tag's two lines, copied into the phone label (the scene's own tag is hidden there).
+ * No waiting station on screen: data-signal="none" (beacon and label down).
  */
-function trackSignal(stage: HTMLElement, frame: HTMLElement, host: HTMLElement): () => void {
+function trackSignal(
+  stage: HTMLElement,
+  frame: HTMLElement,
+  host: HTMLElement,
+  label: { name: HTMLElement; status: HTMLElement },
+): () => void {
   let raf = 0;
   let visible = true;
   let last = '';
@@ -138,13 +146,26 @@ function trackSignal(stage: HTMLElement, frame: HTMLElement, host: HTMLElement):
       marked && marked.style.visibility !== 'hidden' && marked.style.display !== 'none' ? marked : null;
     const sr = stage.getBoundingClientRect();
     const fr = frame.getBoundingClientRect();
-    if (tag && sr.width > 0 && fr.width > 0) {
+    const vx = Number(host.dataset.vesselX);
+    const vy = Number(host.dataset.vesselY);
+    if (
+      tag &&
+      host.dataset.vesselX &&
+      Number.isFinite(vx) &&
+      Number.isFinite(vy) &&
+      sr.width > 0 &&
+      fr.width > 0
+    ) {
+      // the canvas fills the frame; the frame's own scale (if any) is undone so the beacon lives in stage pixels
       const z = fr.width / sr.width;
-      const r = tag.getBoundingClientRect();
-      const x = (r.left - fr.left) / z;
-      const y = (r.bottom - fr.top) / z;
+      const x = (vx * fr.width) / z;
+      const y = (vy * fr.height) / z;
       stage.style.setProperty('--live-ax', `${x.toFixed(1)}px`);
       stage.style.setProperty('--live-ay', `${y.toFixed(1)}px`);
+      const name = tag.querySelector('.fl-viz-name')?.textContent?.trim();
+      const status = tag.querySelector('.fl-viz-sub')?.firstChild?.textContent?.trim();
+      if (name && label.name.textContent !== name) label.name.textContent = name;
+      if (status && label.status.textContent !== status) label.status.textContent = status;
       if (last !== 'live') stage.dataset.signal = last = 'live';
     } else if (last !== 'none') stage.dataset.signal = last = 'none';
     raf = requestAnimationFrame(step);
@@ -177,6 +198,8 @@ export function FleetStage({
   const host = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLDivElement>(null);
+  const tagName = useRef<HTMLSpanElement>(null);
+  const tagStatus = useRef<HTMLSpanElement>(null);
   const [ready, setReady] = useState(false);
   const [why, setWhy] = useState<Why>('pending');
   const forced = useForcedTheme();
@@ -185,11 +208,16 @@ export function FleetStage({
     const st = stage.current;
     const fr = frame.current;
     const el = host.current;
-    if (!signal || !ready || !st || !fr || !el) return;
-    const stop = trackSignal(st, fr, el);
+    const name = tagName.current;
+    const status = tagStatus.current;
+    if (!signal || !ready || !st || !fr || !el || !name || !status) return;
+    const stop = trackSignal(st, fr, el, { name, status });
     return () => {
       stop();
       st.dataset.signal = 'poster';
+      // back on the poster: its label reads what the poster shows
+      name.textContent = POSTER_TAG.name;
+      status.textContent = POSTER_TAG.status;
     };
   }, [signal, ready]);
 
@@ -291,6 +319,16 @@ export function FleetStage({
             <span className="beacon-ring" />
             <span className="beacon-ring beacon-ring-2" />
             <span className="beacon-core" />
+            {/* Phones: the waiting station's label, beside the vessel on a halo of the page ground. The scene's own
+                tag for it sits centred over the vessel at that size, so the stylesheet hides it there. */}
+            <span className="beacon-tag">
+              <span ref={tagName} className="beacon-tag-name">
+                {POSTER_TAG.name}
+              </span>
+              <span ref={tagStatus} className="beacon-tag-status">
+                {POSTER_TAG.status}
+              </span>
+            </span>
           </span>
         ) : null}
       </div>

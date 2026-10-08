@@ -79,6 +79,28 @@ export function LocalizeTimes({
         const zones = [...new Set([zoneName(since), zoneName(until)])].join(' → ');
         line.textContent = `${formatAt(since, 'day-time')} → ${formatAt(until, 'day-time')} (${zones})`;
       }
+      // The masthead names the morning the window ends on (packages/digest dateKey), so it follows the zone too:
+      // a window ending 07:48 in Tokyo is Thursday's edition there.
+      const title = root.querySelector<HTMLTimeElement>('time.ovn-date-time');
+      if (title && Number.isFinite(until)) {
+        const parts = new Intl.DateTimeFormat('en-GB', {
+          weekday: 'long',
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric',
+        }).formatToParts(until);
+        const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? '';
+        const day = new Intl.DateTimeFormat('en-CA', {
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        }).format(until);
+        const weekday = document.createElement('em');
+        weekday.className = 'ovn-weekday';
+        weekday.textContent = `${part('weekday')},`;
+        title.dateTime = day;
+        title.replaceChildren(weekday, ` ${part('day')} ${part('month')} ${part('year')}`);
+      }
     }
   }, [win]);
   return (

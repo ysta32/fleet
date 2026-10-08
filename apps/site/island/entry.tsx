@@ -114,7 +114,7 @@ const FRAME_DIST = 0.74;
  * live camera always use the same framing. */
 const NARROW_MAX_PX = 720;
 const FRAME_DIST_NARROW = 0.5;
-const LOOK_Y_NARROW = -0.6;
+const LOOK_Y_NARROW = 0.2;
 
 /** The station FleetScene marks "needs you" (blocked tasks + waiting agents), most first; null when none. */
 function waitingStation(snap: FleetSnapshot): { index: number; count: number } | null {
@@ -132,6 +132,24 @@ function waitingStation(snap: FleetSnapshot): { index: number; count: number } |
 }
 
 /**
+ * Where the waiting station's vessel sits, as fractions of the canvas (host data-vessel-x / data-vessel-y), so the
+ * beacon (FleetStage) and the poster anchors (scripts/assets.mjs) seat the flare on the vessel itself, not on its
+ * tag. Cleared when nothing is waiting. Written only on change: it is read every frame.
+ */
+function publishVessel(host: HTMLElement, ndc: THREE.Vector3 | null): void {
+  const d = host.dataset;
+  if (!ndc) {
+    delete d.vesselX;
+    delete d.vesselY;
+    return;
+  }
+  const x = (ndc.x * 0.5 + 0.5).toFixed(4);
+  const y = (0.5 - ndc.y * 0.5).toFixed(4);
+  if (d.vesselX !== x) d.vesselX = x;
+  if (d.vesselY !== y) d.vesselY = y;
+}
+
+/**
  * The one "which station is the signal" rule for the hero: the camera aims at waitingStation(), and this marks that
  * station's tag data-signal="1" so the beacon (FleetStage) and the poster anchors (scripts/assets.mjs) follow the
  * same station. Tags carry no project id, so the marked tag is the needs-you tag whose anchor (the 0x0 tag root sits
@@ -139,6 +157,7 @@ function waitingStation(snap: FleetSnapshot): { index: number; count: number } |
  * far apart on screen. `ndc` is the projected station (null: nothing waiting, no tag marked).
  */
 function markSignalTag(host: HTMLElement, ndc: THREE.Vector3 | null, canvas: HTMLCanvasElement): void {
+  publishVessel(host, ndc);
   const tags = host.querySelectorAll<HTMLElement>('.fl-viz-tag[data-needs="1"], .fl-viz-tag[data-signal]');
   let pick: HTMLElement | null = null;
   if (ndc && tags.length) {
