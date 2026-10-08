@@ -2,3 +2,9 @@ dist
 node_modules
 package-lock.json
 .orch
+packages/digest/.visual
+apps/site/.next
+apps/site/out
+apps/site/public/island
+apps/site/lib/brand.generated.ts
+apps/site/lib/optional.generated.ts
