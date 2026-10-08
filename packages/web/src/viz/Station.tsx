@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
@@ -130,6 +130,12 @@ const RAISE = 0.42;
 
 const tmpColor = new THREE.Color();
 const tmpOff = vec3();
+const tmpProj = new THREE.Vector3();
+/** keep station tags this far inside the canvas edge */
+const TAG_MARGIN = 8;
+/** horizontal reach of the leader hairline before the text block (matches the svg + block offset) */
+const TAG_LEAD = 34;
+const NARROW_MQ = '(max-width: 560px)';
 /** first-load choreography: the harbour fades up station by station (cinematic, land easing) */
 export { INTRO_DELAY, INTRO_DUR, INTRO_STAGGER } from './layout';
 const ALERT_DUR = 0.64;
@@ -160,6 +166,11 @@ function StationImpl({
   const gateRef = useRef<THREE.Group>(null);
   const orbMat = useRef<THREE.MeshBasicMaterial>(null);
   const label = useRef<HTMLDivElement>(null);
+  const block = useRef<HTMLDivElement>(null);
+  const tagAnchor = useRef<THREE.Group>(null);
+  const blockW = useRef(0);
+  const tagFlip = useRef(false);
+  const tagShift = useRef(0);
   const mast = useRef<THREE.Group>(null);
   const pennant = useRef<THREE.Mesh>(null);
   const raisedAt = useRef<number | null>(null);
@@ -213,7 +224,7 @@ function StationImpl({
     return new THREE.Vector3(o.x, o.y, o.z);
   }, [d, s]);
 
-  useFrame((_, dtRaw) => {
+  useFrame(({ camera, size }, dtRaw) => {
     const dt = store.reduced ? 0 : Math.min(dtRaw, 0.05);
     const t = store.t;
     // intro: fade up in layout order
@@ -226,6 +237,37 @@ function StationImpl({
     if (label.current && Math.abs(labelOp.current - ie) > 0.004) {
       labelOp.current = ie;
       label.current.style.opacity = String(ie);
+    }
+    // keep the tag inside the canvas: flip the leader to the other side, then nudge as a last resort
+    const lab = label.current;
+    const blk = block.current;
+    const anchor = tagAnchor.current;
+    if (lab && blk && anchor && blockW.current === 0 && lab.style.display !== 'none') {
+      blockW.current = blk.offsetWidth;
+    }
+    if (lab && blk && anchor && blockW.current > 0) {
+      anchor.getWorldPosition(tmpProj).project(camera);
+      const ax = (tmpProj.x * 0.5 + 0.5) * size.width;
+      const w = blockW.current;
+      const narrow = typeof window !== 'undefined' && window.matchMedia(NARROW_MQ).matches;
+      let flip = false;
+      let l: number;
+      if (narrow) l = ax - w / 2;
+      else {
+        flip = ax + TAG_LEAD + w > size.width - TAG_MARGIN && ax - TAG_LEAD - w >= TAG_MARGIN;
+        l = flip ? ax - TAG_LEAD - w : ax + TAG_LEAD;
+      }
+      const r = l + w;
+      const shift =
+        l < TAG_MARGIN ? TAG_MARGIN - l : r > size.width - TAG_MARGIN ? size.width - TAG_MARGIN - r : 0;
+      if (flip !== tagFlip.current) {
+        tagFlip.current = flip;
+        lab.dataset.flip = flip ? '1' : '0';
+      }
+      if (Math.abs(shift - tagShift.current) > 0.5) {
+        tagShift.current = shift;
+        blk.style.translate = shift ? `${shift}px 0` : '';
+      }
     }
     const activity = store.activityAt.get(d.id);
     const recent = activity === undefined ? 0 : Math.max(0, 1 - (t - activity) / 1.2);
@@ -279,6 +321,11 @@ function StationImpl({
       orbMat.current.color.copy(colors.ci).multiplyScalar(vt.gain(d.ci === 'none' ? 0.8 : 1.5));
   });
 
+  const tagPos: [number, number, number] = needs
+    ? compact
+      ? [0, -0.9 * s, 0]
+      : [0, 0.5 * s + MAST_H - 0.17, 0]
+    : [0, 0.55 * s, 0];
   const click = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
     onSelect(d.id);
@@ -290,6 +337,12 @@ function StationImpl({
       : d.working > 0
         ? 'working'
         : 'idle';
+  const tagShown = d.labelled || needs || selected;
+  // the tag's width drives edge clamping; invalidate it whenever its text or visibility changes
+  // (the frame loop re-measures: drei mounts the Html children after this effect would run)
+  useLayoutEffect(() => {
+    blockW.current = 0;
+  }, [d.name, d.working, d.agents, status, tagShown]);
   // idle stations recede: their instruments draw at a lower level so live work leads the eye
   const awake = (d.orch && d.phase !== 'idle') || d.working > 0 || needs;
   const lineOp = (vt.dark ? 1 : 2.3) * (awake ? 1 : 0.55);
@@ -427,21 +480,19 @@ function StationImpl({
         </group>
 
         {/* ATC-style data block: tag offset up-right of the target on a hairline leader */}
-        <Html
-          position={needs ? (compact ? [0, -0.9 * s, 0] : [0, 0.5 * s + MAST_H - 0.17, 0]) : [0, 0.55 * s, 0]}
-          zIndexRange={[20, 0]}
-          style={{ pointerEvents: 'none', userSelect: 'none' }}
-        >
+        <group ref={tagAnchor} position={tagPos} />
+        <Html position={tagPos} zIndexRange={[20, 0]} style={{ pointerEvents: 'none', userSelect: 'none' }}>
           <div
             ref={label}
             className="fl-viz-tag"
             data-needs={needs ? '1' : '0'}
+            data-flip="0"
             style={{
               position: 'absolute',
               left: 0,
               bottom: 0,
               opacity: 0,
-              display: d.labelled || needs || selected ? 'block' : 'none',
+              display: tagShown ? 'block' : 'none',
             }}
           >
             <svg
@@ -460,6 +511,7 @@ function StationImpl({
               />
             </svg>
             <div
+              ref={block}
               className="fl-viz-block"
               style={{
                 position: 'absolute',

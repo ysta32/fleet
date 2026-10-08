@@ -462,6 +462,7 @@ function Legend({ vt }: { vt: VizTheme }) {
   if (narrow)
     return (
       <div
+        data-fl-legend
         style={{ ...overlayText(vt), left: 12, bottom: 10, display: 'flex', alignItems: 'center', gap: 10 }}
       >
         {models.map((m) => (
@@ -476,6 +477,7 @@ function Legend({ vt }: { vt: VizTheme }) {
     );
   return (
     <div
+      data-fl-legend
       style={{
         ...overlayText(vt),
         left: 16,
@@ -574,7 +576,7 @@ export default function FleetScene({ view: viewProp, selection, onSelect }: Flee
           </SceneStoreContext.Provider>
         </VizThemeContext.Provider>
       </Canvas>
-      <style>{`@media (max-width: 560px) { .fl-viz-name { font-size: 11px !important; } .fl-viz-tag svg { display: none; } .fl-viz-block { left: 0 !important; bottom: 4px !important; transform: translateX(-50%); text-align: center; } .fl-viz-tag[data-needs='1'] .fl-viz-block { bottom: auto !important; top: 6px; } .fl-viz-sub[data-needs='0'] { display: none; } }`}</style>
+      <style>{`@media (min-width: 561px) { .fl-viz-tag[data-flip='1'] svg { transform: scaleX(-1); transform-origin: 0 100%; } .fl-viz-tag[data-flip='1'] .fl-viz-block { left: auto !important; right: 34px; text-align: right; } } @media (max-width: 560px) { .fl-viz-name { font-size: 11px !important; } .fl-viz-tag svg { display: none; } .fl-viz-block { left: 0 !important; bottom: 4px !important; transform: translateX(-50%); text-align: center; } .fl-viz-tag[data-needs='1'] .fl-viz-block { bottom: auto !important; top: 6px; } .fl-viz-sub[data-needs='0'] { display: none; } }`}</style>
       {/* depth: Halyard vignette + film grain (DOM, composited by the browser; no per-frame GPU cost) */}
       <div
         aria-hidden
@@ -595,7 +597,7 @@ export default function FleetScene({ view: viewProp, selection, onSelect }: Flee
       {view.snapshot?.demo && (
         <div style={{ ...overlayText(vt), top: 14, right: 16, color: vt.fgMuted }}>synthetic data</div>
       )}
-      <Legend vt={vt} />
+      {(view.snapshot?.projects.length ?? 0) > 0 && <Legend vt={vt} />}
       {!view.snapshot && (
         <div
           style={{
