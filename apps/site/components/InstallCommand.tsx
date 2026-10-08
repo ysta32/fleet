@@ -31,10 +31,16 @@ export function InstallCommand({ cmd, quiet = false, id }: { cmd: string; quiet?
           aria-hidden="true"
           dangerouslySetInnerHTML={{ __html: state === 'copied' ? icons.check : COPY }}
         />
-        <span aria-hidden="true">{state === 'copied' ? 'Copied' : state === 'failed' ? 'Select' : 'Copy'}</span>
+        <span aria-hidden="true">
+          {state === 'copied' ? 'Copied' : state === 'failed' ? 'Select' : 'Copy'}
+        </span>
       </button>
       <span className="sr-only" role="status" aria-live="polite">
-        {state === 'copied' ? 'Install command copied' : state === 'failed' ? 'Copy failed. Select the text instead.' : ''}
+        {state === 'copied'
+          ? 'Install command copied'
+          : state === 'failed'
+            ? 'Copy failed. Select the text instead.'
+            : ''}
       </span>
     </div>
   );

@@ -1587,7 +1587,12 @@ pre.code .c {
 /* The scene reads left to right; keep the headline column clean of station labels. */
 .hero-shade {
   background:
-    linear-gradient(to top, var(--fl-bg) 0%, color-mix(in srgb, var(--fl-bg) 90%, transparent) 30%, transparent 64%),
+    linear-gradient(
+      to top,
+      var(--fl-bg) 0%,
+      color-mix(in srgb, var(--fl-bg) 90%, transparent) 30%,
+      transparent 64%
+    ),
     linear-gradient(
       to right,
       color-mix(in srgb, var(--fl-bg) 94%, transparent) 0%,

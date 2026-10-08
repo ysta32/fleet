@@ -15,8 +15,8 @@ export function DigestSection() {
             Wake up to <em>what shipped.</em>
           </h2>
           <p className="lead" style={{ marginTop: 'var(--fl-space-5)' }}>
-            One page each morning: merged PRs, deploys, CI failures and what needs you first, across every repo.
-            Rendered at build time by the real digest renderer from its synthetic demo fixture.
+            One page each morning: merged PRs, deploys, CI failures and what needs you first, across every
+            repo. Rendered at build time by the real digest renderer from its synthetic demo fixture.
           </p>
         </div>
         <figure className="digest-frame">

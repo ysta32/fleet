@@ -3,7 +3,11 @@ import { Icon } from '@/components/Icon';
 import { PageHead } from '@/components/PageHead';
 import { pageMeta } from '@/lib/site';
 
-export const metadata = pageMeta('press', 'Press kit', 'The Fleet mark, wordmark, palette and screenshots, free to use when writing about Fleet.');
+export const metadata = pageMeta(
+  'press',
+  'Press kit',
+  'The Fleet mark, wordmark, palette and screenshots, free to use when writing about Fleet.',
+);
 
 const SWATCHES = [
   ['Ink', 'bg', 'Background, dark'],
@@ -23,7 +27,11 @@ export default function Press() {
     <>
       <PageHead
         label="Press kit"
-        title={<>The mark, the palette, <em>the harbour.</em></>}
+        title={
+          <>
+            The mark, the palette, <em>the harbour.</em>
+          </>
+        }
         lead="Use these when you write about Fleet. Please do not recolor the pennant or put the mark on orange."
       />
       <div className="wrap page-body" style={{ display: 'grid', gap: 'var(--fl-space-10)' }}>
@@ -56,8 +64,9 @@ export default function Press() {
             </div>
           </div>
           <p className="caption">
-            The mark is a mast with a signal pennant, crossed by an orbit. The pennant and the dot are always signal
-            orange; the mast and orbit follow the text color. Keep clear space equal to the pennant height.
+            The mark is a mast with a signal pennant, crossed by an orbit. The pennant and the dot are always
+            signal orange; the mast and orbit follow the text color. Keep clear space equal to the pennant
+            height.
           </p>
         </section>
 
@@ -78,7 +87,8 @@ export default function Press() {
             ))}
           </div>
           <p className="caption">
-            Type: Instrument Serif for display, Schibsted Grotesk for interface text, IBM Plex Mono for numbers.
+            Type: Instrument Serif for display, Schibsted Grotesk for interface text, IBM Plex Mono for
+            numbers.
           </p>
         </section>
 
@@ -94,7 +104,10 @@ export default function Press() {
                 </div>
                 <div className="asset-row">
                   <span>
-                    {label} <span className="num">· {w}×{h}</span>
+                    {label}{' '}
+                    <span className="num">
+                      · {w}×{h}
+                    </span>
                   </span>
                   <a className="link-arrow" href={src} download>
                     WebP <Icon name="chevron" />

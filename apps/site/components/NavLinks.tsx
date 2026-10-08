@@ -64,14 +64,22 @@ export function MobileMenu() {
               <li key={item.href}>
                 <Link href={item.href} aria-current={isCurrent(path ?? '/', item.href) ? 'page' : undefined}>
                   {item.label}
-                  <span className="icon" aria-hidden="true" dangerouslySetInnerHTML={{ __html: icons.chevron }} />
+                  <span
+                    className="icon"
+                    aria-hidden="true"
+                    dangerouslySetInnerHTML={{ __html: icons.chevron }}
+                  />
                 </Link>
               </li>
             ))}
             <li>
               <a href={REPO_URL}>
                 GitHub
-                <span className="icon" aria-hidden="true" dangerouslySetInnerHTML={{ __html: icons.external }} />
+                <span
+                  className="icon"
+                  aria-hidden="true"
+                  dangerouslySetInnerHTML={{ __html: icons.external }}
+                />
               </a>
             </li>
           </ul>

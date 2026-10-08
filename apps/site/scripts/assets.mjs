@@ -16,7 +16,9 @@ const site = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repo = path.resolve(site, '../..');
 const pub = path.join(site, 'public');
 const ORIGIN = 'http://assets.local';
-const only = (process.argv.find((a) => a.startsWith('--only=')) ?? '--only=posters,og,icons').slice(7).split(',');
+const only = (process.argv.find((a) => a.startsWith('--only=')) ?? '--only=posters,og,icons')
+  .slice(7)
+  .split(',');
 const FONTS_CSS =
   'https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&family=Schibsted+Grotesk:wght@400;500;600&display=block';
 
@@ -35,13 +37,28 @@ async function tokenValues() {
   };
   const dark = block(":root[data-theme='dark'] {");
   const light = block(":root[data-theme='light'] {");
-  return { darkBg: pick(dark, 'bg'), lightBg: pick(light, 'bg'), accent: pick(dark, 'accent'), fg: pick(dark, 'fg'), muted: pick(dark, 'fg-muted'), subtle: pick(dark, 'fg-subtle') };
+  return {
+    darkBg: pick(dark, 'bg'),
+    lightBg: pick(light, 'bg'),
+    accent: pick(dark, 'accent'),
+    fg: pick(dark, 'fg'),
+    muted: pick(dark, 'fg-muted'),
+    subtle: pick(dark, 'fg-subtle'),
+  };
 }
 
-const MIME = { '.js': 'text/javascript', '.svg': 'image/svg+xml', '.webp': 'image/webp', '.png': 'image/png', '.css': 'text/css' };
+const MIME = {
+  '.js': 'text/javascript',
+  '.svg': 'image/svg+xml',
+  '.webp': 'image/webp',
+  '.png': 'image/png',
+  '.css': 'text/css',
+};
 
 async function withBrowser(fn) {
-  const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+  const browser = await chromium.launch({
+    args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
+  });
   try {
     return await fn(browser);
   } finally {
@@ -50,13 +67,23 @@ async function withBrowser(fn) {
 }
 
 async function newPage(browser, { width, height, scheme }, pages) {
-  const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1, colorScheme: scheme, reducedMotion: 'no-preference' });
+  const ctx = await browser.newContext({
+    viewport: { width, height },
+    deviceScaleFactor: 1,
+    colorScheme: scheme,
+    reducedMotion: 'no-preference',
+  });
   await ctx.route(`${ORIGIN}/**`, async (route) => {
     const url = new URL(route.request().url());
-    if (pages[url.pathname]) return route.fulfill({ status: 200, contentType: 'text/html', body: pages[url.pathname] });
+    if (pages[url.pathname])
+      return route.fulfill({ status: 200, contentType: 'text/html', body: pages[url.pathname] });
     const file = path.join(pub, decodeURIComponent(url.pathname));
     if (!file.startsWith(pub) || !existsSync(file)) return route.fulfill({ status: 404, body: 'not found' });
-    return route.fulfill({ status: 200, contentType: MIME[path.extname(file)] ?? 'application/octet-stream', body: await readFile(file) });
+    return route.fulfill({
+      status: 200,
+      contentType: MIME[path.extname(file)] ?? 'application/octet-stream',
+      body: await readFile(file),
+    });
   });
   const page = await ctx.newPage();
   const errors = [];
@@ -74,7 +101,11 @@ import { mount } from '/island/fleet-scene.js';
 await document.fonts.ready;
 mount(document.getElementById('h'), { seed: 7, ${projects ? `projects: ${projects},` : ''} onReady: () => { window.__ready = true; } });
 </script></body></html>`;
-  const { page, ctx, errors } = await newPage(browser, { width, height, scheme: theme }, { '/scene.html': html });
+  const { page, ctx, errors } = await newPage(
+    browser,
+    { width, height, scheme: theme },
+    { '/scene.html': html },
+  );
   await page.goto(`${ORIGIN}/scene.html`);
   await page.waitForFunction(() => window.__ready === true, null, { timeout: 60_000 });
   const hasCanvas = await page.evaluate(() => {
@@ -94,11 +125,20 @@ async function posters(browser) {
   for (const theme of ['dark', 'light']) {
     const png = await renderScene(browser, { theme, width: 1920, height: 1080, settleMs: 7000 });
     for (const w of [768, 1280, 1920]) {
-      await sharp(png).resize({ width: w }).webp({ quality: w <= 768 ? 70 : 74, effort: 6 }).toFile(path.join(pub, `poster/fleet-${theme}-${w}.webp`));
+      await sharp(png)
+        .resize({ width: w })
+        .webp({ quality: w <= 768 ? 70 : 74, effort: 6 })
+        .toFile(path.join(pub, `poster/fleet-${theme}-${w}.webp`));
     }
     console.log(`[assets] poster ${theme}`);
   }
-  const close = await renderScene(browser, { theme: 'dark', width: 1280, height: 800, projects: 3, settleMs: 7000 });
+  const close = await renderScene(browser, {
+    theme: 'dark',
+    width: 1280,
+    height: 800,
+    projects: 3,
+    settleMs: 7000,
+  });
   await sharp(close).webp({ quality: 76, effort: 6 }).toFile(path.join(pub, 'poster/fleet-close-1280.webp'));
   console.log('[assets] poster close');
 }
@@ -114,7 +154,8 @@ async function pageMetas() {
         const src = await readFile(p, 'utf8');
         const str = `'((?:[^'\\\\]|\\\\.)*)'`;
         const m = new RegExp(`pageMeta\\(\\s*${str},\\s*${str},\\s*${str}`).exec(src);
-        if (m) out.push({ slug: m[1], title: m[2].replace(/\\'/g, "'"), description: m[3].replace(/\\'/g, "'") });
+        if (m)
+          out.push({ slug: m[1], title: m[2].replace(/\\'/g, "'"), description: m[3].replace(/\\'/g, "'") });
       }
     }
   };
@@ -128,7 +169,8 @@ const firstSentence = (d) => {
   const first = /^.*?[.!?](?=\s|$)/.exec(d)?.[0] ?? d;
   return first.length <= 100 ? first : d.slice(0, d.lastIndexOf(' ', 97)) + '…';
 };
-const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const esc = (s) =>
+  s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
 async function ogCards(browser, tokens) {
   await mkdir(path.join(pub, 'og'), { recursive: true });
@@ -151,12 +193,18 @@ p{font:400 24px/1.4 'Schibsted Grotesk',sans-serif;color:${tokens.muted};max-wid
 <div class="wm">${wordmark}</div>
 <div><div class="label">${slug === 'home' ? 'Local mission control for Claude Code' : 'Fleet · ' + esc(title)}</div><h1>${head}</h1><p>${esc(firstSentence(description))}</p></div>
 </div></body></html>`;
-    const { page, ctx } = await newPage(browser, { width: 1200, height: 630, scheme: 'dark' }, { '/og.html': html });
+    const { page, ctx } = await newPage(
+      browser,
+      { width: 1200, height: 630, scheme: 'dark' },
+      { '/og.html': html },
+    );
     await page.goto(`${ORIGIN}/og.html`, { waitUntil: 'networkidle' });
     await page.evaluate(() => document.fonts.ready);
     const png = await page.screenshot({ type: 'png' });
     await ctx.close();
-    await sharp(png).png({ compressionLevel: 9, palette: true, quality: 90 }).toFile(path.join(pub, `og/${slug}.png`));
+    await sharp(png)
+      .png({ compressionLevel: 9, palette: true, quality: 90 })
+      .toFile(path.join(pub, `og/${slug}.png`));
   }
   console.log(`[assets] og cards: ${metas.map((m) => m.slug).join(', ')}`);
 }
@@ -165,12 +213,26 @@ async function icons(tokens) {
   const dir = path.join(pub, 'icons');
   await mkdir(dir, { recursive: true });
   const favicon = await readFile(path.join(repo, 'packages/ui/brand/favicon.svg'));
-  for (const s of [16, 32, 48]) await sharp(favicon, { density: 72 * (s / 32) * 4 }).resize(s, s).png().toFile(path.join(dir, `favicon-${s}.png`));
-  for (const s of [192, 512]) await sharp(favicon, { density: 72 * (s / 32) }).resize(s, s).png().toFile(path.join(dir, `icon-${s}.png`));
+  for (const s of [16, 32, 48])
+    await sharp(favicon, { density: 72 * (s / 32) * 4 })
+      .resize(s, s)
+      .png()
+      .toFile(path.join(dir, `favicon-${s}.png`));
+  for (const s of [192, 512])
+    await sharp(favicon, { density: 72 * (s / 32) })
+      .resize(s, s)
+      .png()
+      .toFile(path.join(dir, `icon-${s}.png`));
   // Apple touch and maskable icons must be opaque and full-bleed: the mark on the ink background, inside the safe zone.
-  const mark = (await readFile(path.join(repo, 'packages/ui/brand/mark.svg'), 'utf8')).replace('<svg ', `<svg color="${tokens.fg}" `);
+  const mark = (await readFile(path.join(repo, 'packages/ui/brand/mark.svg'), 'utf8')).replace(
+    '<svg ',
+    `<svg color="${tokens.fg}" `,
+  );
   const plate = async (size, inner, file) => {
-    const m = await sharp(Buffer.from(mark), { density: 72 * (inner / 32) }).resize(inner, inner).png().toBuffer();
+    const m = await sharp(Buffer.from(mark), { density: 72 * (inner / 32) })
+      .resize(inner, inner)
+      .png()
+      .toBuffer();
     await sharp({ create: { width: size, height: size, channels: 4, background: tokens.darkBg } })
       .composite([{ input: m, gravity: 'center' }])
       .png()
@@ -198,7 +260,8 @@ async function icons(tokens) {
   console.log('[assets] icons + manifest');
 }
 
-if (!existsSync(path.join(pub, 'island/fleet-scene.js'))) throw new Error('public/island/fleet-scene.js missing: run node scripts/prebuild.mjs first');
+if (!existsSync(path.join(pub, 'island/fleet-scene.js')))
+  throw new Error('public/island/fleet-scene.js missing: run node scripts/prebuild.mjs first');
 const tokens = await tokenValues();
 if (only.includes('icons')) await icons(tokens);
 if (only.includes('posters') || only.includes('og')) {

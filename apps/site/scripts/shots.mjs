@@ -17,10 +17,17 @@ const browser = await chromium.launch();
 const issues = [];
 for (const scheme of schemes) {
   for (const width of widths) {
-    const ctx = await browser.newContext({ viewport: { width, height: Math.round(width < 800 ? width * 2.1 : width * 0.62) }, colorScheme: scheme });
+    const ctx = await browser.newContext({
+      viewport: { width, height: Math.round(width < 800 ? width * 2.1 : width * 0.62) },
+      colorScheme: scheme,
+    });
     const page = await ctx.newPage();
     page.on('pageerror', (e) => issues.push(`${scheme} ${width}: pageerror ${e}`));
-    page.on('requestfailed', (r) => r.failure()?.errorText !== 'net::ERR_ABORTED' && issues.push(`${scheme} ${width}: failed ${r.url()}`));
+    page.on(
+      'requestfailed',
+      (r) =>
+        r.failure()?.errorText !== 'net::ERR_ABORTED' && issues.push(`${scheme} ${width}: failed ${r.url()}`),
+    );
     for (const p of pages) {
       const res = await page.goto(base + p, { waitUntil: 'load' });
       if (!res || (res.status() !== 200 && p !== '/nope')) issues.push(`${p}: HTTP ${res?.status()}`);
@@ -45,14 +52,21 @@ for (const scheme of schemes) {
       }
       // Chromium cannot capture a single bitmap taller than ~16k px; long mobile pages are split.
       const h = await page.evaluate(() => document.documentElement.scrollHeight);
-      if (p === '/demo' || h <= 12000) await page.screenshot({ path: path.join(outDir, name), fullPage: p !== '/demo' });
+      if (p === '/demo' || h <= 12000)
+        await page.screenshot({ path: path.join(outDir, name), fullPage: p !== '/demo' });
       else
         for (let i = 0, y = 0; y < h; i++, y += 12000)
-          await page.screenshot({ path: path.join(outDir, name.replace('.png', `-part${i + 1}.png`)), fullPage: true, clip: { x: 0, y, width, height: Math.min(12000, h - y) } });
+          await page.screenshot({
+            path: path.join(outDir, name.replace('.png', `-part${i + 1}.png`)),
+            fullPage: true,
+            clip: { x: 0, y, width, height: Math.min(12000, h - y) },
+          });
     }
     await ctx.close();
   }
 }
 await browser.close();
-console.log(issues.length ? `[shots] issues:\n  ${issues.join('\n  ')}` : '[shots] no console/overflow/request issues');
+console.log(
+  issues.length ? `[shots] issues:\n  ${issues.join('\n  ')}` : '[shots] no console/overflow/request issues',
+);
 console.log(`[shots] wrote ${outDir}`);

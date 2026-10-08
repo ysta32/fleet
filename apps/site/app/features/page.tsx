@@ -142,7 +142,11 @@ function Feature({
           <span className="label">
             {n} · {label}
           </span>
-          <h2 id={`f-${n}`} className="h2" style={{ marginTop: 'var(--fl-space-4)', fontSize: 'var(--fl-text-2xl)' }}>
+          <h2
+            id={`f-${n}`}
+            className="h2"
+            style={{ marginTop: 'var(--fl-space-4)', fontSize: 'var(--fl-text-2xl)' }}
+          >
             {title}
           </h2>
           <div className="prose" style={{ marginTop: 'var(--fl-space-5)' }}>

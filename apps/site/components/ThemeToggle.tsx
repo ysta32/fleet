@@ -32,7 +32,13 @@ export function ThemeToggle() {
   };
   const glyph = pref === 'light' ? icons.sun : pref === 'dark' ? icons.moon : SYSTEM;
   return (
-    <button type="button" className="icon-btn" onClick={cycle} aria-label={NEXT_LABEL[pref]} title={NEXT_LABEL[pref]}>
+    <button
+      type="button"
+      className="icon-btn"
+      onClick={cycle}
+      aria-label={NEXT_LABEL[pref]}
+      title={NEXT_LABEL[pref]}
+    >
       <span className="icon icon-md" aria-hidden="true" dangerouslySetInnerHTML={{ __html: glyph }} />
     </button>
   );

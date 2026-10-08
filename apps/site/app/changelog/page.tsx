@@ -2,14 +2,20 @@ import { PageHead } from '@/components/PageHead';
 import { readChangelog } from '@/lib/changelog';
 import { REPO_URL, pageMeta } from '@/lib/site';
 
-export const metadata = pageMeta('changelog', 'Changelog', 'Every Fleet release, generated from CHANGELOG.md in the repository.');
+export const metadata = pageMeta(
+  'changelog',
+  'Changelog',
+  'Every Fleet release, generated from CHANGELOG.md in the repository.',
+);
 
 /** Renders `code` spans from changelog markdown; everything else is plain text. */
 function Inline({ text }: { text: string }) {
   const parts = text.split(/(`[^`]+`)/g);
   return (
     <>
-      {parts.map((p, i) => (p.startsWith('`') && p.endsWith('`') ? <code key={i}>{p.slice(1, -1)}</code> : p))}
+      {parts.map((p, i) =>
+        p.startsWith('`') && p.endsWith('`') ? <code key={i}>{p.slice(1, -1)}</code> : p,
+      )}
     </>
   );
 }
@@ -23,8 +29,7 @@ export default function Changelog() {
         title={<>The logbook.</>}
         lead={
           <>
-            Generated at build time from{' '}
-            <a href={`${REPO_URL}/blob/main/CHANGELOG.md`}>CHANGELOG.md</a>.{' '}
+            Generated at build time from <a href={`${REPO_URL}/blob/main/CHANGELOG.md`}>CHANGELOG.md</a>.{' '}
             {releases.some((r) => r.date)
               ? 'Newest first.'
               : 'Fleet is in v0.x development and has not published a release yet.'}

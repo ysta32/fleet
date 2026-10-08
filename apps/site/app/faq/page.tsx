@@ -3,7 +3,11 @@ import { Icon } from '@/components/Icon';
 import { PageHead } from '@/components/PageHead';
 import { pageMeta } from '@/lib/site';
 
-export const metadata = pageMeta('faq', 'FAQ', 'Short answers about what Fleet reads, what it costs, what it runs on and what it does not do.');
+export const metadata = pageMeta(
+  'faq',
+  'FAQ',
+  'Short answers about what Fleet reads, what it costs, what it runs on and what it does not do.',
+);
 
 const QA: [string, React.ReactNode][] = [
   [

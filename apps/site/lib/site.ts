@@ -2,7 +2,8 @@ import type { Metadata } from 'next';
 
 const vercelHost = process.env.VERCEL_PROJECT_PRODUCTION_URL;
 /** Canonical origin: SITE_URL, else the Vercel production host, else local preview. */
-export const SITE_URL = process.env.SITE_URL ?? (vercelHost ? `https://${vercelHost}` : 'http://localhost:4530');
+export const SITE_URL =
+  process.env.SITE_URL ?? (vercelHost ? `https://${vercelHost}` : 'http://localhost:4530');
 export const REPO_URL = 'https://github.com/ysta32/fleet';
 export const ACTIONS_URL = `${REPO_URL}/actions`;
 export const CI_BADGE_URL = `${REPO_URL}/actions/workflows/ci.yml/badge.svg`;

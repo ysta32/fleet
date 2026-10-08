@@ -22,9 +22,7 @@ export default function Home() {
       {/* 1. Hook */}
       <section className="hero grain" aria-labelledby="hero-title">
         <div className="hero-stage">
-          <FleetStage
-            posterAlt="A night harbour of glowing vessels: a synthetic fleet of Claude Code agents grouped by project"
-          />
+          <FleetStage posterAlt="A night harbour of glowing vessels: a synthetic fleet of Claude Code agents grouped by project" />
         </div>
         <div className="hero-horizon" aria-hidden="true" />
         <div className="hero-shade" aria-hidden="true" />
@@ -34,8 +32,8 @@ export default function Home() {
             Your agents, <em>at a glance.</em>
           </h1>
           <p className="lead">
-            Fleet turns every Claude Code session on your machine into one live harbour. When an agent stops to wait for
-            you, its signal goes up, here and on your phone.
+            Fleet turns every Claude Code session on your machine into one live harbour. When an agent stops
+            to wait for you, its signal goes up, here and on your phone.
           </p>
           <div className="hero-actions">
             <InstallCommand cmd={INSTALL_CMD} />
@@ -50,7 +48,8 @@ export default function Home() {
             Real WebGL render · synthetic fleet
           </span>
           <span className="label">
-            {String(totals.projects).padStart(2, '0')} projects · {String(totals.agents).padStart(2, '0')} agents · macOS
+            {String(totals.projects).padStart(2, '0')} projects · {String(totals.agents).padStart(2, '0')}{' '}
+            agents · macOS
           </span>
         </div>
       </section>
@@ -67,12 +66,12 @@ export default function Home() {
             </h2>
             <div className="prose" style={{ marginTop: 'var(--fl-space-6)' }}>
               <p>
-                Parallel agents are fast until one of them asks a question. It does not ping you. It sits in a tab
-                behind eleven others, burning your afternoon while the rest of the plan waits on it.
+                Parallel agents are fast until one of them asks a question. It does not ping you. It sits in a
+                tab behind eleven others, burning your afternoon while the rest of the plan waits on it.
               </p>
               <p>
-                <strong>Fleet watches the transcripts Claude Code already writes</strong>, on your machine, and tells
-                you which agent needs you, for how long, and what it has cost so far.
+                <strong>Fleet watches the transcripts Claude Code already writes</strong>, on your machine,
+                and tells you which agent needs you, for how long, and what it has cost so far.
               </p>
             </div>
           </div>
@@ -99,7 +98,10 @@ export default function Home() {
               <div className="panel-head">
                 <span className="label">The live fleet</span>
                 <h3 className="h3">Every session is a vessel, grouped by project and army.</h3>
-                <p>Vessels move while they work and pulse once when they stop for you. Click one to see its last tool call.</p>
+                <p>
+                  Vessels move while they work and pulse once when they stop for you. Click one to see its
+                  last tool call.
+                </p>
               </div>
               <div className="media" style={{ flex: 1, minHeight: 280 }}>
                 <img
@@ -129,8 +131,8 @@ export default function Home() {
             </article>
           </div>
           <p className="caption" style={{ marginTop: 'var(--fl-space-5)' }}>
-            Previews are rendered at build time from Fleet&apos;s deterministic demo generator. No real sessions appear on
-            this site.
+            Previews are rendered at build time from Fleet&apos;s deterministic demo generator. No real
+            sessions appear on this site.
           </p>
         </div>
       </section>
@@ -149,8 +151,8 @@ export default function Home() {
               No logos, no quotes. Read the code.
             </h2>
             <p className="lead">
-              Fleet is new and built by one person. These numbers come from the repository at build time, so they cannot
-              be inflated.
+              Fleet is new and built by one person. These numbers come from the repository at build time, so
+              they cannot be inflated.
             </p>
           </div>
           <div className="facts" data-reveal>
@@ -160,9 +162,7 @@ export default function Home() {
             </div>
             <div className="fact">
               <span className="fact-n">{facts.testCases}</span>
-              <p>
-                Test cases across {facts.testFiles} files, run in CI on every push.
-              </p>
+              <p>Test cases across {facts.testFiles} files, run in CI on every push.</p>
             </div>
             <div className="fact">
               <span className="fact-n">127.0.0.1</span>
@@ -228,7 +228,9 @@ export default function Home() {
                 <dt>
                   <code>github</code>
                 </dt>
-                <dd>true. Read-only PR and CI status through your own gh, for repos active in the last 24h.</dd>
+                <dd>
+                  true. Read-only PR and CI status through your own gh, for repos active in the last 24h.
+                </dd>
                 <dt>
                   <code>config</code>
                 </dt>
@@ -268,7 +270,9 @@ export default function Home() {
           <h2 id="action-title" className="display display-xl" style={{ maxWidth: '12ch' }}>
             Raise the signal <em>tonight.</em>
           </h2>
-          <p className="lead">Node 20 and macOS. One command installs the collector and starts it at login.</p>
+          <p className="lead">
+            Node 20 and macOS. One command installs the collector and starts it at login.
+          </p>
           <InstallCommand cmd={INSTALL_CMD} />
           <div className="action-links">
             <Link className="link-arrow" href="/docs">

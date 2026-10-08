@@ -32,7 +32,11 @@ const CLI = [
 const CONFIG = [
   ['port', '4747', 'Port for the API and the web app. FLEET_PORT overrides it.'],
   ['lan', 'false', 'false binds 127.0.0.1. true binds 0.0.0.0 for your phone. FLEET_LAN=1 overrides it.'],
-  ['token', 'random', '32 random bytes in hex, generated on first run. Required for every non-local request.'],
+  [
+    'token',
+    'random',
+    '32 random bytes in hex, generated on first run. Required for every non-local request.',
+  ],
   ['claudeProjectsDir', '~/.claude/projects', 'Where Claude Code writes its transcripts.'],
   ['recentWindowMs', '86400000', 'Sessions active within this window (24h) are shown.'],
   ['shareContent', 'false', 'Allow status and handoff excerpts to reach remote clients.'],
@@ -49,7 +53,11 @@ export default function Docs() {
     <>
       <PageHead
         label="Docs"
-        title={<>Set it up once. <em>Forget it is there.</em></>}
+        title={
+          <>
+            Set it up once. <em>Forget it is there.</em>
+          </>
+        }
         lead="Everything you need to install, configure and trust Fleet. Ten minutes, start to finish."
       />
       <div className="wrap page-body doc">
@@ -80,8 +88,8 @@ export default function Docs() {
               </code>
             </pre>
             <p>
-              Prefer source? <code>FLEET_FROM_GIT=1 bash scripts/install.sh</code> clones the repository, builds it and
-              links the CLI. The installer never touches <code>~/.claude/settings.json</code>.
+              Prefer source? <code>FLEET_FROM_GIT=1 bash scripts/install.sh</code> clones the repository,
+              builds it and links the CLI. The installer never touches <code>~/.claude/settings.json</code>.
             </p>
           </section>
 
@@ -102,8 +110,9 @@ export default function Docs() {
           <section id="config" aria-labelledby="config-h">
             <h2 id="config-h">Configuration</h2>
             <p>
-              Fleet reads <code>~/.config/fleet/config.json</code> (or <code>FLEET_CONFIG</code>). The file is created on
-              first run with mode 0600. Data lives in <code>~/.local/share/fleet</code> (or <code>FLEET_DATA</code>).
+              Fleet reads <code>~/.config/fleet/config.json</code> (or <code>FLEET_CONFIG</code>). The file is
+              created on first run with mode 0600. Data lives in <code>~/.local/share/fleet</code> (or{' '}
+              <code>FLEET_DATA</code>).
             </p>
             <dl className="def">
               {CONFIG.map(([key, def, what]) => (
@@ -122,30 +131,28 @@ export default function Docs() {
           <section id="phone" aria-labelledby="phone-h">
             <h2 id="phone-h">Phone over Tailscale</h2>
             <ol>
-              <li>
-                Install Tailscale on your Mac and phone and sign both in to the same tailnet.
-              </li>
+              <li>Install Tailscale on your Mac and phone and sign both in to the same tailnet.</li>
               <li>
                 Set <code>&quot;lan&quot;: true</code> in the config, and add your Mac&apos;s tailnet name to{' '}
                 <code>allowedHosts</code>.
               </li>
               <li>
-                Restart the collector, then run <code>fleet token</code>. Open the printed URL on your phone. It carries
-                the token, so treat it like a password.
+                Restart the collector, then run <code>fleet token</code>. Open the printed URL on your phone.
+                It carries the token, so treat it like a password.
               </li>
               <li>Add the page to your home screen to keep it one tap away.</li>
             </ol>
             <p>
-              Do not expose the port to the public internet. LAN mode is for networks you control, and Tailscale keeps it
-              that way.
+              Do not expose the port to the public internet. LAN mode is for networks you control, and
+              Tailscale keeps it that way.
             </p>
           </section>
 
           <section id="notifications" aria-labelledby="notifications-h">
             <h2 id="notifications-h">Notifications</h2>
             <p>
-              macOS notifications are on by default. For your phone, pick a hard-to-guess ntfy topic, subscribe to it in
-              the ntfy app, and set it in the config:
+              macOS notifications are on by default. For your phone, pick a hard-to-guess ntfy topic,
+              subscribe to it in the ntfy app, and set it in the config:
             </p>
             <pre className="code">
               <code>{`{
@@ -157,8 +164,8 @@ export default function Docs() {
 }`}</code>
             </pre>
             <p>
-              Anyone who knows a public ntfy topic can read it. Each alert sends a title and a short body, such as the
-              project and what it is waiting for. Self-host ntfy if that is too much.
+              Anyone who knows a public ntfy topic can read it. Each alert sends a title and a short body,
+              such as the project and what it is waiting for. Self-host ntfy if that is too much.
             </p>
           </section>
 
@@ -166,25 +173,26 @@ export default function Docs() {
             <h2 id="privacy-h">Privacy model</h2>
             <ul>
               <li>
-                <strong>Read-only.</strong> Fleet reads transcripts and never writes to them or to Claude Code settings.
+                <strong>Read-only.</strong> Fleet reads transcripts and never writes to them or to Claude Code
+                settings.
               </li>
               <li>
-                <strong>Local.</strong> The collector binds 127.0.0.1 by default. There is no Fleet server and no
-                telemetry.
+                <strong>Local.</strong> The collector binds 127.0.0.1 by default. There is no Fleet server and
+                no telemetry.
               </li>
               <li>
-                <strong>Token-gated.</strong> Every non-local request needs the token. Loopback requests also check the
-                Host header to block DNS rebinding.
+                <strong>Token-gated.</strong> Every non-local request needs the token. Loopback requests also
+                check the Host header to block DNS rebinding.
               </li>
               <li>
-                <strong>Minimal by default.</strong> With <code>shareContent</code> off, remote clients get state and
-                counts, not status or handoff excerpts.
+                <strong>Minimal by default.</strong> With <code>shareContent</code> off, remote clients get
+                state and counts, not status or handoff excerpts.
               </li>
               <li>
-                <strong>Two outbound calls, both through your own accounts.</strong> GitHub status is on by default.
-                It runs read-only through your signed-in <code>gh</code>, only for repos with activity in the last 24
-                hours, and turns off with <code>&quot;github&quot;: false</code>. ntfy runs only if you set a topic.
-                Nothing else leaves the machine.
+                <strong>Two outbound calls, both through your own accounts.</strong> GitHub status is on by
+                default. It runs read-only through your signed-in <code>gh</code>, only for repos with
+                activity in the last 24 hours, and turns off with <code>&quot;github&quot;: false</code>. ntfy
+                runs only if you set a topic. Nothing else leaves the machine.
               </li>
             </ul>
           </section>
@@ -192,11 +200,11 @@ export default function Docs() {
           <section id="architecture" aria-labelledby="architecture-h">
             <h2 id="architecture-h">Architecture</h2>
             <p>
-              Three workspace packages do the work. <code>fleet-collector</code> tails transcripts, polls GitHub, keeps a
-              short history and serves the API and web app. <code>@fleet/shared</code> holds the protocol types, the
-              cost estimator and the synthetic demo generator. <code>@fleet/web</code> is the React and three.js app:
-              the 3D fleet, the dashboard and replay. Halyard (<code>@fleet/ui</code>) is the design system all three
-              share.
+              Three workspace packages do the work. <code>fleet-collector</code> tails transcripts, polls
+              GitHub, keeps a short history and serves the API and web app. <code>@fleet/shared</code> holds
+              the protocol types, the cost estimator and the synthetic demo generator. <code>@fleet/web</code>{' '}
+              is the React and three.js app: the 3D fleet, the dashboard and replay. Halyard (
+              <code>@fleet/ui</code>) is the design system all three share.
             </p>
             <p>
               Source and issues are on <a href={REPO_URL}>GitHub</a>.
@@ -207,22 +215,23 @@ export default function Docs() {
             <h2 id="troubleshooting-h">Troubleshooting</h2>
             <h3>The dashboard is empty.</h3>
             <p>
-              Run <code>fleet doctor</code>. It checks that <code>claudeProjectsDir</code> exists. Sessions older than{' '}
-              <code>recentWindowMs</code> are hidden; start Claude Code in any repo and it appears.
+              Run <code>fleet doctor</code>. It checks that <code>claudeProjectsDir</code> exists. Sessions
+              older than <code>recentWindowMs</code> are hidden; start Claude Code in any repo and it appears.
             </p>
             <h3>Port 4747 is in use.</h3>
             <p>
-              Another collector is probably running. Check <code>fleet status</code>, or set <code>FLEET_PORT</code> to
-              a free port.
+              Another collector is probably running. Check <code>fleet status</code>, or set{' '}
+              <code>FLEET_PORT</code> to a free port.
             </p>
             <h3>My phone cannot connect.</h3>
             <p>
-              Confirm <code>lan</code> is true, the Mac&apos;s tailnet name is in <code>allowedHosts</code>, and the URL
-              includes the token from <code>fleet token</code>.
+              Confirm <code>lan</code> is true, the Mac&apos;s tailnet name is in <code>allowedHosts</code>,
+              and the URL includes the token from <code>fleet token</code>.
             </p>
             <h3>No PR or CI status.</h3>
             <p>
-              Run <code>gh auth status</code>. GitHub polling needs a signed-in gh CLI and a GitHub remote on the repo.
+              Run <code>gh auth status</code>. GitHub polling needs a signed-in gh CLI and a GitHub remote on
+              the repo.
             </p>
           </section>
         </div>

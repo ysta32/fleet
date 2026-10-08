@@ -3,7 +3,8 @@ import { useState } from 'react';
 import { FleetStage } from '@/components/FleetStage';
 
 const NOTE: Record<string, string> = {
-  reduced: 'Reduced motion is on, so this is a still render. Turn it off in your system settings to see the scene move.',
+  reduced:
+    'Reduced motion is on, so this is a still render. Turn it off in your system settings to see the scene move.',
   'no-webgl': 'Your browser has WebGL turned off, so this is a still render of the same scene.',
   error: 'The 3D scene failed to load. This is a still render of it. Reload to try again.',
 };

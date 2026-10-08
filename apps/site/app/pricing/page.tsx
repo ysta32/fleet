@@ -11,17 +11,36 @@ export const metadata = pageMeta(
 );
 
 const POINTS = [
-  ['Free, with no tiers', 'There is no Pro plan, no seat count and no trial. Every feature is in the free download.'],
+  [
+    'Free, with no tiers',
+    'There is no Pro plan, no seat count and no trial. Every feature is in the free download.',
+  ],
   ['MIT licensed', 'Use it at work, change it, ship a fork. Keep the copyright notice and the license text.'],
-  ['No account', 'Fleet runs on your machine. There is nothing to sign up for and no server of ours to talk to.'],
-  ['Your model bill is separate', 'Fleet estimates what your agents cost. It does not add to that cost or resell anything.'],
-  ['No warranty', 'It is provided as is. If it breaks, open an issue; fixes are best effort by one developer.'],
+  [
+    'No account',
+    'Fleet runs on your machine. There is nothing to sign up for and no server of ours to talk to.',
+  ],
+  [
+    'Your model bill is separate',
+    'Fleet estimates what your agents cost. It does not add to that cost or resell anything.',
+  ],
+  [
+    'No warranty',
+    'It is provided as is. If it breaks, open an issue; fixes are best effort by one developer.',
+  ],
 ] as const;
 
 export default function Pricing() {
   return (
     <>
-      <PageHead label="Pricing" title={<>Free. MIT. <em>That is the whole page.</em></>} />
+      <PageHead
+        label="Pricing"
+        title={
+          <>
+            Free. MIT. <em>That is the whole page.</em>
+          </>
+        }
+      />
       <div className="wrap page-body price">
         <div style={{ display: 'grid', gap: 'var(--fl-space-5)', alignContent: 'start' }}>
           <span className="price-figure">$0</span>

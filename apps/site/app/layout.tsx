@@ -57,7 +57,11 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${display.variable} ${sans.variable} ${mono.variable}`} suppressHydrationWarning>
+    <html
+      lang="en"
+      className={`${display.variable} ${sans.variable} ${mono.variable}`}
+      suppressHydrationWarning
+    >
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT }} />
       </head>
@@ -102,7 +106,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   <ul>
                     {col.links.map((l) => (
                       <li key={l.href}>
-                        {l.href.startsWith('http') ? <a href={l.href}>{l.label}</a> : <Link href={l.href}>{l.label}</Link>}
+                        {l.href.startsWith('http') ? (
+                          <a href={l.href}>{l.label}</a>
+                        ) : (
+                          <Link href={l.href}>{l.label}</Link>
+                        )}
                       </li>
                     ))}
                   </ul>

@@ -75,7 +75,13 @@ function useDemoView(fleet: DemoFleet): FleetView {
   }, [snapshot, events, subscribers]);
 }
 
-const STATUS_WORD: Record<string, string> = { working: 'working', idle: 'idle', waiting: 'needs you', done: 'done', failed: 'failed' };
+const STATUS_WORD: Record<string, string> = {
+  working: 'working',
+  idle: 'idle',
+  waiting: 'needs you',
+  done: 'done',
+  failed: 'failed',
+};
 
 /**
  * Keyboard and screen-reader route into the scene: every station and agent as a button that drives the same
@@ -105,23 +111,45 @@ function FleetIndex({
         }
       }}
     >
-      <button type="button" className="fleet-index-toggle" aria-expanded={open} aria-controls={listId} onClick={() => setOpen((o) => !o)}>
-        Stations and agents <span className="num">{snapshot.projects.length}/{snapshot.agents.length}</span>
+      <button
+        type="button"
+        className="fleet-index-toggle"
+        aria-expanded={open}
+        aria-controls={listId}
+        onClick={() => setOpen((o) => !o)}
+      >
+        Stations and agents{' '}
+        <span className="num">
+          {snapshot.projects.length}/{snapshot.agents.length}
+        </span>
       </button>
       <ul id={listId} className="fleet-index-list" hidden={!open}>
         {snapshot.projects.map((p) => {
           const agents = snapshot.agents.filter((a) => a.projectId === p.id);
           return (
             <li key={p.id}>
-              <button type="button" className="fleet-index-station" aria-pressed={isSel('project', p.id)} onClick={() => select('project', p.id)}>
+              <button
+                type="button"
+                className="fleet-index-station"
+                aria-pressed={isSel('project', p.id)}
+                onClick={() => select('project', p.id)}
+              >
                 {p.name} <span className="num">{agents.length}</span>
               </button>
               {agents.length > 0 && (
                 <ul aria-label={`${p.name} agents`}>
                   {agents.map((a) => (
                     <li key={a.id}>
-                      <button type="button" aria-pressed={isSel('agent', a.id)} data-status={a.status} onClick={() => select('agent', a.id)}>
-                        {a.label} <span className="fleet-index-meta">{a.model} · {STATUS_WORD[a.status] ?? a.status}</span>
+                      <button
+                        type="button"
+                        aria-pressed={isSel('agent', a.id)}
+                        data-status={a.status}
+                        onClick={() => select('agent', a.id)}
+                      >
+                        {a.label}{' '}
+                        <span className="fleet-index-meta">
+                          {a.model} · {STATUS_WORD[a.status] ?? a.status}
+                        </span>
                       </button>
                     </li>
                   ))}
@@ -165,7 +193,9 @@ function Island({ seed, projects, interactive, onReady }: MountOptions) {
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <FleetScene view={view} selection={selection} onSelect={setSelection} />
-      {interactive && snap ? <FleetIndex snapshot={snap} selection={selection} onSelect={setSelection} /> : null}
+      {interactive && snap ? (
+        <FleetIndex snapshot={snap} selection={selection} onSelect={setSelection} />
+      ) : null}
     </div>
   );
 }

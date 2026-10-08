@@ -50,8 +50,9 @@ function afterLcp(cb: () => void): () => void {
   let idle = 0;
   const run = () => {
     if (cancelled) return;
-    const ric = (window as Window & { requestIdleCallback?: (f: () => void, o?: { timeout: number }) => number })
-      .requestIdleCallback;
+    const ric = (
+      window as Window & { requestIdleCallback?: (f: () => void, o?: { timeout: number }) => number }
+    ).requestIdleCallback;
     if (ric) idle = ric(() => !cancelled && cb(), { timeout: 2500 });
     else idle = window.setTimeout(() => !cancelled && cb(), 600);
   };
@@ -153,7 +154,9 @@ export function FleetStage({
   return (
     <>
       <picture>
-        {forced ? null : <source media="(prefers-color-scheme: light)" srcSet={srcSet('light')} sizes="100vw" />}
+        {forced ? null : (
+          <source media="(prefers-color-scheme: light)" srcSet={srcSet('light')} sizes="100vw" />
+        )}
         <img
           className="hero-poster"
           src={`/poster/fleet-${forced ?? 'dark'}-1920.webp`}

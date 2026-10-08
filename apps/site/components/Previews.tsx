@@ -80,7 +80,11 @@ export function SessionsPreview() {
               <tr key={s.id}>
                 <td>{s.project}</td>
                 <td>
-                  <span className="dot" style={{ background: `var(--fl-model-${s.model})` }} aria-hidden="true" />
+                  <span
+                    className="dot"
+                    style={{ background: `var(--fl-model-${s.model})` }}
+                    aria-hidden="true"
+                  />
                   <span className="mono" style={{ fontSize: 'var(--fl-text-xs)' }}>
                     {s.model}
                   </span>
@@ -94,7 +98,8 @@ export function SessionsPreview() {
         </table>
       </div>
       <p className="caption mono">
-        {totals.working}/{totals.agents} agents working · {totals.projects} projects · {fmtUsd(totals.cost)} so far
+        {totals.working}/{totals.agents} agents working · {totals.projects} projects · {fmtUsd(totals.cost)}{' '}
+        so far
       </p>
     </div>
   );
@@ -166,7 +171,9 @@ export function PhonePreview() {
         <div className="notif">
           <span className="label">ntfy · Fleet · now</span>
           <strong>{top ? `${top.title} · ${top.project}` : 'Nothing needs you'}</strong>
-          <span style={{ color: 'var(--fl-fg-muted)' }}>{top ? `${top.detail}. Idle ${top.minutes}m.` : ''}</span>
+          <span style={{ color: 'var(--fl-fg-muted)' }}>
+            {top ? `${top.detail}. Idle ${top.minutes}m.` : ''}
+          </span>
         </div>
         <div className="notif" style={{ opacity: 0.6 }}>
           <span className="label">ntfy · Fleet · 12m ago</span>

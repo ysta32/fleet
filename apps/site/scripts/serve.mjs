@@ -51,7 +51,9 @@ createServer((req, res) => {
   const target = file ?? path.join(root, '404.html');
   const immutable = url.pathname.startsWith('/_next/static/');
   const type = TYPES[path.extname(target)] ?? 'application/octet-stream';
-  const gzip = /^(text\/|application\/(json|manifest)|image\/svg)/.test(type) && /\bgzip\b/.test(String(req.headers['accept-encoding']));
+  const gzip =
+    /^(text\/|application\/(json|manifest)|image\/svg)/.test(type) &&
+    /\bgzip\b/.test(String(req.headers['accept-encoding']));
   res.writeHead(status, {
     'Content-Type': type,
     ...(gzip ? { 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' } : {}),

@@ -118,12 +118,23 @@ export function costExample() {
     lines: [
       { label: 'input', tokens: tokens.input, rate: '$3.00 / Mtok', usd: part({ input: tokens.input }) },
       { label: 'output', tokens: tokens.output, rate: '$15.00 / Mtok', usd: part({ output: tokens.output }) },
-      { label: 'cache read', tokens: tokens.cacheRead, rate: '0.1 × input', usd: part({ cacheRead: tokens.cacheRead }) },
-      { label: 'cache write', tokens: tokens.cacheWrite, rate: '1.25 × input', usd: part({ cacheWrite: tokens.cacheWrite }) },
+      {
+        label: 'cache read',
+        tokens: tokens.cacheRead,
+        rate: '0.1 × input',
+        usd: part({ cacheRead: tokens.cacheRead }),
+      },
+      {
+        label: 'cache write',
+        tokens: tokens.cacheWrite,
+        rate: '1.25 × input',
+        usd: part({ cacheWrite: tokens.cacheWrite }),
+      },
     ],
     total: estimateCostUsd(modelId, tokens),
   };
 }
 
 export const fmtUsd = (n: number) => `$${n.toFixed(2)}`;
-export const fmtTok = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(2)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
+export const fmtTok = (n: number) =>
+  n >= 1_000_000 ? `${(n / 1_000_000).toFixed(2)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);

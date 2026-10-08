@@ -1,4 +1,12 @@
-export function PageHead({ label, title, lead }: { label: string; title: React.ReactNode; lead?: React.ReactNode }) {
+export function PageHead({
+  label,
+  title,
+  lead,
+}: {
+  label: string;
+  title: React.ReactNode;
+  lead?: React.ReactNode;
+}) {
   return (
     <header className="wrap page-head">
       <span className="label">{label}</span>
