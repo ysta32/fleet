@@ -21,6 +21,7 @@ import { Hud } from './Hud';
 import {
   cameraFitPosition,
   cameraMaxDistance,
+  focusDistance,
   clamp,
   damp,
   fitScaleForAspect,
@@ -359,7 +360,7 @@ function CameraRig({
       c.target.add(delta);
       camera.position.add(delta);
       if (focusing) {
-        const want = selection?.kind === 'project' ? 11 : 6;
+        const want = focusDistance(selection?.kind ?? 'session', fitted.current ?? framed);
         offset.copy(camera.position).sub(c.target);
         const len = offset.length();
         const next = store.reduced ? want : THREE.MathUtils.lerp(len, want, damp(2.4, dt));

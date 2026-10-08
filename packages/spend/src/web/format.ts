@@ -62,6 +62,20 @@ export function monthShort(m: number): string {
   return MONTHS[m - 1] ?? '';
 }
 
+/**
+ * X-axis day ticks for a month chart: 1, 8, 15, 22 and the last day. The 8th and 22nd are `alt` (hidden
+ * on narrow charts, where they collide with their neighbours), and a weekly tick closer than 4 days to the
+ * month end is dropped so the end label never overlaps it.
+ */
+export function monthTicks(days: number): { day: number; alt: boolean }[] {
+  const n = Math.max(1, Math.floor(days));
+  const ticks = [1, 8, 15, 22]
+    .filter((day) => day === 1 || n - day >= 4)
+    .map((day) => ({ day, alt: day === 8 || day === 22 }));
+  if (n > 1) ticks.push({ day: n, alt: false });
+  return ticks;
+}
+
 export function daysInMonth(y: number, m: number): number {
   return new Date(Date.UTC(y, m, 0)).getUTCDate();
 }
