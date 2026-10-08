@@ -218,7 +218,7 @@ const PR_TITLES: Record<string, [string, string]> = {
   faq: ['FAQ for billing and limits', 'Troubleshooting FAQ'],
   dataset: ['Deduplicate the training dataset', 'Versioned dataset manifests'],
   features: ['Backfill derived features', 'Feature freshness checks'],
-  trainer: ['Mixed-precision trainer', 'Resume training from checkpoints'],
+  trainer: ['Mixed-precision trainer', 'Resume interrupted training runs'],
   eval: ['Eval harness with held-out splits', 'Regression gate on eval scores'],
   export: ['Export models to a portable format', 'Smaller exported model artifacts'],
   serving: ['Health checks for the model server', 'Warm model replicas on deploy'],
@@ -291,12 +291,14 @@ const MAX_ENDED_SESSIONS = 12;
 const ROLLUP_RETENTION_MS = 36 * HOUR_MS;
 const LEDGER_RETENTION_MS = 24 * HOUR_MS;
 /**
- * Needs-you waits are scheduled fleet-wide, one at a time: each lasts 5-45 min, and the next starts
- * 170-230 min after it ends, so a 12h night has 3-5 incidents (including the one left open at load).
+ * Needs-you waits are scheduled fleet-wide, one at a time: each lasts 5-45 min, and consecutive waits
+ * start 185-232 min apart (start to start; an army reaches its next checkpoint within a minute or two,
+ * so real spacing stays under 240 min). Any rolling 12h window therefore holds 3 or 4 scheduled waits,
+ * plus at most one more for the wait left open at load: 3-5 incidents per night.
  */
 const MINUTE_MS = 60_000;
 const waitLength = (random: () => number) => 5 * MINUTE_MS + Math.floor(random() * 40 * MINUTE_MS);
-const waitGap = (random: () => number) => 170 * MINUTE_MS + Math.floor(random() * 60 * MINUTE_MS);
+const waitSpacing = (random: () => number) => 185 * MINUTE_MS + Math.floor(random() * 47 * MINUTE_MS);
 const between = (random: () => number, minMinutes: number, maxMinutes: number) =>
   Math.floor((minMinutes + random() * (maxMinutes - minMinutes)) * MINUTE_MS);
 /**
@@ -920,7 +922,7 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
         if (now >= nextWaitAt && !armies.some((other) => other.waiting)) {
           const length = waitLength(random);
           ctx.beginWait(length);
-          nextWaitAt = now + length + waitGap(random);
+          nextWaitAt = now + waitSpacing(random);
         } else tool(coder, 'Bash', 'npm');
         break;
       case 6:
@@ -1050,12 +1052,19 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
       (army) => army.session.status !== 'ended' && army.stage <= 10 && (army.stage > 0 || army.taskIndex > 0),
     );
     if (!candidates.length) return;
-    const chosen = candidates[Math.floor(random() * candidates.length)]!;
+    // A scheduled wait already in progress is the incident left open; otherwise start one now.
+    const chosen =
+      candidates.find((army) => army.waiting) ?? candidates[Math.floor(random() * candidates.length)]!;
     for (const army of armies) if (army !== chosen && army.waiting) context(army, events).endWait();
     const hold = 10 * MINUTE_MS + Math.floor(random() * 20 * MINUTE_MS);
-    if (chosen.waiting) chosen.waitUntil = Math.max(chosen.waitUntil, now + hold);
-    else context(chosen, events).beginWait(hold);
-    nextWaitAt = Math.max(nextWaitAt, chosen.waitUntil + waitGap(random));
+    if (chosen.waiting) {
+      // Its start already set the next slot (>= 185 min after it began, well past this extension).
+      chosen.waitUntil = Math.max(chosen.waitUntil, now + hold);
+    } else {
+      context(chosen, events).beginWait(hold);
+      nextWaitAt = now + waitSpacing(random);
+    }
+    nextWaitAt = Math.max(nextWaitAt, chosen.waitUntil + 5 * MINUTE_MS);
   }
 
   // Warm-up: simulate the hours before `createdAt`, keeping a frame every minute for replay.
