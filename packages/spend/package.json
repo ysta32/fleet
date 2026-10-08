@@ -1,6 +1,6 @@
 {
   "name": "fleet-spend",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Local, private spend tracker for AI coding agents (Claude Code, Codex, Cursor, Copilot, Anthropic/OpenAI APIs)",
   "type": "module",
   "bin": {

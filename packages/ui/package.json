@@ -1,6 +1,6 @@
 {
   "name": "@fleet/ui",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Halyard: the Fleet design system (tokens, fonts, icons, motion)",
   "type": "module",
   "main": "dist/index.js",
