@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Icon, Kbd } from './Icon';
 import { KEYMAP } from './hotkeys';
-import { useModal } from './modal';
+import { useMediaQuery, useModal } from './modal';
 import { PushToggle } from '../push/PushToggle';
 
 export function HelpOverlay({ onClose, demo = false }: { onClose(): void; demo?: boolean }) {
@@ -13,6 +13,14 @@ export function HelpOverlay({ onClose, demo = false }: { onClose(): void; demo?:
     dialog.current?.focus({ preventScroll: true });
   }, []);
   const groups = [...new Set(KEYMAP.map((entry) => entry.group))];
+  // Phones rarely have a keyboard, so there the phone-alerts switch leads (in reading and tab order)
+  // and the shortcuts follow; on a 375px screen the switch would otherwise sit below the fold.
+  const phone = useMediaQuery('(max-width: 767px)');
+  const push = (
+    <div className={`help-push${phone ? ' help-push-first' : ''}`}>
+      <PushToggle demo={demo} />
+    </div>
+  );
   return (
     <div
       ref={overlay}
@@ -36,6 +44,7 @@ export function HelpOverlay({ onClose, demo = false }: { onClose(): void; demo?:
           </button>
         </header>
         <div className="help-body">
+          {phone && push}
           <div className="help-groups">
             {groups.map((group) => (
               <section key={group}>
@@ -55,9 +64,7 @@ export function HelpOverlay({ onClose, demo = false }: { onClose(): void; demo?:
               </section>
             ))}
           </div>
-          <div className="help-push">
-            <PushToggle demo={demo} />
-          </div>
+          {!phone && push}
         </div>
       </div>
     </div>

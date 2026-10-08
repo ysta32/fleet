@@ -501,6 +501,61 @@ describe('createDemoFleet', () => {
     expect(seen.size).toBeGreaterThan(12);
   });
 
+  it("spreads each step's events inside the elapsed step, in order and never past the clock", () => {
+    const fleet = createDemoFleet({ seed: 42, now: NOW });
+    const events: FleetEvent[] = [];
+    let clock = NOW;
+    let latest = NOW;
+    for (let tick = 0; tick < 2_400; tick++) {
+      const batch = fleet.tick(250);
+      clock += 250;
+      // a tick's events come after everything delivered before and never pass its clock; a step's
+      // window is (step - 800ms, step], so they may predate the previous tick's clock by under 800ms
+      if (batch.length) expect(batch[0]!.ts).toBeGreaterThan(latest);
+      for (const event of batch) {
+        expect(event.ts).toBeGreaterThan(clock - 250 - 800);
+        expect(event.ts).toBeLessThanOrEqual(clock);
+        expect(event.id.startsWith(`${event.ts}-`)).toBe(true);
+      }
+      if (batch.length) latest = batch.at(-1)!.ts;
+      expect(fleet.snapshot().generatedAt).toBe(clock);
+      events.push(...batch);
+    }
+    const times = events.map((event) => event.ts);
+    expect(times).toEqual([...times].sort((a, b) => a - b));
+    // times are no longer all on the 800ms step grid
+    expect(events.filter((event) => (event.ts - NOW) % 800 !== 0).length).toBeGreaterThan(events.length / 2);
+    // one session's consecutive events read as 0s, 1s, 2s and 3s apart, not only +0s and +2s
+    const gaps = new Set<number>();
+    const last = new Map<string, number>();
+    for (const event of events) {
+      if (!event.sessionId) continue;
+      const previous = last.get(event.sessionId);
+      if (previous !== undefined) gaps.add(Math.floor((event.ts - previous) / 1000));
+      last.set(event.sessionId, event.ts);
+    }
+    for (const gap of [0, 1, 2, 3]) expect(gaps.has(gap)).toBe(true);
+    // the history agrees: still in order, never past the clock, same times as the live stream
+    const history = fleet.history(1).events.filter((event) => event.ts > NOW);
+    expect(history.map((event) => event.ts)).toEqual(times.filter((at) => at >= clock - 3_600_000));
+    expect(history.every((event) => event.ts <= fleet.snapshot().generatedAt)).toBe(true);
+  });
+
+  it('dates alerts at the event that raised them', () => {
+    const fleet = createDemoFleet({ now: NOW, seed: 9 });
+    const events = fleet.history(12).events;
+    for (let step = 0; step < 360; step++) events.push(...fleet.tick(120_000));
+    const raised = fleet.snapshot().alerts;
+    expect(raised.length).toBeGreaterThan(0);
+    for (const alert of raised) {
+      const source = events.filter((event) => event.ts === alert.at && event.projectId === alert.projectId);
+      expect(source.length, `${alert.kind} at ${alert.at}`).toBeGreaterThan(0);
+      expect(
+        source.some((event) => (alert.kind === 'ci.failed' ? event.kind === 'ci' : event.kind === 'blocked')),
+      ).toBe(true);
+    }
+  });
+
   it('caps catch-up at two minutes and silently skips the remaining time in under 50ms', () => {
     const fleet = createDemoFleet({ now: NOW });
     const limited = createDemoFleet({ now: NOW });
@@ -514,7 +569,8 @@ describe('createDemoFleet', () => {
     expect(fleet.tick(799)).toEqual([]);
     const next = fleet.tick(1);
     expect(next.length).toBeGreaterThan(0);
-    expect(next.every((event) => event.ts === NOW + 1e12 + 800)).toBe(true);
+    // the next step lands on the grid at +800ms; its events happen during that step, never before the skip
+    expect(next.every((event) => event.ts > NOW + 1e12 && event.ts <= NOW + 1e12 + 800)).toBe(true);
     const warmed = createDemoFleet({ now: NOW });
     warmed.history(0.1);
     const warmedStart = performance.now();

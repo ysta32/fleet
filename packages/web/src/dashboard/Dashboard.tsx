@@ -19,6 +19,7 @@ import {
   MODEL_FAMILIES,
   relativeTime,
   sortSessions,
+  spendNote,
   timeTitle,
   totalTokens,
 } from './model';
@@ -325,6 +326,7 @@ export default function Dashboard({
   );
   const dismissed = dismissedAlerts ?? new Set<string>();
   const totals = aggregateFleet(snapshot, now);
+  const note = spendNote(totals.spend);
   const armies = snapshot.projects.filter((project) => project.orch);
   const alerts = snapshot.alerts
     .filter((alert) => !alert.cleared && !dismissed.has(alert.id))
@@ -417,17 +419,8 @@ export default function Dashboard({
                   {view.mode === 'replay' ? `Spend by ${clockTime(now)}` : 'Spend today'}
                 </dt>
                 <dd className="numeral">{formatCost(totals.costToday)}</dd>
-                <dd
-                  className="kpi-note"
-                  title={
-                    totals.spend.earlierUsd >= 0.005
-                      ? 'Today counts sessions started since local midnight; earlier is sessions started before it'
-                      : undefined
-                  }
-                >
-                  {totals.spend.earlierUsd >= 0.005
-                    ? `${formatCost(totals.costToday)} today across ${totals.spend.todaySessions} ${totals.spend.todaySessions === 1 ? 'session' : 'sessions'} · ${formatCost(totals.spend.earlierUsd)} earlier`
-                    : `Across ${snapshot.sessions.length} ${snapshot.sessions.length === 1 ? 'session' : 'sessions'}`}
+                <dd className="kpi-note" title={note.title}>
+                  {note.text}
                 </dd>
               </div>
               <div className="kpi">

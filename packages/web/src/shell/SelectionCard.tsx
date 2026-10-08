@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import type { FleetEvent, FleetSnapshot } from '@fleet/shared';
 import type { Selection } from '../data/contract';
 import { formatCost, formatCount, relativeTime, timeTitle, totalTokens } from '../dashboard/model';
-import { eventClock, eventDelta, timelineGroups } from './timeline';
+import { timelineGroups, timelineRows } from './timeline';
 import { Icon } from './Icon';
 import { useDrawer, useMediaQuery } from './modal';
 
@@ -215,22 +215,26 @@ export function SelectionCard({
                   <h4 className="micro drawer-group-head num">{group.task ?? 'Other activity'}</h4>
                 )}
                 <ol className="drawer-group-events">
-                  {group.events.map((event, index) => {
-                    const previous = index > 0 ? group.events[index - 1] : undefined;
-                    return (
-                      <li key={event.id} className={`drawer-event severity-${event.severity}`}>
-                        <time
-                          className={`num${previous ? ' drawer-event-delta' : ''}`}
-                          dateTime={new Date(event.ts).toISOString()}
-                          title={timeTitle(event.ts, now)}
-                        >
-                          {previous ? eventDelta(event.ts, previous.ts) : eventClock(event.ts)}
-                        </time>
-                        <i className="sev" aria-label={event.severity} />
-                        <span className="drawer-event-label">{event.label}</span>
-                      </li>
-                    );
-                  })}
+                  {timelineRows(group.events).map(({ event, time, run, follows }, index, rows) => (
+                    <li
+                      key={event.id}
+                      className={`drawer-event severity-${event.severity}${follows ? ' drawer-event-follows' : ''}${rows[index + 1]?.follows ? ' drawer-event-joined' : ''}`}
+                    >
+                      <time
+                        className={`num${index > 0 ? ' drawer-event-delta' : ''}`}
+                        dateTime={new Date(event.ts).toISOString()}
+                        title={
+                          run > 1
+                            ? `${timeTitle(event.ts, now)} · ${run} events in the same second`
+                            : timeTitle(event.ts, now)
+                        }
+                      >
+                        {follows ? <span className="sr-only">same second</span> : time}
+                      </time>
+                      <i className="sev" aria-label={event.severity} />
+                      <span className="drawer-event-label">{event.label}</span>
+                    </li>
+                  ))}
                 </ol>
               </li>
             ))}

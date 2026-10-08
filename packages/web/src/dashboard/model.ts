@@ -1,6 +1,7 @@
 import { formatLocalTime, formatUtcTime, sessionSpend } from '@fleet/shared';
 import type {
   Agent,
+  SessionSpend,
   Alert,
   AlertKind,
   FleetSnapshot,
@@ -84,6 +85,24 @@ export function aggregateFleet(snapshot: FleetSnapshot, now: number) {
     return { project, activeByModel, activeAgents, working };
   });
   return { tokens, costTotal: spend.totalUsd, costToday: spend.todayUsd, spend, projects };
+}
+
+/**
+ * The note under the Overview's spend headline. The headline already shows today's spend, so the note
+ * adds what it leaves out: how many sessions it covers and, when sessions started before midnight are
+ * still listed, the total with them (today plus earlier, so the two figures always add up).
+ */
+export function spendNote(spend: SessionSpend): { text: string; title?: string } {
+  const plural = (count: number) => `${count} ${count === 1 ? 'session' : 'sessions'}`;
+  if (spend.earlierUsd < 0.005) return { text: `Across ${plural(spend.sessions)}` };
+  // Split in whole cents of the shown figures, so today plus earlier reads exactly as the total.
+  const earlier = (Math.round(spend.totalUsd * 100) - Math.round(spend.todayUsd * 100)) / 100;
+  return {
+    text: `${plural(spend.todaySessions)} since midnight · ${formatCost(spend.totalUsd)} including older sessions`,
+    title:
+      `Today counts sessions started since local midnight: ${formatCost(spend.todayUsd)}. ` +
+      `Sessions started before it add ${formatCost(earlier)}, for ${formatCost(spend.totalUsd)} in all.`,
+  };
 }
 
 export type WorkingRow = ReturnType<typeof aggregateFleet>['projects'][number] & {
