@@ -4,6 +4,20 @@ All notable changes to Fleet are recorded here. The format follows [Keep a Chang
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-10-08
+
+### Changed
+
+- Site: the Next runtime starts after first paint, so the hero poster is the first thing painted. Home on mobile Lighthouse went from 95 (LCP 3.0s) to 99 (LCP 2.2s).
+- Site hero: the flare ring sits on the waiting vessel, and on phones a 14px needs-you label with a backing halo sits beside it, clear of the header.
+- The Overview spend note adds information instead of repeating the headline, and its hover split always adds up to the total shown.
+- The session drawer shows a same-second run's time once instead of a stack of "+0s" rows.
+- On phones the Help sheet leads with the phone alerts switch.
+
+### Fixed
+
+- The site digest's date title follows the visitor's time zone, like its times.
+
 ## [1.1.0] - 2026-10-08
 
 The redesign release: one signal per incident, a demo world that reads like a real night, and a site built around it.
