@@ -1691,7 +1691,7 @@ pre.code .c {
 }
 
 /* ======================================================================
-   v1.1 site pass (t40): rhythm, numbering, hero flare, proof, phone,
+   v1.1 site pass (t40): rhythm, numbering, hero sync, proof, phone,
    spend beat, CTA, docs rail and copy, live 404.
    ====================================================================== */
 
@@ -1808,181 +1808,31 @@ main {
 @media (max-width: 1023px) {
   .hero-stage {
     bottom: auto;
-    height: 46%;
-    -webkit-mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
-    mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
+    /* A fixed height, not a share of the hero: the hero grows with its copy, and a taller stage would
+       crop the square phone poster at the sides and push its legend down behind the headline. */
+    height: min(100vw, 46svh);
+    /* Fully clear by 88%: the poster's legend row sits below that, under the copy. */
+    -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent 88%);
+    mask-image: linear-gradient(to bottom, #000 55%, transparent 88%);
   }
   .hero-shade {
     background: none;
   }
   .hero-copy {
     align-content: end;
-    padding-top: calc(46svh - var(--fl-space-7));
+    padding-top: calc(min(100vw, 46svh) - var(--fl-space-7));
     padding-bottom: var(--fl-space-8);
   }
 }
 
-/* S1 flare. Final state is the static state; motion only plays it in. */
-.flare {
-  position: absolute;
-  left: var(--flare-x, 46%);
-  top: var(--flare-y, 48%);
-  width: 0;
-  height: 0;
-  z-index: 1;
-  pointer-events: none;
-  color: var(--fl-fg-muted);
-}
-.flare-hull {
-  position: absolute;
-  left: -24px;
-  top: -28px;
-  width: 48px;
-  height: 56px;
-}
-.flare-hull svg {
-  display: block;
-  overflow: visible;
-  fill: none;
-  stroke-linejoin: round;
-}
-.flare-frame {
-  stroke: currentColor;
-  stroke-width: 1.25;
-}
-.flare-rim {
-  stroke: var(--fl-accent);
-  stroke-width: 2;
-  filter: drop-shadow(0 0 6px var(--fl-accent));
-}
-.flare-beam {
-  position: absolute;
-  left: -1px;
-  bottom: 0;
-  width: 2px;
-  height: var(--flare-beam, 36vh);
-  background: linear-gradient(to top, var(--fl-accent) 0%, transparent 100%);
-  transform-origin: 50% 100%;
-}
-.flare-beam::before {
-  content: '';
-  position: absolute;
-  inset: 0 -14px;
-  background: linear-gradient(to top, var(--fl-accent) 0%, transparent 70%);
-  opacity: 0.18;
-  filter: blur(8px);
-}
-.flare-ring {
-  position: absolute;
-  left: -44px;
-  top: -14px;
-  width: 88px;
-  height: 28px;
-  border: var(--fl-hairline) solid var(--fl-accent);
-  border-radius: 50%;
-  opacity: 0.45;
-}
-.flare-ring-2 {
-  left: -76px;
-  top: -24px;
-  width: 152px;
-  height: 48px;
-  opacity: 0.18;
-}
-.flare-tag {
-  position: absolute;
-  left: 40px;
-  top: -44px;
-  display: flex;
-  align-items: center;
-  gap: var(--fl-space-2);
-  white-space: nowrap;
-  padding: var(--fl-space-1) var(--fl-space-3);
-  font: 500 var(--fl-text-xs) / var(--fl-leading-normal) var(--fl-font-mono);
-  color: var(--fl-fg);
-  background: var(--fl-glass);
-  border: var(--fl-hairline) solid color-mix(in srgb, var(--fl-accent) 45%, var(--fl-border));
-  border-radius: var(--fl-radius-sm);
-  -webkit-backdrop-filter: blur(var(--fl-blur-md));
-  backdrop-filter: blur(var(--fl-blur-md));
-}
-.flare-tag b {
-  font-weight: 600;
-}
-.flare-tag-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: var(--fl-radius-pill);
-  background: var(--fl-accent);
-}
-@media (max-width: 1023px) {
-  .flare {
-    --flare-x: 50%;
-    --flare-y: 50%;
-    --flare-beam: 30svh;
-  }
-  .flare-tag {
-    left: 0;
-    top: 40px;
-    transform: translateX(-50%);
-  }
-}
+/* S1: the scene's own halyard signal (packages/web viz) raises the flare; the headline's last words
+   turn signal orange in step with it. Reduced motion shows the end state. */
 @media (prefers-reduced-motion: no-preference) {
-  .flare-hull {
-    animation: flare-drift 1.6s var(--fl-ease-land) both;
-  }
-  .flare-rim {
-    animation: flare-fade 0.5s 1.4s ease-out both;
-  }
-  .flare-beam {
-    animation: flare-rise 1.2s 1.6s var(--fl-ease-land) both;
-  }
-  .flare-ring {
-    animation: flare-ping 2.8s 1.6s ease-out infinite both;
-  }
-  .flare-ring-2 {
-    animation-delay: 3s;
-  }
-  .flare-tag {
-    animation: flare-fade 0.6s 2s ease-out both;
-  }
   .hero-sync {
-    animation: flare-sync 0.6s 1.6s ease-out both;
+    animation: hero-sync 0.6s 1.2s ease-out both;
   }
 }
-@keyframes flare-drift {
-  from {
-    transform: translate(-80px, 12px);
-  }
-  to {
-    transform: none;
-  }
-}
-@keyframes flare-fade {
-  from {
-    opacity: 0;
-  }
-}
-@keyframes flare-rise {
-  from {
-    transform: scaleY(0);
-    opacity: 0;
-  }
-}
-@keyframes flare-ping {
-  0% {
-    transform: scale(0.4);
-    opacity: 0;
-  }
-  12% {
-    opacity: 0.6;
-  }
-  100% {
-    transform: scale(1.8);
-    opacity: 0;
-  }
-}
-@keyframes flare-sync {
+@keyframes hero-sync {
   from {
     color: var(--fl-fg);
   }

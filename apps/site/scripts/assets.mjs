@@ -1,6 +1,8 @@
 // Generates the site's binary assets into public/ (committed; not part of `next build`, which has no browser):
 //   poster/fleet-<dark|light>-<768|1280|1920>.webp  stills of the REAL hero island (FleetScene + createDemoFleet,
 //                                                   synthetic data) rendered by headless Chromium
+//   poster/fleet-<dark|light>-m.webp                square phone still: rendered at 420x420 CSS px and 2x, so
+//                                                   station labels keep their real size on a 375px screen
 //   poster/fleet-close-1280.webp                    a tighter dark still with fewer projects
 //   og/<slug>.png                                   1200x630 social cards, one per pageMeta() call in app/
 //   icons/*.png, manifest.webmanifest               favicon + PWA set rasterised from packages/ui/brand
@@ -66,10 +68,10 @@ async function withBrowser(fn) {
   }
 }
 
-async function newPage(browser, { width, height, scheme }, pages) {
+async function newPage(browser, { width, height, scheme, scale = 1 }, pages) {
   const ctx = await browser.newContext({
     viewport: { width, height },
-    deviceScaleFactor: 1,
+    deviceScaleFactor: scale,
     colorScheme: scheme,
     reducedMotion: 'no-preference',
   });
@@ -92,7 +94,7 @@ async function newPage(browser, { width, height, scheme }, pages) {
   return { page, ctx, errors };
 }
 
-async function renderScene(browser, { theme, width, height, projects, settleMs }) {
+async function renderScene(browser, { theme, width, height, projects, settleMs, scale = 1 }) {
   const html = `<!doctype html><html data-theme="${theme}"><head><meta charset="utf-8">
 <link rel="stylesheet" href="${FONTS_CSS}">
 <style>html,body{margin:0;height:100%;overflow:hidden}#h{position:fixed;inset:0}</style></head>
@@ -103,7 +105,7 @@ mount(document.getElementById('h'), { seed: 7, ${projects ? `projects: ${project
 </script></body></html>`;
   const { page, ctx, errors } = await newPage(
     browser,
-    { width, height, scheme: theme },
+    { width, height, scheme: theme, scale },
     { '/scene.html': html },
   );
   await page.goto(`${ORIGIN}/scene.html`);
@@ -130,6 +132,10 @@ async function posters(browser) {
         .webp({ quality: w <= 768 ? 70 : 74, effort: 6 })
         .toFile(path.join(pub, `poster/fleet-${theme}-${w}.webp`));
     }
+    const phone = await renderScene(browser, { theme, width: 420, height: 420, scale: 2, settleMs: 7000 });
+    await sharp(phone)
+      .webp({ quality: 72, effort: 6 })
+      .toFile(path.join(pub, `poster/fleet-${theme}-m.webp`));
     console.log(`[assets] poster ${theme}`);
   }
   const close = await renderScene(browser, {

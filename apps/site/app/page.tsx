@@ -5,7 +5,6 @@ import { InstallCommand } from '@/components/InstallCommand';
 import { CostMath, InboxPreview, PhonePreview, SessionsPreview, TerminalWall } from '@/components/Previews';
 import { OptionalSections } from '@/components/Optional';
 import { demoPreview } from '@/lib/demo';
-import { HeroFlare } from '@/components/HeroFlare';
 import { readChangelog } from '@/lib/changelog';
 import { fleetVersion, repoFacts } from '@/lib/repo';
 import { INSTALL_CMD, REPO_URL, pageMeta } from '@/lib/site';
@@ -18,9 +17,7 @@ export const metadata = pageMeta(
 
 export default function Home() {
   const facts = repoFacts();
-  const { totals, snapshot } = demoPreview();
-  // Agents that stopped for you, counted from the whole demo snapshot (the inbox preview is truncated).
-  const waiting = snapshot.agents.filter((a) => a.status === 'waiting').length;
+  const { totals } = demoPreview();
   const version = fleetVersion();
   const release = readChangelog().find((r) => r.version === version);
   return (
@@ -29,7 +26,6 @@ export default function Home() {
       <section className="hero grain" aria-labelledby="hero-title">
         <div className="hero-stage">
           <FleetStage posterAlt="A night harbour of glowing vessels: a synthetic fleet of Claude Code agents grouped by project" />
-          {waiting > 0 ? <HeroFlare waiting={waiting} /> : null}
         </div>
         <div className="hero-horizon" aria-hidden="true" />
         <div className="hero-shade" aria-hidden="true" />
