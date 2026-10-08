@@ -1,3 +1,4 @@
+import { formatLocalTime, formatUtcTime, sessionSpend } from '@fleet/shared';
 import type {
   Alert,
   AlertKind,
@@ -56,14 +57,9 @@ export function relativeTime(at: number, now: number): string {
 }
 
 export function aggregateFleet(snapshot: FleetSnapshot, now: number) {
-  const day = new Date(now);
-  day.setHours(0, 0, 0, 0);
+  const spend = sessionSpend(snapshot.sessions, now);
   const tokens: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-  let costTotal = 0;
-  let costToday = 0;
   for (const session of snapshot.sessions) {
-    costTotal += session.costUsd;
-    if (session.startedAt >= day.getTime() && session.startedAt <= now) costToday += session.costUsd;
     for (const key of ['input', 'output', 'cacheRead', 'cacheWrite'] as const)
       tokens[key] += session.tokens[key];
   }
@@ -86,7 +82,7 @@ export function aggregateFleet(snapshot: FleetSnapshot, now: number) {
       project.orch?.phase === 'running';
     return { project, activeByModel, activeAgents, working };
   });
-  return { tokens, costTotal, costToday, projects };
+  return { tokens, costTotal: spend.totalUsd, costToday: spend.todayUsd, spend, projects };
 }
 
 export type WorkingRow = ReturnType<typeof aggregateFleet>['projects'][number] & {
@@ -485,6 +481,12 @@ export function matches(query: string, ...fields: (string | undefined)[]): boole
   return fields.some((field) => field?.toLowerCase().includes(q));
 }
 
+/** Local 24h "HH:MM"; pair with `formatUtcTime` in a title for the UTC instant. */
 export function clockTime(at: number): string {
-  return new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  return formatLocalTime(at);
+}
+
+/** Tooltip for any shown time: local clock, how long ago, and the UTC instant. */
+export function timeTitle(at: number, now: number): string {
+  return `${clockTime(at)} local, ${relativeTime(at, now)} · ${formatUtcTime(at)}`;
 }

@@ -164,7 +164,7 @@ ${R} .fls-tone-good{color:${t('success')}}
 }
 /* hero: the focal point */
 ${R} .fls-hero{position:relative;overflow:hidden;padding:${t('space-7')} ${t('space-7')} ${t('space-6')};border-radius:${t('radius-lg')};border:1px solid ${t('border')};background:radial-gradient(120% 90% at 0% 0%,${wash('accent', 11)},transparent 55%),radial-gradient(80% 60% at 100% 100%,${wash('accent', 5)},transparent 60%),linear-gradient(180deg,${t('surface-1')},${t('bg')});box-shadow:${t('elev-2')}}
-${R} .fls-hero-num{display:block;font-family:${t('font-mono')};font-weight:500;font-variant-numeric:proportional-nums;font-size:clamp(3rem,12cqi,6.5rem);line-height:0.95;letter-spacing:-0.045em;color:${t('fg')};margin-top:${t('space-4')}}
+${R} .fls-hero-num{display:block;font-family:${t('font-mono')};font-weight:500;font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1,"zero" 0;font-size:clamp(3rem,12cqi,6.5rem);line-height:0.95;letter-spacing:-0.03em;color:${t('fg')};margin-top:${t('space-4')}}
 ${R} .fls-hero-num .fls-cents{color:${t('fg-muted')}}
 ${R} .fls-hero-sep{font-family:${t('font-mono')};font-weight:500;color:${t('fg-muted')};margin:0 -0.16em}
 ${R} .fls-hero-line{font-family:${t('font-display')};font-size:clamp(1.25rem,3.2cqi,1.75rem);line-height:1.25;letter-spacing:var(--fl-tracking-display, -0.01em);color:${t('fg-muted')};margin-top:${t('space-4')};max-width:44ch;text-wrap:balance}
@@ -209,7 +209,7 @@ ${R} .fls-band{fill:${wash('accent', 14)}}
 ${R} .fls-budget-line{stroke:${t('fg-muted')};stroke-width:1;stroke-dasharray:2 3}
 ${R} .fls-today-line{stroke:${t('border-strong')};stroke-width:1}
 ${R} .fls-tag{position:absolute;z-index:2;font-size:${t('text-2xs')};white-space:nowrap;pointer-events:none;line-height:1.3;text-shadow:0 0 2px ${t('surface-1')},0 0 4px ${t('surface-1')},0 0 6px ${t('surface-1')}}
-${R} .fls-tag-budget{right:0;padding-top:4px;font-size:${t('text-xs')};color:${t('fg-muted')}}
+${R} .fls-tag-budget{right:0;padding-top:4px;font-size:${t('text-xs')};font-weight:500;color:${t('fg')}}
 ${R} .fls-tag-today{right:0;transform:translateY(calc(-100% - 4px));padding:1px 6px;border-radius:${t('radius-sm')};background:${t('surface-1')};border:1px solid ${t('border-strong')};font-size:${t('text-xs')};color:${t('fg')};font-weight:500}
 ${R} .fls-tag-end{right:0;transform:translate(0,calc(-100% - 8px));padding:1px 6px;border-radius:${t('radius-sm')};background:${t('surface-1')};color:${t('fg')};border:1px solid ${t('border-strong')}}
 ${R} .fls-marker{position:absolute;z-index:1;width:10px;height:10px;margin:-5px 0 0 -5px;border-radius:50%;background:${t('accent')};box-shadow:0 0 0 2px ${t('surface-1')};pointer-events:none}

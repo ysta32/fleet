@@ -147,11 +147,15 @@ describe('createDemoFleet', () => {
       expect(value).toBeGreaterThanOrEqual(2);
       expect(value).toBeLessThanOrEqual(8);
     }
-    // Every CI failure is repaired later on the same project.
+    const totals = fleet.overnight(8).totals;
+    // Every CI failure is repaired later on the same project (repairs take up to 80 minutes, so keep
+    // running past the night to see repairs of failures from its last hour).
+    const after = Array.from({ length: 45 }, () => fleet.tick(120_000)).flat();
+    const all = [...events, ...after];
     events.forEach((event, index) => {
       if (event.kind !== 'ci' || event.severity !== 'error') return;
       expect(
-        events
+        all
           .slice(index + 1)
           .some(
             (next) =>
@@ -159,7 +163,6 @@ describe('createDemoFleet', () => {
           ),
       ).toBe(true);
     });
-    const totals = fleet.overnight(8).totals;
     expect(totals.mergedPRs).toBe(count('merge'));
     expect(totals.ciFailures).toBe(count('ci', 'error'));
     expect(totals.commits).toBeGreaterThanOrEqual(2 * totals.mergedPRs);
@@ -218,7 +221,9 @@ describe('createDemoFleet', () => {
     ).toBe(true);
     expect(history.frames.at(-1)).toEqual(fleet.snapshot());
     // Notable events cover the whole window, not just its tail.
-    const notable = history.events.filter((event) => ['merge', 'ci', 'release'].includes(event.kind));
+    const notable = history.events.filter((event) =>
+      ['merge', 'ci', 'release', 'deploy', 'review', 'test.run'].includes(event.kind),
+    );
     expect(notable[0]!.ts - history.from).toBeLessThan(10 * 60_000);
     expect(history.events.every((event) => event.ts >= history.from && event.ts <= NOW)).toBe(true);
     expect(history.events.map((event) => event.ts)).toEqual(
@@ -272,21 +277,68 @@ describe('createDemoFleet', () => {
     expect(shapes.size).toBeGreaterThan(3);
   });
 
-  it('keeps needs-you waits rare and realistic: a handful per 6h, each 5 to 45 minutes', () => {
-    const fleet = createDemoFleet({ now: NOW, seed: 9 });
-    const events = Array.from({ length: 180 }, () => fleet.tick(120_000)).flat();
-    const starts = events.filter((event) => event.kind === 'session.waiting');
-    expect(starts.length).toBeGreaterThanOrEqual(4);
-    expect(starts.length).toBeLessThanOrEqual(10);
-    for (const begin of starts) {
-      const end = events.find(
-        (event) =>
-          event.ts > begin.ts && event.sessionId === begin.sessionId && event.label === 'Dependency ready',
-      );
-      if (!end) continue;
-      expect(end.ts - begin.ts).toBeGreaterThanOrEqual(5 * 60_000);
-      expect(end.ts - begin.ts).toBeLessThanOrEqual(45 * 60_000 + 3_000);
-    }
+  it.each([1, 9, 42, 7, 999, 2024])(
+    'keeps needs-you incidents to 3-5 in every rolling 12h window, each 5 to 45 minutes (seed %i)',
+    (seed) => {
+      const fleet = createDemoFleet({ now: NOW, seed });
+      // The pre-simulated night (with the wait left open at load) plus 24h live, collected once each.
+      const events = fleet.history(12).events;
+      for (let step = 0; step < 720; step++) {
+        events.push(...fleet.tick(120_000));
+        // Windows that end mid-step past load (e.g. 361 steps) are read straight from history too.
+        if (step === 360) {
+          const night = fleet.history(12).events.filter((event) => event.kind === 'session.waiting');
+          expect(night.length).toBeGreaterThanOrEqual(3);
+          expect(night.length).toBeLessThanOrEqual(5);
+        }
+      }
+      const starts = events.filter((event) => event.kind === 'session.waiting');
+      expect(events.filter((event) => event.kind === 'blocked')).toHaveLength(starts.length);
+      const last = NOW + 720 * 120_000;
+      for (let from = NOW - 12 * 3_600_000; from + 12 * 3_600_000 <= last; from += 10 * 60_000) {
+        const count = starts.filter((event) => event.ts >= from && event.ts < from + 12 * 3_600_000).length;
+        expect(count, `window starting ${(from - NOW) / 60_000} min`).toBeGreaterThanOrEqual(3);
+        expect(count, `window starting ${(from - NOW) / 60_000} min`).toBeLessThanOrEqual(5);
+      }
+      for (const [index, begin] of starts.entries()) {
+        // Scheduled waits start 185-232 minutes apart, so they never overlap; only the wait settled
+        // at load (at NOW) may follow sooner, after ending any wait in progress.
+        const next = starts[index + 1];
+        if (next && next.ts !== NOW) {
+          expect(next.ts - begin.ts).toBeGreaterThanOrEqual(185 * 60_000);
+          expect(next.ts - begin.ts).toBeLessThan(240 * 60_000);
+        }
+        const end = events.find(
+          (event) =>
+            event.ts > begin.ts &&
+            event.sessionId === begin.sessionId &&
+            event.label === 'Approved, resuming',
+        );
+        if (!end) continue;
+        expect(end.ts - begin.ts).toBeGreaterThanOrEqual(5 * 60_000);
+        expect(end.ts - begin.ts).toBeLessThanOrEqual(45 * 60_000 + 3_000);
+      }
+    },
+  );
+
+  it('uses realistic, unprefixed titles and ids', () => {
+    const fleet = createDemoFleet({ now: NOW });
+    for (let step = 0; step < 120; step++) fleet.tick(120_000);
+    const snapshot = fleet.snapshot();
+    // `path` is never displayed and keeps its /synthetic/ privacy marker; everything else is user-facing.
+    const shown = { ...snapshot, projects: snapshot.projects.map(({ path: _path, ...project }) => project) };
+    expect(snapshot.projects.every((project) => project.path === `/synthetic/${project.name}`)).toBe(true);
+    const text = JSON.stringify([shown, fleet.history(12).events, fleet.overnight(12)]);
+    expect(text).not.toMatch(/synthetic/i);
+    expect(text).not.toMatch(/checkpoint/i);
+    for (const project of snapshot.projects) expect(project.id).toBe(project.name);
+    for (const run of snapshot.projects.flatMap((project) => (project.orch ? [project.orch] : [])))
+      for (const entry of run.inflight) {
+        expect(entry.agent).toMatch(/^[a-z][a-z0-9-]*:run-\d+:a\d$/);
+        expect(entry.started).toMatch(/^\d{2}:\d{2}$/);
+      }
+    for (const pr of snapshot.prs) expect(pr.title).toMatch(/^[A-Z][^#]{8,}$/);
+    for (const session of snapshot.sessions) expect(session.title).not.toMatch(/^(Synthetic|Demo)\b/);
   });
 
   it('summarizes the night ending now from the same simulation', () => {
