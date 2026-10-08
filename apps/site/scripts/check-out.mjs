@@ -6,6 +6,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loaderUrls } from './defer-hydration.mjs';
 
 const out = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../out');
 const REQUIRED = [
@@ -58,6 +59,8 @@ for (const f of all.filter((f) => f.endsWith('.html'))) {
     /<meta[^>]+(?:property|name)="(?:og:image|twitter:image)"[^>]+content="([^"]+)"/g,
   ))
     refs.add(new URL(m[1]).pathname);
+  // runtime chunks moved into the post-paint loader (scripts/defer-hydration.mjs) are refs like any src
+  for (const u of loaderUrls(html)) refs.add(u);
   for (const raw of refs) {
     const ref = raw.replace(/&amp;/g, '&');
     if (/^(https?:|mailto:|data:|#|\/\/)/.test(ref)) continue;

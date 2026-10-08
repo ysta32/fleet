@@ -9,6 +9,7 @@
     "dev": "node scripts/prebuild.mjs && next dev -p 4530",
     "preview": "node scripts/serve.mjs 4530",
     "typecheck": "tsc --noEmit -p .",
+    "test": "node --test scripts/*.test.mjs",
     "assets": "node scripts/prebuild.mjs && node scripts/assets.mjs",
     "postbuild": "node scripts/defer-hydration.mjs && node scripts/check-out.mjs"
   },
