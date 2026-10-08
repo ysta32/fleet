@@ -3,8 +3,18 @@ import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { Agent, AgentStatus } from '@fleet/shared';
 import { easing, ease } from '@fleet/ui';
-import { arcPoint, clamp, damp, flightDuration, hash01, hoverOffset, locationKey, vec3 } from './layout';
-import { INTRO_DELAY, INTRO_STAGGER } from './Station';
+import {
+  arcPoint,
+  clamp,
+  damp,
+  flightDuration,
+  hash01,
+  hoverOffset,
+  INTRO_DELAY,
+  INTRO_STAGGER,
+  locationKey,
+  vec3,
+} from './layout';
 import { useSceneStore, type SceneStore } from './store';
 import { ROLE_SCALE, ROLE_SHAPES, useVizTheme, type BotShape, type VizTheme } from './theme';
 
@@ -54,7 +64,7 @@ export interface BotEntry {
   order: number;
 }
 
-interface BotRec {
+export interface BotRec {
   id: string;
   /** dense index into the hit proxy + trail buffer */
   slot: number;
@@ -95,6 +105,18 @@ const s3 = new THREE.Vector3();
 const c3 = new THREE.Color();
 const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 
+/**
+ * Raycast for an instanced mesh whose instances move every frame. three caches the instanced
+ * bounding sphere on first raycast, which would make vessels that later travel outside it
+ * unclickable. Recomputing lazily here (only when a pointer actually raycasts) keeps the frame loop
+ * free of that work.
+ */
+function raycastMoving(this: THREE.InstancedMesh, rc: THREE.Raycaster, out: THREE.Intersection[]): void {
+  if (this.count === 0) return;
+  this.computeBoundingSphere();
+  THREE.InstancedMesh.prototype.raycast.call(this, rc, out);
+}
+
 function botColor(vt: VizTheme, a: Agent): string {
   return a.status === 'failed' ? vt.danger : a.status === 'waiting' ? vt.accent : vt.model[a.model];
 }
@@ -119,7 +141,7 @@ function bodyMaterial(): THREE.MeshStandardMaterial {
   return m;
 }
 
-function initRec(store: SceneStore, e: BotEntry, vt: VizTheme): BotRec {
+export function initRec(store: SceneStore, e: BotEntry, vt: VizTheme): BotRec {
   const agent = e.a;
   const phase = hash01(agent.id);
   const loc = store.effectiveLocation(agent);
@@ -165,14 +187,17 @@ function initRec(store: SceneStore, e: BotEntry, vt: VizTheme): BotRec {
   };
 }
 
-/** Advance one vessel (writes rec.pos). Exported for tests via the store-driven step. */
-function stepRec(store: SceneStore, rec: BotRec, dt: number): void {
+/** Advance one vessel (writes rec.pos). Exported for the determinism tests. */
+export function stepRec(store: SceneStore, rec: BotRec, dt: number): void {
   const t = store.t;
   const live = store.agents.get(rec.id) ?? rec.agent;
   const loc = store.effectiveLocation(live);
   const radius = store.resolveLocation(loc, live.projectId, target);
   const working = live.status === 'working';
-  if (working) rec.hoverT += dt;
+  if (store.replaying) {
+    rec.hoverT = rec.phase * 20 + store.replaySec;
+    rec.spin = (rec.phase * Math.PI * 2 + store.replaySec * 1.1) % (Math.PI * 2);
+  } else if (working) rec.hoverT += dt;
   hoverOffset(rec.phase, rec.hoverT, radius * (working ? 1 : 1.15), hov);
   target.x += hov.x;
   target.y += hov.y;
@@ -229,7 +254,7 @@ function stepRec(store: SceneStore, rec: BotRec, dt: number): void {
     }
   } else if (store.reduced) rec.pos.copy(target);
   else rec.pos.lerp(target, damp(5, dt));
-  rec.spin += dt * ((working ? 1.1 : 0) + (rec.flying ? 2.5 : 0));
+  if (!store.replaying) rec.spin += dt * ((working ? 1.1 : 0) + (rec.flying ? 2.5 : 0));
 }
 
 export function Bots({
@@ -298,7 +323,8 @@ export function Bots({
 
   // reconcile records with the snapshot (allocation happens here, never per frame)
   useLayoutEffect(() => {
-    const scrubbed = reconciledEpoch.current !== store.seekEpoch && list.current.length > 0;
+    // replay (or a fresh seek epoch): new vessels belong to the playhead and appear in place
+    const scrubbed = store.replaying || reconciledEpoch.current !== store.seekEpoch;
     reconciledEpoch.current = store.seekEpoch;
     const keep = new Set<string>();
     const next: BotRec[] = [];
@@ -459,7 +485,10 @@ export function Bots({
         args={[hitGeo, hitMat, max]}
         frustumCulled={false}
         onClick={click}
-        onUpdate={(m) => m.instanceMatrix.setUsage(THREE.DynamicDrawUsage)}
+        onUpdate={(m) => {
+          m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+          m.raycast = raycastMoving;
+        }}
       />
       <points geometry={trailGeo} material={trailMat} frustumCulled={false} renderOrder={4} />
       <mesh ref={sel} geometry={selGeo} material={selMat} visible={false} />

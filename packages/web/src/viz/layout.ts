@@ -14,6 +14,11 @@ export interface Vec3 {
 
 export const vec3 = (x = 0, y = 0, z = 0): Vec3 => ({ x, y, z });
 
+/** first-load choreography: the harbour fades up station by station (cinematic, land easing) */
+export const INTRO_DELAY = 0.2;
+export const INTRO_STAGGER = 0.09;
+export const INTRO_DUR = 0.9;
+
 /** Height at which stations float above the grid floor. */
 export const STATION_Y = 2.2;
 /** Number of task satellites per orbit ring before a new, wider ring starts. */

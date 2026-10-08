@@ -368,7 +368,11 @@ function SceneContents({ view, selection, onSelect }: FleetSceneProps) {
   store.vt = vt;
   const snap = view.snapshot;
   const replayAt = view.mode === 'replay' ? view.replay.at : null;
-  store.syncClock(view.mode, replayAt ?? snap?.generatedAt ?? -Infinity);
+  store.syncClock(
+    view.mode,
+    replayAt ?? snap?.generatedAt ?? -Infinity,
+    view.mode !== 'replay' || view.replay.playing,
+  );
   store.setSnapshot(snap);
   const stations = useMemo(() => (snap ? buildStations(snap, store) : []), [snap, store]);
   const radius = layoutRadius(store.projectCount);

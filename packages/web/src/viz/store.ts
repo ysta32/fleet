@@ -113,6 +113,19 @@ export class SceneStore {
    * scene is a function of the playhead rather than of the path taken to it.
    */
   seekEpoch = 0;
+
+  /** True while the scene is driven by a replay playhead. */
+  get replaying(): boolean {
+    return this.clockMode === 'replay';
+  }
+
+  /**
+   * Replay clock (s) for ambient motion (hover, spin, task orbits): a pure function of the playhead,
+   * so revisiting a playhead reproduces the same scene. Only meaningful while `replaying`.
+   */
+  get replaySec(): number {
+    return Number.isFinite(this.playhead) ? this.playhead / 1000 : 0;
+  }
   rings: RingFx[] = [];
   beams: BeamFx[] = [];
   particles: ParticleFx[] = [];
@@ -164,14 +177,15 @@ export class SceneStore {
    * (live <-> demo <-> replay) or the playhead moves backward (replay seek), since they describe a
    * future that no longer applies. Idempotent for repeated calls with the same values.
    */
-  syncClock(mode: string, playhead: number): void {
+  syncClock(mode: string, playhead: number, playing = true): void {
     const switched = this.clockMode !== null && mode !== this.clockMode;
     const back = playhead < this.playhead;
     if (switched || back) this.locOverride.clear();
-    // replay playback advances at most 100ms x 60 per frame; anything larger is a scrub
-    const jump =
-      mode === 'replay' && Number.isFinite(this.playhead) && playhead - this.playhead > SEEK_JUMP_MS;
-    if (switched || (mode === 'replay' && back) || jump) this.discontinuity();
+    const moved = playhead !== this.playhead && Number.isFinite(this.playhead);
+    // replay: a paused playhead only moves by an explicit seek; while playing, playback advances at
+    // most 100ms x 60 per frame, so a backward move or a larger jump is a seek too
+    const seek = mode === 'replay' && moved && (!playing || back || playhead - this.playhead > SEEK_JUMP_MS);
+    if (switched || seek) this.discontinuity();
     this.clockMode = mode;
     this.playhead = playhead;
   }

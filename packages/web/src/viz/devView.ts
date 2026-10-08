@@ -483,13 +483,10 @@ export function fromDemoFleet(demo: DemoFleet, tickMs = 250): DevFleet {
     },
     seek(f) {
       if (!hist) return;
-      const prev = at;
       at = clampPlayhead(hist, hist.from + (hist.to - hist.from) * Math.min(1, Math.max(0, f)));
       current = makeReplay();
       notify();
-      // small forward steps play their events (as playback would); jumps are silent scrubs
-      if (at > prev && at - prev <= 10_000)
-        for (const e of hist.events) if (e.ts > prev && e.ts <= at) for (const l of listeners) l(e);
+      // an explicit seek is silent: the scene is reconstructed at the playhead, no events replay
     },
   };
 }

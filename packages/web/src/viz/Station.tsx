@@ -4,7 +4,18 @@ import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import type { CiState, OrchPhase } from '@fleet/shared';
 import { easing, ease } from '@fleet/ui';
-import { alertPulse, anchorOffset, clamp, hash01, taskOrbitRadius, TASKS_PER_RING, vec3 } from './layout';
+import {
+  alertPulse,
+  anchorOffset,
+  INTRO_DELAY,
+  INTRO_DUR,
+  INTRO_STAGGER,
+  clamp,
+  hash01,
+  taskOrbitRadius,
+  TASKS_PER_RING,
+  vec3,
+} from './layout';
 import { useSceneStore } from './store';
 import { FONTS, useVizTheme } from './theme';
 
@@ -120,9 +131,7 @@ const RAISE = 0.42;
 const tmpColor = new THREE.Color();
 const tmpOff = vec3();
 /** first-load choreography: the harbour fades up station by station (cinematic, land easing) */
-export const INTRO_DELAY = 0.2;
-export const INTRO_STAGGER = 0.09;
-export const INTRO_DUR = 0.9;
+export { INTRO_DELAY, INTRO_DUR, INTRO_STAGGER } from './layout';
 const ALERT_DUR = 0.64;
 
 function StationImpl({
