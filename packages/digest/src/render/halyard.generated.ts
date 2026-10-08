@@ -1,0 +1,348 @@
+// generated — run npm run sync-tokens (source: packages/ui/tokens.css, packages/ui/src/index.ts). Do not edit.
+export const HALYARD_TOKENS_CSS = `/*
+ * HALYARD: Fleet design tokens. FROZEN NAMES (values may be tuned by the design task).
+ * Prefix --fl-. Theme: dark by default; follows prefers-color-scheme unless [data-theme] is set
+ * on <html>: [data-theme="dark"] | [data-theme="light"].
+ */
+:root {
+  /* type */
+  --fl-font-display: 'Instrument Serif', 'Iowan Old Style', Georgia, serif;
+  --fl-font-sans: 'Schibsted Grotesk', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --fl-font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --fl-text-2xs: 0.6875rem; /* 11 */
+  --fl-text-xs: 0.75rem; /* 12 */
+  --fl-text-sm: 0.8125rem; /* 13 */
+  --fl-text-md: 0.9375rem; /* 15 */
+  --fl-text-lg: 1.125rem; /* 18 */
+  --fl-text-xl: 1.5rem; /* 24 */
+  --fl-text-2xl: 2.25rem; /* 36 */
+  --fl-text-3xl: 3.5rem; /* 56 */
+  --fl-text-4xl: 5.5rem; /* 88 */
+  --fl-leading-tight: 1.1;
+  --fl-leading-normal: 1.5;
+  --fl-tracking-caps: 0.08em;
+
+  /* space (4px base) */
+  --fl-space-0: 0;
+  --fl-space-1: 2px;
+  --fl-space-2: 4px;
+  --fl-space-3: 8px;
+  --fl-space-4: 12px;
+  --fl-space-5: 16px;
+  --fl-space-6: 24px;
+  --fl-space-7: 32px;
+  --fl-space-8: 48px;
+  --fl-space-9: 64px;
+  --fl-space-10: 96px;
+  --fl-space-11: 128px;
+
+  /* radius */
+  --fl-radius-xs: 2px;
+  --fl-radius-sm: 4px;
+  --fl-radius-md: 6px;
+  --fl-radius-lg: 10px;
+  --fl-radius-pill: 999px;
+
+  /* motion */
+  --fl-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --fl-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --fl-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --fl-dur-instant: 80ms;
+  --fl-dur-fast: 140ms;
+  --fl-dur-base: 220ms;
+  --fl-dur-slow: 420ms;
+  --fl-dur-cinematic: 900ms;
+
+  /* named motions (added by 20-design-system; mirrored in JS as \`motion\`) */
+  /* dispatch: something leaves (agent spawned, PR pushed, toast out): quick, decisive acceleration */
+  --fl-ease-dispatch: cubic-bezier(0.5, 0, 0.75, 0);
+  --fl-dur-dispatch: 260ms;
+  /* land: something arrives and settles (row inserted, panel opened, result in): long deceleration */
+  --fl-ease-land: cubic-bezier(0.16, 1, 0.3, 1);
+  --fl-dur-land: 420ms;
+  /* alert: a needs-you state (blocked, CI red): one firm pulse, never a loop */
+  --fl-ease-alert: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --fl-dur-alert: 640ms;
+  --fl-stagger: 24ms;
+  --fl-motion-dispatch: var(--fl-dur-dispatch) var(--fl-ease-dispatch);
+  --fl-motion-land: var(--fl-dur-land) var(--fl-ease-land);
+  --fl-motion-alert: var(--fl-dur-alert) var(--fl-ease-alert);
+
+  /* type (added) */
+  --fl-leading-snug: 1.3;
+  --fl-tracking-tight: -0.02em;
+  --fl-tracking-display: -0.022em; /* Instrument Serif at --fl-text-2xl and up */
+  --fl-tracking-display-xl: -0.032em; /* --fl-text-4xl hero numerals and headlines */
+  --fl-leading-display: 0.96;
+  --fl-measure: 64ch;
+
+  /* layout (added) */
+  --fl-radius-xl: 16px;
+  --fl-icon-sm: 16px;
+  --fl-icon-md: 20px;
+  --fl-icon-stroke: 1.5;
+  --fl-hairline: 1px;
+  --fl-row-h: 32px;
+  --fl-row-h-compact: 26px;
+  --fl-sidebar-w: 232px;
+  --fl-content-max: 1440px;
+  --fl-z-base: 0;
+  --fl-z-sticky: 10;
+  --fl-z-overlay: 40;
+  --fl-z-palette: 50;
+  --fl-z-toast: 60;
+  --fl-focus-width: 2px;
+  --fl-focus-offset: 2px;
+
+  /* depth (added): grain texture, blur. Grain is a tiled SVG noise; blend with mix-blend-mode: overlay at low opacity. */
+  --fl-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0.55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  --fl-grain-size: 160px;
+  --fl-blur-sm: 8px;
+  --fl-blur-md: 16px;
+  --fl-blur-lg: 40px;
+
+  /* model identity (same in both themes) */
+  --fl-model-opus: #ff6a2b;
+  --fl-model-sonnet: #7fd1d9;
+  --fl-model-haiku: #b6e85a;
+  --fl-model-fable: #e9e2cf;
+  --fl-model-astra: #e58ac9;
+  --fl-model-unknown: #8a8f88;
+}
+
+/* dark (default) */
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --fl-bg: #0b0d0c;
+  --fl-surface-1: #121514;
+  --fl-surface-2: #181c1a;
+  --fl-surface-3: #20251f;
+  --fl-border: rgba(233, 226, 207, 0.09);
+  --fl-border-strong: rgba(233, 226, 207, 0.18);
+  --fl-fg: #ece7da;
+  --fl-fg-muted: #a7a596;
+  --fl-fg-subtle: #8a8b82;
+  --fl-accent: #ff6a2b;
+  --fl-accent-fg: #0b0d0c;
+  --fl-success: #9be564;
+  --fl-warn: #f5b83d;
+  --fl-danger: #ff5964;
+  --fl-info: #7fd1d9;
+  --fl-focus: #ffb547;
+  --fl-series-1: #ff6a2b;
+  --fl-series-2: #7fd1d9;
+  --fl-series-3: #b6e85a;
+  --fl-series-4: #f5b83d;
+  --fl-series-5: #e58ac9;
+  --fl-series-6: #e9e2cf;
+  --fl-series-7: #5fa88a;
+  --fl-series-8: #c98b5a;
+  --fl-elev-0: none;
+  --fl-elev-1: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 1px 2px rgba(0, 0, 0, 0.5);
+  --fl-elev-2: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 8px 24px rgba(0, 0, 0, 0.45);
+  --fl-elev-3: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 24px 64px rgba(0, 0, 0, 0.6);
+  /* added by 20-design-system */
+  --fl-grain-opacity: 0.07;
+  --fl-glow-accent:
+    0 0 0 1px rgba(255, 106, 43, 0.35), 0 0 24px rgba(255, 106, 43, 0.28), 0 0 72px rgba(255, 106, 43, 0.12);
+  --fl-glow-danger: 0 0 0 1px rgba(255, 89, 100, 0.4), 0 0 24px rgba(255, 89, 100, 0.3);
+  --fl-gradient-surface: linear-gradient(180deg, rgba(233, 226, 207, 0.035) 0%, rgba(233, 226, 207, 0) 40%);
+  --fl-gradient-horizon: radial-gradient(
+    120% 60% at 50% 115%,
+    rgba(255, 106, 43, 0.16) 0%,
+    rgba(255, 106, 43, 0.04) 35%,
+    rgba(11, 13, 12, 0) 70%
+  );
+  --fl-gradient-vignette: radial-gradient(
+    140% 100% at 50% 0%,
+    rgba(11, 13, 12, 0) 55%,
+    rgba(5, 6, 6, 0.65) 100%
+  );
+  --fl-glass: rgba(18, 21, 20, 0.72);
+  --fl-accent-soft: rgba(255, 106, 43, 0.14);
+  --fl-danger-soft: rgba(255, 89, 100, 0.14);
+  --fl-warn-soft: rgba(245, 184, 61, 0.14);
+  --fl-success-soft: rgba(155, 229, 100, 0.12);
+  --fl-selection: rgba(255, 106, 43, 0.28);
+  --fl-scrim: rgba(5, 6, 6, 0.64);
+  --fl-skeleton: #1b1f1d;
+  --fl-skeleton-shine: #232825;
+  --fl-scrollbar: rgba(233, 226, 207, 0.14);
+  --fl-scrollbar-hover: rgba(233, 226, 207, 0.26);
+  --fl-focus-ring:
+    0 0 0 var(--fl-focus-offset, 2px) var(--fl-bg),
+    0 0 0 calc(var(--fl-focus-offset, 2px) + var(--fl-focus-width, 2px)) var(--fl-focus);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    color-scheme: light;
+    --fl-bg: #f3f0e8;
+    --fl-surface-1: #fbf9f4;
+    --fl-surface-2: #ffffff;
+    --fl-surface-3: #ece8dd;
+    --fl-border: rgba(24, 26, 22, 0.1);
+    --fl-border-strong: rgba(24, 26, 22, 0.2);
+    --fl-fg: #181a16;
+    --fl-fg-muted: #55574f;
+    --fl-fg-subtle: #64665c;
+    --fl-accent: #b5400e;
+    --fl-accent-fg: #ffffff;
+    --fl-success: #347524;
+    --fl-warn: #8e5c00;
+    --fl-danger: #c42637;
+    --fl-info: #1c717b;
+    --fl-focus: #b5400e;
+    --fl-series-1: #b5400e;
+    --fl-series-2: #1f7f8a;
+    --fl-series-3: #5d8f1c;
+    --fl-series-4: #b07a00;
+    --fl-series-5: #b4428f;
+    --fl-series-6: #6b6656;
+    --fl-series-7: #2f7a5c;
+    --fl-series-8: #8f5a2e;
+    --fl-elev-0: none;
+    --fl-elev-1: 0 1px 2px rgba(24, 26, 22, 0.08);
+    --fl-elev-2: 0 8px 24px rgba(24, 26, 22, 0.1);
+    --fl-elev-3: 0 24px 64px rgba(24, 26, 22, 0.16);
+    /* added by 20-design-system */
+    --fl-grain-opacity: 0.05;
+    --fl-glow-accent: 0 0 0 1px rgba(181, 64, 14, 0.3), 0 0 20px rgba(181, 64, 14, 0.16);
+    --fl-glow-danger: 0 0 0 1px rgba(196, 38, 55, 0.35), 0 0 20px rgba(196, 38, 55, 0.16);
+    --fl-gradient-surface: linear-gradient(180deg, rgba(255, 255, 255, 0.7) 0%, rgba(255, 255, 255, 0) 40%);
+    --fl-gradient-horizon: radial-gradient(
+      120% 60% at 50% 115%,
+      rgba(181, 64, 14, 0.1) 0%,
+      rgba(181, 64, 14, 0.03) 35%,
+      rgba(243, 240, 232, 0) 70%
+    );
+    --fl-gradient-vignette: radial-gradient(
+      140% 100% at 50% 0%,
+      rgba(243, 240, 232, 0) 60%,
+      rgba(24, 26, 22, 0.06) 100%
+    );
+    --fl-glass: rgba(251, 249, 244, 0.78);
+    --fl-accent-soft: rgba(181, 64, 14, 0.1);
+    --fl-danger-soft: rgba(196, 38, 55, 0.1);
+    --fl-warn-soft: rgba(142, 92, 0, 0.1);
+    --fl-success-soft: rgba(52, 117, 36, 0.1);
+    --fl-selection: rgba(181, 64, 14, 0.18);
+    --fl-scrim: rgba(24, 26, 22, 0.36);
+    --fl-skeleton: #e6e2d6;
+    --fl-skeleton-shine: #f0ece2;
+    --fl-scrollbar: rgba(24, 26, 22, 0.18);
+    --fl-scrollbar-hover: rgba(24, 26, 22, 0.32);
+    --fl-focus-ring:
+      0 0 0 var(--fl-focus-offset, 2px) var(--fl-bg),
+      0 0 0 calc(var(--fl-focus-offset, 2px) + var(--fl-focus-width, 2px)) var(--fl-focus);
+  }
+}
+:root[data-theme='light'] {
+  color-scheme: light;
+  --fl-bg: #f3f0e8;
+  --fl-surface-1: #fbf9f4;
+  --fl-surface-2: #ffffff;
+  --fl-surface-3: #ece8dd;
+  --fl-border: rgba(24, 26, 22, 0.1);
+  --fl-border-strong: rgba(24, 26, 22, 0.2);
+  --fl-fg: #181a16;
+  --fl-fg-muted: #55574f;
+  --fl-fg-subtle: #64665c;
+  --fl-accent: #b5400e;
+  --fl-accent-fg: #ffffff;
+  --fl-success: #347524;
+  --fl-warn: #8e5c00;
+  --fl-danger: #c42637;
+  --fl-info: #1c717b;
+  --fl-focus: #b5400e;
+  --fl-series-1: #b5400e;
+  --fl-series-2: #1f7f8a;
+  --fl-series-3: #5d8f1c;
+  --fl-series-4: #b07a00;
+  --fl-series-5: #b4428f;
+  --fl-series-6: #6b6656;
+  --fl-series-7: #2f7a5c;
+  --fl-series-8: #8f5a2e;
+  --fl-elev-0: none;
+  --fl-elev-1: 0 1px 2px rgba(24, 26, 22, 0.08);
+  --fl-elev-2: 0 8px 24px rgba(24, 26, 22, 0.1);
+  --fl-elev-3: 0 24px 64px rgba(24, 26, 22, 0.16);
+  /* added by 20-design-system */
+  --fl-grain-opacity: 0.05;
+  --fl-glow-accent: 0 0 0 1px rgba(181, 64, 14, 0.3), 0 0 20px rgba(181, 64, 14, 0.16);
+  --fl-glow-danger: 0 0 0 1px rgba(196, 38, 55, 0.35), 0 0 20px rgba(196, 38, 55, 0.16);
+  --fl-gradient-surface: linear-gradient(180deg, rgba(255, 255, 255, 0.7) 0%, rgba(255, 255, 255, 0) 40%);
+  --fl-gradient-horizon: radial-gradient(
+    120% 60% at 50% 115%,
+    rgba(181, 64, 14, 0.1) 0%,
+    rgba(181, 64, 14, 0.03) 35%,
+    rgba(243, 240, 232, 0) 70%
+  );
+  --fl-gradient-vignette: radial-gradient(
+    140% 100% at 50% 0%,
+    rgba(243, 240, 232, 0) 60%,
+    rgba(24, 26, 22, 0.06) 100%
+  );
+  --fl-glass: rgba(251, 249, 244, 0.78);
+  --fl-accent-soft: rgba(181, 64, 14, 0.1);
+  --fl-danger-soft: rgba(196, 38, 55, 0.1);
+  --fl-warn-soft: rgba(142, 92, 0, 0.1);
+  --fl-success-soft: rgba(52, 117, 36, 0.1);
+  --fl-selection: rgba(181, 64, 14, 0.18);
+  --fl-scrim: rgba(24, 26, 22, 0.36);
+  --fl-skeleton: #e6e2d6;
+  --fl-skeleton-shine: #f0ece2;
+  --fl-scrollbar: rgba(24, 26, 22, 0.18);
+  --fl-scrollbar-hover: rgba(24, 26, 22, 0.32);
+  --fl-focus-ring:
+    0 0 0 var(--fl-focus-offset, 2px) var(--fl-bg),
+    0 0 0 calc(var(--fl-focus-offset, 2px) + var(--fl-focus-width, 2px)) var(--fl-focus);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --fl-dur-instant: 0ms;
+    --fl-dur-fast: 0ms;
+    --fl-dur-base: 0ms;
+    --fl-dur-slow: 0ms;
+    --fl-dur-cinematic: 0ms;
+    --fl-dur-dispatch: 0ms;
+    --fl-dur-land: 0ms;
+    --fl-dur-alert: 0ms;
+    --fl-stagger: 0ms;
+  }
+}
+
+/* Halyard base hygiene (added): styled focus, selection, scrollbars. Opt-out by not importing tokens.css. */
+:where(:focus-visible) {
+  outline: var(--fl-focus-width) solid var(--fl-focus);
+  outline-offset: var(--fl-focus-offset);
+}
+::selection {
+  background: var(--fl-selection);
+}
+:where(html) {
+  scrollbar-color: var(--fl-scrollbar) transparent;
+  scrollbar-width: thin;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--fl-scrollbar);
+  border: 3px solid transparent;
+  border-radius: var(--fl-radius-pill);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--fl-scrollbar-hover);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+`;
+
+export const HALYARD_FONT_URL =
+  'https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=Schibsted+Grotesk:wght@400;500;600;700&display=swap';
