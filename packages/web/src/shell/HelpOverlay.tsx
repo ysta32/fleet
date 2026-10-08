@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { Icon, Kbd } from './Icon';
 import { KEYMAP } from './hotkeys';
 import { useModal } from './modal';
+import { PushToggle } from '../push/PushToggle';
 
 export function HelpOverlay({ onClose }: { onClose(): void }) {
   const close = useRef<HTMLButtonElement>(null);
@@ -46,6 +47,7 @@ export function HelpOverlay({ onClose }: { onClose(): void }) {
             </section>
           ))}
         </div>
+        <PushToggle />
       </div>
     </div>
   );

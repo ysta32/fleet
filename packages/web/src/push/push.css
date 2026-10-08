@@ -1,0 +1,16 @@
+.push-toggle { margin-top: var(--fl-space-4); }
+.push-row { display: flex; align-items: center; justify-content: space-between; gap: var(--fl-space-3); }
+.push-note, .push-error { margin: var(--fl-space-4) 0 0; font: 400 var(--fl-text-2xs) / 1.5 var(--fl-font-mono); color: var(--fl-fg-muted); }
+.push-error { margin-top: var(--fl-space-2); }
+.push-switch {
+  position: relative; width: 2.5rem; height: 1.5rem; padding: 0; cursor: pointer;
+  border: var(--fl-hairline) solid var(--fl-border-strong); border-radius: 999px; background: var(--fl-surface-3);
+}
+.push-switch:focus-visible { outline: 2px solid var(--fl-fg); outline-offset: 2px; }
+.push-switch:disabled { opacity: 0.6; cursor: progress; }
+.push-knob {
+  position: absolute; top: 2px; left: 2px; width: calc(1.5rem - 6px); height: calc(1.5rem - 6px);
+  border-radius: 50%; background: var(--fl-fg-muted); transition: transform 120ms ease;
+}
+.push-switch.is-on .push-knob { transform: translateX(1rem); background: var(--fl-fg); }
+@media (prefers-reduced-motion: reduce) { .push-knob { transition: none; } }
