@@ -321,6 +321,63 @@ describe('createDemoFleet', () => {
     },
   );
 
+  it.each([42, 7, 999])('varies tool targets, model mixes and step pacing by seed (seed %i)', (seed) => {
+    const fleet = createDemoFleet({ seed, now: NOW });
+    const snapshot = fleet.snapshot();
+    // last tools ("Read · HANDOFF.md") differ across sessions: none on more than a third of them
+    const targets = snapshot.sessions.flatMap((session) =>
+      session.lastTool ? [`${session.lastTool.name} ${session.lastTool.target}`] : [],
+    );
+    expect(targets.length).toBeGreaterThanOrEqual(6);
+    const most = Math.max(
+      ...[...new Set(targets)].map((target) => targets.filter((t) => t === target).length),
+    );
+    expect(most).toBeLessThanOrEqual(Math.ceil(targets.length / 3));
+    // each army staffs its roles with its own model mix
+    const mixes = snapshot.projects
+      .filter((project) => project.orch)
+      .map((project) =>
+        snapshot.agents
+          .filter((agent) => agent.projectId === project.id && agent.role !== 'lead')
+          .map((agent) => agent.model)
+          .join(','),
+      );
+    expect(new Set(mixes).size).toBeGreaterThan(1);
+    // steps take uneven time: gaps between a task's events span more than the 2.4s turn grid
+    const byTask = new Map<string, number[]>();
+    for (const event of fleet.history(1).events) {
+      if (!event.taskId) continue;
+      const key = `${event.sessionId}/${event.taskId}`;
+      byTask.set(key, [...(byTask.get(key) ?? []), event.ts]);
+    }
+    const gaps = new Set<number>();
+    for (const times of byTask.values())
+      for (let index = 1; index < times.length; index++)
+        gaps.add(Math.round((times[index]! - times[index - 1]!) / 1000));
+    expect([...gaps].filter((gap) => gap >= 5).length).toBeGreaterThanOrEqual(3);
+    // same seed, same choices
+    expect(createDemoFleet({ seed, now: NOW }).snapshot()).toEqual(snapshot);
+  });
+
+  it('raises wait alerts about their task and session, and none for CI the army repairs itself', () => {
+    const fleet = createDemoFleet({ now: NOW, seed: 9 });
+    for (let step = 0; step < 360; step++) {
+      fleet.tick(120_000);
+      const snapshot = fleet.snapshot();
+      for (const alert of snapshot.alerts) {
+        expect(alert.kind).not.toBe('ci.failed');
+        expect(alert.taskId).toMatch(/^t\d\d$/);
+        expect(snapshot.sessions.some((session) => session.id === alert.sessionId) || alert.cleared).toBe(
+          true,
+        );
+      }
+      for (const agent of snapshot.agents.filter((entry) => entry.status === 'waiting')) {
+        const run = snapshot.projects.find((project) => project.id === agent.projectId)!.orch!;
+        expect(run.blocked).toEqual([agent.currentTask]);
+      }
+    }
+  });
+
   it('uses realistic, unprefixed titles and ids', () => {
     const fleet = createDemoFleet({ now: NOW });
     for (let step = 0; step < 120; step++) fleet.tick(120_000);
@@ -393,8 +450,8 @@ describe('createDemoFleet', () => {
     const seen = new Map<string, number>();
     let lastSequence = -1;
     let pairedAlerts = false;
-    // Six hours: waits (paired alerts) and CI failures are rare, so sample a longer span.
-    for (let step = 0; step < 180; step++) {
+    // Twelve hours: waits (paired alerts) are the only alerts and they are rare, so sample a long span.
+    for (let step = 0; step < 360; step++) {
       fleet.tick(120_000);
       const alerts = fleet.snapshot().alerts;
       expect(new Set(alerts.map((alert) => alert.id)).size).toBe(alerts.length);

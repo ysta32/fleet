@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { HistoryResponse } from '@fleet/shared';
 import type { FleetView } from '../data/contract';
+import { liveHistory, useLiveTape } from '../data/liveTape';
 import {
   buildTimeline,
   formatClock,
@@ -22,8 +22,8 @@ export const REPLAY_WINDOWS = [
 const COLUMNS = 120;
 /** tape height in the svg's user units (the svg stretches to the css height) */
 const TAPE_H = 20;
-/** live mode: the tape shows the last hour of streamed events */
-const LIVE_WINDOW_MS = 3_600_000;
+/** live mode: the tape is rebuilt at most this often (the demo snapshot changes 4 times a second) */
+const LIVE_REBUILD_MS = 5_000;
 /** Shift-drag snaps to a notch within this fraction of the window */
 const SNAP_FRACTION = 0.025;
 const TOAST_MS = 2400;
@@ -82,20 +82,18 @@ export function ReplayBar({ view }: { view: FleetView }) {
   const { replay } = view;
   const active = view.mode === 'replay';
   const history = active ? (replay.history ?? null) : null;
+  const tape = useLiveTape(view.mode);
+  // live: the last hour (loaded history plus streamed events) with the same bars and notches as replay
+  const live = useRef({ snapshot: view.snapshot, events: view.events });
+  live.current = { snapshot: view.snapshot, events: view.events };
   const liveSnapshot = active ? null : view.snapshot;
-  const liveEvents = active ? null : view.events;
+  const liveKey = liveSnapshot ? Math.floor(liveSnapshot.generatedAt / LIVE_REBUILD_MS) : null;
   const model = useMemo<TimelineModel | null>(() => {
     if (history) return buildTimeline(history, COLUMNS);
-    if (!liveEvents || !liveSnapshot) return null;
-    const to = liveSnapshot.generatedAt;
-    const live: HistoryResponse = {
-      from: to - LIVE_WINDOW_MS,
-      to,
-      frames: [liveSnapshot],
-      events: liveEvents,
-    };
-    return buildTimeline(live, COLUMNS);
-  }, [history, liveEvents, liveSnapshot]);
+    const { snapshot, events } = live.current;
+    if (liveKey === null || !snapshot) return null;
+    return buildTimeline(liveHistory(tape, snapshot, events), COLUMNS);
+  }, [history, tape, liveKey]);
   const ticks = useMemo(() => (model ? <Ticks model={model} /> : null), [model]);
   const notches = useMemo(() => (model ? <Notches model={model} /> : null), [model]);
 

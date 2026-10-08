@@ -115,6 +115,26 @@ export function nowWorking(
   return { rows, agents: rows.reduce((sum, row) => sum + row.activeAgents, 0), projects: rows.length };
 }
 
+/**
+ * Top-bar vitals. Live they read "Today"; in replay they read the playhead ("At 13:04") and count the
+ * working agents and the day's spend in the snapshot at that moment, using the same selectors as the
+ * Overview (nowWorking, sessionSpend), so the bar and the panel never disagree.
+ */
+export function headerVitals(
+  snapshot: FleetSnapshot,
+  at: number,
+  replay: boolean,
+): { label: string; title: string; working: number; costUsd: number } {
+  return {
+    label: replay ? `At ${clockTime(at)}` : 'Today',
+    title: replay
+      ? `Estimated spend for sessions started that day, as of ${clockTime(at)} local time`
+      : 'Estimated spend for sessions started today, local time',
+    working: nowWorking(snapshot, at).agents,
+    costUsd: sessionSpend(snapshot.sessions, at).todayUsd,
+  };
+}
+
 export type SessionSortKey =
   'project' | 'title' | 'model' | 'status' | 'lastTool' | 'tokens' | 'cost' | 'lastActivity';
 
@@ -334,7 +354,20 @@ export function incidents(snapshot: FleetSnapshot, dismissed: ReadonlySet<string
         .filter((task): task is string => !!task)
         .map(taskKey),
     );
-    const task = onTask.size === 1 ? [...onTask][0]! : undefined;
+    // An agent with no current task still waits on the army's one blocked task when the session runs on
+    // that army's branch (a wait raised before the task was dispatched).
+    const run = snapshot.projects.find((project) => project.id === session.projectId)?.orch;
+    const blockedKeys = run
+      ? [...new Set([...run.blocked, ...run.tasks.filter((t) => t.state === 'blocked').map((t) => t.id)])]
+          .map(taskKey)
+          .filter((key, index, keys) => key && keys.indexOf(key) === index)
+      : [];
+    const task =
+      onTask.size === 1
+        ? [...onTask][0]!
+        : !onTask.size && blockedKeys.length === 1 && !!session.gitBranch && session.gitBranch === run?.branch
+          ? blockedKeys[0]!
+          : undefined;
     const entry = task
       ? draft(`${session.projectId}:task:${task}`, session.projectId, 'task')
       : draft(`${session.projectId}:session:${session.id}`, session.projectId, 'session');
@@ -344,7 +377,8 @@ export function incidents(snapshot: FleetSnapshot, dismissed: ReadonlySet<string
         known?.id ??
         (waitingAgents.length ? waitingAgents : agents).find(
           (agent) => agent.currentTask && taskKey(agent.currentTask) === task,
-        )!.currentTask!;
+        )?.currentTask ??
+        task;
       entry.taskSlug = known?.slug;
     }
     entry.sessions.add(session.id);
@@ -464,15 +498,28 @@ export function needsYou(snapshot: FleetSnapshot, dismissed: ReadonlySet<string>
 }
 
 /**
- * The station's "needs you" count: incidents in this project that come from live state (a blocked
- * task or a waiting session), so one blocked task with its waiting coder reads as 1, not 2.
+ * The station's "needs you" count: this project's share of the same incidents() list the Overview,
+ * Alerts and the nav badge count, so one blocked task with its waiting coder reads as 1 everywhere and
+ * the stations add up to the Overview total. Pass the snapshot through `withDismissed` first so cleared
+ * alerts drop out here too.
  */
 export function stationNeeds(snapshot: FleetSnapshot, projectId: string): number {
-  return incidents(snapshot).filter(
-    (incident) =>
-      incident.projectId === projectId &&
-      incident.reasons.some((reason) => reason.kind === 'waiting' || reason.kind === 'blocked'),
-  ).length;
+  return incidents(snapshot).filter((incident) => incident.projectId === projectId).length;
+}
+
+/**
+ * The snapshot with the operator's dismissed alerts marked cleared, for views (the harbour) that read
+ * incidents without the dismissed set. Returns the same object when nothing changes.
+ */
+export function withDismissed(snapshot: FleetSnapshot, dismissed: ReadonlySet<string>): FleetSnapshot {
+  if (!dismissed.size || !snapshot.alerts.some((alert) => !alert.cleared && dismissed.has(alert.id)))
+    return snapshot;
+  return {
+    ...snapshot,
+    alerts: snapshot.alerts.map((alert) =>
+      !alert.cleared && dismissed.has(alert.id) ? { ...alert, cleared: true } : alert,
+    ),
+  };
 }
 
 export function matches(query: string, ...fields: (string | undefined)[]): boolean {

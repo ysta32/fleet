@@ -24,13 +24,103 @@ export const DEMO_PROJECT_NAMES = [
   'pulsar-ml',
 ];
 const NAMES = DEMO_PROJECT_NAMES;
-const ROLES: [AgentRole, ModelFamily, string][] = [
-  ['lead', 'fable', 'lead'],
-  ['coder', 'sonnet', 'coder 1'],
-  ['coder', 'astra', 'coder 2'],
-  ['critic', 'opus', 'critic'],
-  ['scout', 'haiku', 'scout'],
-  ['tester', 'sonnet', 'tester'],
+const ROLES: [AgentRole, string][] = [
+  ['lead', 'lead'],
+  ['coder', 'coder 1'],
+  ['coder', 'coder 2'],
+  ['critic', 'critic'],
+  ['scout', 'scout'],
+  ['tester', 'tester'],
+];
+/**
+ * Model per role (lead, coder 1, coder 2, critic, scout, tester). Each project draws one mix by seed, so
+ * stations differ the way real teams do. Every mix keeps one premium seat, so spend per hour stays close.
+ */
+const MODEL_MIXES: ModelFamily[][] = [
+  ['fable', 'sonnet', 'astra', 'opus', 'haiku', 'sonnet'],
+  ['opus', 'sonnet', 'sonnet', 'astra', 'haiku', 'haiku'],
+  ['fable', 'astra', 'astra', 'sonnet', 'haiku', 'sonnet'],
+  ['sonnet', 'sonnet', 'haiku', 'opus', 'haiku', 'astra'],
+  ['fable', 'sonnet', 'sonnet', 'sonnet', 'astra', 'haiku'],
+  ['opus', 'astra', 'sonnet', 'sonnet', 'sonnet', 'haiku'],
+];
+/** Each project's stack: where its code lives and how it is checked, so tool targets read like that repo. */
+interface Stack {
+  dir: string;
+  ext: string;
+  test: string[];
+  build: string[];
+  /** files the scout and lead read besides the task brief */
+  docs: string[];
+  /** files a task touches besides its main one (its test, shared types), by slug */
+  related: (slug: string) => string[];
+}
+const STACKS: Stack[] = [
+  {
+    dir: 'internal/api',
+    ext: '.go',
+    test: ['go test ./...', 'go test ./internal/api/...', 'go vet ./...'],
+    build: ['go build ./...', 'golangci-lint run'],
+    docs: ['README.md', 'api/openapi.yaml', 'docs/errors.md'],
+    related: (slug) => [`internal/api/${slug}_test.go`, 'internal/api/types.go', 'internal/api/errors.go'],
+  },
+  {
+    dir: 'src/components',
+    ext: '.tsx',
+    test: ['vitest run', 'vitest run src/components', 'playwright test --project=chromium'],
+    build: ['npm run build', 'npm run lint', 'tsc --noEmit'],
+    docs: ['README.md', 'src/tokens/README.md', 'DESIGN.md'],
+    related: (slug) => [
+      `src/components/${slug}.test.tsx`,
+      'src/components/index.ts',
+      'src/styles/tokens.css',
+    ],
+  },
+  {
+    dir: 'src/cmd',
+    ext: '.rs',
+    test: ['cargo test', 'cargo test --test cli', 'cargo test -- --nocapture'],
+    build: ['cargo build', 'cargo clippy -- -D warnings', 'cargo fmt --check'],
+    docs: ['README.md', 'docs/flags.md', 'Cargo.toml'],
+    related: () => ['src/cmd/mod.rs', 'src/main.rs', 'tests/cli.rs'],
+  },
+  {
+    dir: 'crates/storage/src',
+    ext: '.rs',
+    test: ['cargo test -p storage', 'cargo test -p storage --release', 'cargo bench --no-run'],
+    build: ['cargo check --workspace', 'cargo clippy --workspace'],
+    docs: ['README.md', 'docs/format.md', 'ARCHITECTURE.md'],
+    related: () => [
+      'crates/storage/src/lib.rs',
+      'crates/storage/src/page.rs',
+      'crates/storage/tests/recovery.rs',
+    ],
+  },
+  {
+    dir: 'docs',
+    ext: '.mdx',
+    test: ['npm run lint:links', 'npm run check:spelling', 'npm run test:examples'],
+    build: ['npm run build', 'npm run preview -- --strict'],
+    docs: ['README.md', 'docs/_sidebar.json', 'STYLE.md'],
+    related: (slug) => ['docs/_sidebar.json', `docs/${slug}/index.mdx`, 'docs/snippets/install.mdx'],
+  },
+  {
+    dir: 'pulsar',
+    ext: '.py',
+    test: ['pytest -q', 'pytest -q tests/unit', 'pytest -q -k smoke'],
+    build: ['ruff check .', 'mypy pulsar'],
+    docs: ['README.md', 'pyproject.toml', 'notebooks/README.md'],
+    related: (slug) => [`tests/test_${slug.replace(/-/g, '_')}.py`, 'pulsar/config.py', 'pulsar/types.py'],
+  },
+];
+/** What the lead reads or updates after a task lands (Read / Edit pairs). */
+const LEAD_NOTES: [string, string][] = [
+  ['Read', 'HANDOFF.md'],
+  ['Edit', 'STATUS.md'],
+  ['Read', 'PLAN.md'],
+  ['Edit', 'CHANGELOG.md'],
+  ['Bash', 'git log --oneline -5'],
+  ['Read', 'DECISIONS.md'],
 ];
 const SLUGS: string[][] = [
   [
@@ -306,7 +396,17 @@ const between = (random: () => number, minMinutes: number, maxMinutes: number) =
  * lane per hour (~20 per 8h), 1-3 CI failures and 0-2 releases per night, a deploy every 50-110 min.
  * Tool calls are priced at TOKEN_SCALE so the fleet burns ~$3/hour while active (~$40/day).
  */
-const TOKEN_SCALE = 0.105;
+const TOKEN_SCALE = 0.155;
+/** Work time after a stage, [min, max) ms: read 3, edit 4, test 6, review 9, branch checks 11. */
+const HOLD_MS: Record<number, [number, number]> = {
+  3: [0, 8_000],
+  4: [3_000, 24_000],
+  6: [3_000, 18_000],
+  9: [2_000, 14_000],
+  11: [0, 6_000],
+};
+/** Chance per turn that the agent mid-step makes another tool call. */
+const HOLD_CALL_CHANCE = 0.7;
 const prTitle = (slug: string, number: number): string =>
   PR_TITLES[slug]?.[number % 2] ?? `Improve ${slug.replace(/-/g, ' ')}`;
 
@@ -319,6 +419,8 @@ interface PrJob {
   mergeAt: number;
   fail: boolean;
   commits: number;
+  /** waits hours for a human merge */
+  held: boolean;
 }
 
 /** Model id used when pricing a synthetic agent of the given family. */
@@ -408,6 +510,8 @@ interface Army {
   resumeState: OrchTask['state'];
   /** PR opened for the current task, or 0 when the task lands on the army branch only */
   prNumber: number;
+  /** clock time before which the army is mid-step (thinking, editing, running tests) */
+  holdUntil: number;
 }
 
 function copySnapshot(state: FleetSnapshot, generatedAt = state.generatedAt): FleetSnapshot {
@@ -480,11 +584,15 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
   const warmupMs = Math.round((warmupHours * HOUR_MS) / STEP_MS) * STEP_MS;
   const origin = createdAt - warmupMs;
   const random = mulberry32(seed);
+  // Cosmetic choices (model mix, tool targets, step pacing) draw from their own stream by seed.
+  const vary = mulberry32((seed ^ 0x5bd1e995) >>> 0);
+  const pick = <T>(items: readonly T[]): T => items[Math.floor(vary() * items.length)]!;
   let now = origin;
   let nextStep = now + STEP_MS;
   let sequence = 0;
   let alertSeq = 0;
   let turn = 0;
+  let runs = 0;
   const historyFrames: FleetSnapshot[] = [];
   const detailEvents = new EventRing(MAX_DETAIL_EVENTS);
   const notableEvents = new EventRing(MAX_NOTABLE_EVENTS);
@@ -514,8 +622,16 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
     alerts: [],
   };
 
+  // A seeded shuffle, so up to six projects each get a different model mix.
+  const mixes = [...MODEL_MIXES];
+  for (let index = mixes.length - 1; index > 0; index--) {
+    const other = Math.floor(vary() * (index + 1));
+    [mixes[index], mixes[other]] = [mixes[other]!, mixes[index]!];
+  }
+
   function start(project: Project, generation: number): Army {
-    const id = `${project.id}:run-${generation}`;
+    // Fleet-wide run numbers: two lanes can reach one project at the same generation, never the same run.
+    const id = `${project.id}:run-${runs++}`;
     const projectIndex = state.projects.indexOf(project);
     const slugs = SLUGS[projectIndex % SLUGS.length]!;
     const themes = THEMES[projectIndex % THEMES.length]!;
@@ -555,12 +671,13 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
       blocked: [],
       updatedAt: now,
     };
-    const agents: Agent[] = ROLES.map(([role, family, label], index) => ({
+    const mix = mixes[projectIndex % mixes.length]!;
+    const agents: Agent[] = ROLES.map(([role, label], index) => ({
       id: index === 0 ? id : `${id}:a${index}`,
       sessionId: id,
       projectId: project.id,
       role,
-      model: index === 0 && generation % 2 ? 'opus' : family,
+      model: index === 0 && generation % 2 ? 'opus' : mix[index]!,
       label: index === 0 ? `${project.name} ${label}` : label,
       status: 'idle',
       location: { kind: 'project', projectId: project.id },
@@ -595,6 +712,7 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
       waitUntil: 0,
       resumeState: 'queued',
       prNumber: 0,
+      holdUntil: 0,
     };
   }
 
@@ -692,26 +810,15 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
           state: pr.ci,
           number: pr.number,
         });
-        if (job.fail) {
-          record('ci.failed', { number: pr.number, title: pr.headRef });
-          state.alerts.push({
-            id: `alert-${now}-${alertSeq++}`,
-            kind: 'ci.failed',
-            projectId: project.id,
-            title: 'ci.failed',
-            body: `Checks failed on #${pr.number}: ${pr.title}`,
-            at: now,
-          });
-          state.alerts = state.alerts.slice(-12);
-        }
+        // The army repairs its own red CI (see 'repair'), so a failure is recorded and shown on the PR
+        // but raises no needs-you alert: the only incidents are the scheduled waits (3-5 a night).
+        if (job.fail) record('ci.failed', { number: pr.number, title: pr.headRef });
         job.phase = job.fail ? 'repair' : 'merge';
       } else if (job.phase === 'repair' && now >= job.repairAt) {
         pr.ci = 'success';
         pr.updatedAt = now;
         record('commit');
         emit('ci', 'CI repaired', 'success', { state: 'success', number: pr.number });
-        for (const entry of state.alerts)
-          if (entry.projectId === project.id && entry.kind === 'ci.failed') entry.cleared = true;
         job.phase = 'merge';
       } else if (job.phase === 'merge' && now >= job.mergeAt) {
         pr.state = 'merged';
@@ -792,6 +899,7 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
       });
     }
     function alert(kind: 'session.waiting' | 'army.blocked', body: string): void {
+      // Structured subject, so the dashboard folds both alerts into the one incident for this task.
       state.alerts.push({
         id: `alert-${now}-${alertSeq++}`,
         kind,
@@ -799,6 +907,8 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
         title: kind,
         body,
         at: now,
+        taskId: task.id,
+        sessionId: session.id,
       });
       state.alerts = state.alerts.slice(-12);
     }
@@ -815,6 +925,8 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
       session.status = 'waiting';
       session.lastActivity = now;
       coder.status = 'waiting';
+      // the coder waits on this task even when the wait opens before it was dispatched (settled at load)
+      coder.currentTask = task.id;
       taskState('blocked');
       orch.phase = 'blocked';
       orch.blocked = [task.id];
@@ -831,8 +943,7 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
       orch.phase = 'running';
       orch.blocked = [];
       taskState(army.resumeState);
-      for (const entry of state.alerts)
-        if (entry.projectId === project.id && entry.kind !== 'ci.failed') entry.cleared = true;
+      for (const entry of state.alerts) if (entry.projectId === project.id) entry.cleared = true;
       emit('agent.status', 'Approved, resuming', coder, 'info', { status: 'working' });
     }
     return {
@@ -852,6 +963,12 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
     };
   }
 
+  /** How long the work after a stage takes: reading and editing, test runs and review are not instant. */
+  function holdAfter(stage: number): number {
+    const span = HOLD_MS[stage];
+    return span ? Math.floor(span[0] + vary() * (span[1] - span[0])) : 0;
+  }
+
   function advance(army: Army, events: FleetEvent[]): void {
     const ctx = context(army, events);
     if (army.waiting) {
@@ -863,7 +980,9 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
     const critic = agents[3]!;
     const scout = agents[4]!;
     const tester = agents[5]!;
-    project.lastActivity = session.lastActivity = orch.updatedAt = now;
+    const stack = STACKS[state.projects.indexOf(project) % STACKS.length]!;
+    const file = `${stack.dir}/${task.slug}${stack.ext}`;
+    const related = () => pick(stack.related(task.slug));
 
     function move(agent: Agent, kind: AgentLocation['kind'], ref?: string): void {
       agent.location = { kind, projectId: project.id, ...(ref ? { ref } : {}) };
@@ -886,6 +1005,19 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
       session.toolCalls++;
       emit('agent.tool', `${name} ${target}`, agent, 'info', { name, target });
     }
+    if (now < army.holdUntil) {
+      // Mid-step: the agent on it sometimes makes another call, so steps take uneven, believable time.
+      if (vary() < HOLD_CALL_CHANCE) {
+        project.lastActivity = session.lastActivity = orch.updatedAt = now;
+        const done = army.stage - 1;
+        if (done === 6 || done === 11) tool(tester, 'Bash', pick(stack.test));
+        else if (done === 9) tool(critic, 'Read', related());
+        else tool(coder, pick(['Read', 'Edit', 'Edit']), pick([file, related()]));
+      }
+      return;
+    }
+    project.lastActivity = session.lastActivity = orch.updatedAt = now;
+    const stageRun = army.stage;
     switch (army.stage++) {
       case 0:
         if (army.taskIndex === 0) emit('session.start', `Army started: ${session.title}`);
@@ -907,27 +1039,27 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
         break;
       case 1:
         move(scout, 'task', task.id);
-        tool(scout, 'Read', 'README.md');
+        tool(scout, 'Read', pick(stack.docs));
         break;
       case 2:
         move(coder, 'worktree', task.id);
         break;
       case 3:
-        tool(coder, 'Read', `${task.slug}.ts`);
+        tool(coder, 'Read', file);
         break;
       case 4:
-        tool(coder, 'Edit', `${task.slug}.ts`);
+        tool(coder, 'Edit', file);
         break;
       case 5:
         if (now >= nextWaitAt && !armies.some((other) => other.waiting)) {
           const length = waitLength(random);
           ctx.beginWait(length);
           nextWaitAt = now + waitSpacing(random);
-        } else tool(coder, 'Bash', 'npm');
+        } else tool(coder, 'Bash', pick(stack.build));
         break;
       case 6:
         move(tester, 'worktree', task.id);
-        tool(tester, 'Bash', 'vitest');
+        tool(tester, 'Bash', pick(stack.test));
         break;
       case 7:
         emit('test.run', 'Unit tests passed', tester, 'success', { passed: 12, failed: 0 });
@@ -945,10 +1077,23 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
           if (fail) nextCiFailAt = now + between(random, 170, 330);
           const ciAt = now + between(random, 4, 12);
           const repairAt = fail ? ciAt + between(random, 20, 80) : ciAt;
-          // Some PRs wait for a human merge for a few hours, so several are open at any time.
-          const mergeAt = repairAt + (random() < 0.3 ? between(random, 100, 300) : between(random, 8, 40));
+          // Some PRs wait for a human merge for a few hours, so several are open at any time; while fewer
+          // than two wait, the next one does too, so the open list never empties.
+          const waiting = prJobs.filter((job) => job.held).length;
+          const held = random() < 0.2 || waiting < 2;
+          const mergeAt = repairAt + (held ? between(random, 100, 300) : between(random, 8, 40));
           const commits = 2 + Math.floor(random() * 4);
-          prJobs.push({ projectId: project.id, number, phase: 'ci', ciAt, repairAt, mergeAt, fail, commits });
+          prJobs.push({
+            projectId: project.id,
+            number,
+            phase: 'ci',
+            ciAt,
+            repairAt,
+            mergeAt,
+            fail,
+            commits,
+            held,
+          });
           state.prs.push({
             projectId: project.id,
             number,
@@ -968,7 +1113,7 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
         break;
       }
       case 9:
-        tool(critic, 'Read', `${task.slug}.ts`);
+        tool(critic, 'Read', file);
         emit('review', 'Review approved', critic, 'success', { verdict: 'approved' });
         break;
       case 10:
@@ -982,11 +1127,18 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
         else move(tester, 'worktree', task.id);
         break;
       case 11:
-        tool(tester, 'Bash', 'vitest');
+        tool(tester, 'Bash', pick(stack.test));
         break;
-      case 12:
-        tool(lead, 'Read', 'HANDOFF.md');
+      case 12: {
+        const [name, target] = pick<[string, string]>([
+          ...LEAD_NOTES,
+          ['Bash', pick(stack.build)],
+          ['Read', pick(stack.docs)],
+          ['Read', `TASKS/${orch.tasks[army.taskIndex + 1]?.id ?? task.id}.md`],
+        ]);
+        tool(lead, name, target);
         break;
+      }
       case 13:
         emit('test.run', 'Branch checks passed', tester, 'success', { passed: 12, failed: 0 });
         break;
@@ -1020,6 +1172,7 @@ export function createDemoFleet(opts: DemoFleetOptions = {}): SyntheticFleet {
         advance(army, events);
       }
     }
+    if (!army.waiting) army.holdUntil = Math.max(army.holdUntil, now + holdAfter(stageRun));
   }
 
   function snapshot(): FleetSnapshot {

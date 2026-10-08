@@ -38,6 +38,23 @@ const frame = (generatedAt: number, alerts: FleetSnapshot['alerts'] = []): Fleet
   deploys: [],
   alerts,
 });
+/** A frame where each [session, project, since] is a session waiting on the operator. */
+const waitingFrame = (generatedAt: number, waits: [string, string, number][]): FleetSnapshot => ({
+  ...frame(generatedAt),
+  sessions: waits.map(([id, projectId, since]) => ({
+    id,
+    projectId,
+    title: `Session ${id}`,
+    model: 'sonnet',
+    startedAt: 0,
+    lastActivity: since,
+    status: 'waiting',
+    tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    costUsd: 0,
+    toolCalls: 0,
+    agentIds: [],
+  })),
+});
 const MIN = 60_000;
 const history = (events: FleetEvent[], to = 100 * MIN): HistoryResponse =>
   normalizeHistory({ from: 0, to, frames: [frame(0)], events });
@@ -129,14 +146,24 @@ describe('timeline model', () => {
     expect(model.max).toBe(3);
   });
   it('names notches by project, merges neighbours by the longest wait, and steps between them', () => {
+    // the notches read incidents() off the frames: s1 waits 10-14, s2 (orbit-docs) 12-52, s3 from 70
     const model = buildTimeline(
-      history([
-        event(10 * MIN, 'session.waiting'),
-        event(12 * MIN, 'blocked', { projectId: 'p2', sessionId: 's2' }),
-        event(14 * MIN, 'agent.tool'),
-        event(52 * MIN, 'agent.tool', { projectId: 'p2', sessionId: 's2' }),
-        event(70 * MIN, 'session.waiting', { sessionId: 's3' }),
-      ]),
+      normalizeHistory({
+        from: 0,
+        to: 100 * MIN,
+        frames: [
+          frame(0),
+          waitingFrame(10 * MIN, [['s1', 'p1', 10 * MIN]]),
+          waitingFrame(12 * MIN, [
+            ['s1', 'p1', 10 * MIN],
+            ['s2', 'p2', 12 * MIN],
+          ]),
+          waitingFrame(14 * MIN, [['s2', 'p2', 12 * MIN]]),
+          frame(52 * MIN),
+          waitingFrame(70 * MIN, [['s3', 'p1', 70 * MIN]]),
+        ],
+        events: [],
+      }),
       10,
       10,
     );
