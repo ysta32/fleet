@@ -1648,13 +1648,30 @@ function navFor(sorted: IndexEntry[], id: string): DigestNav {
   return nav;
 }
 
+/**
+ * Structural check for stored history: enough shape that the renderer can read it without throwing
+ * (window bounds, headline, numeric totals, project objects). Anything else is skipped as corrupt.
+ */
 function looksLikeDigest(x: unknown): x is Digest {
+  if (typeof x !== 'object' || x === null) return false;
+  const d = x as Partial<Record<keyof Digest, unknown>>;
+  const win = d.window as Partial<Record<'since' | 'until', unknown>> | null | undefined;
+  const totals = d.totals as Record<string, unknown> | null | undefined;
   return (
-    typeof x === 'object' &&
-    x !== null &&
-    (x as Digest).schema === 'overnight.digest/v1' &&
-    typeof (x as Digest).id === 'string' &&
-    Array.isArray((x as Digest).projects)
+    d.schema === 'overnight.digest/v1' &&
+    typeof d.id === 'string' &&
+    typeof d.headline === 'string' &&
+    typeof win === 'object' &&
+    win !== null &&
+    typeof win.since === 'string' &&
+    typeof win.until === 'string' &&
+    typeof totals === 'object' &&
+    totals !== null &&
+    !Array.isArray(totals) &&
+    Object.values(totals).every((v) => typeof v === 'number' && Number.isFinite(v)) &&
+    Array.isArray(d.projects) &&
+    d.projects.every((p) => typeof p === 'object' && p !== null) &&
+    (d.warnings === undefined || Array.isArray(d.warnings))
   );
 }
 
@@ -1767,15 +1784,22 @@ export async function writeArchive(d: Digest, outDir: string, opts: WriteArchive
     if (!neighbour) continue;
     const nd = await readStoredDigest(digestsDir, neighbour.id, warn, 'kept its old page');
     if (nd === undefined) continue; // missing or unreadable stored JSON: nothing to re-render from
-    await write(
-      join(digestsDir, `${neighbour.id}.html`),
-      renderDigestHtml(nd, {
+    let html: string;
+    try {
+      html = renderDigestHtml(nd, {
         ...renderOpts,
         nav: navFor(sorted, neighbour.id),
         history: await historyFor(neighbour.id),
         edition: editionOf(sorted, neighbour.id),
-      }),
-    );
+      });
+    } catch (e) {
+      // A neighbour is decoration for today's edition: never let an odd old file block publishing.
+      warn(
+        `overnight: ${join(digestsDir, `${neighbour.id}.json`)} could not be rendered (${(e as Error).message}); kept its old page`,
+      );
+      continue;
+    }
+    await write(join(digestsDir, `${neighbour.id}.html`), html);
   }
 
   // latest.json only ever moves forward (a backfill of an older day must not replace it).

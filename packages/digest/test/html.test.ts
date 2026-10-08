@@ -870,6 +870,46 @@ describe('writeArchive', () => {
     }
   });
 
+  it('skips a stored neighbour that passes the schema tag but lacks window/totals (regression)', async () => {
+    const out = await mkdtemp(join(tmpdir(), 'ovn-html-'));
+    try {
+      const quietWarn = () => undefined;
+      await writeArchive(makeDigest('2026-10-06'), out, { siteTitle: 'Overnight', warn: quietWarn });
+      const before = await readFile(join(out, 'digests/2026-10-06.html'), 'utf8');
+      const broken = { ...makeDigest('2026-10-06') } as Partial<Digest>;
+      delete broken.window;
+      await writeFile(join(out, 'digests/2026-10-06.json'), JSON.stringify(broken));
+      const warnings: string[] = [];
+      const written = await writeArchive(makeDigest('2026-10-07'), out, {
+        siteTitle: 'Overnight',
+        warn: (m) => warnings.push(m),
+      });
+      expect(written).toContain(join(out, 'latest.json'));
+      expect(written).toContain(join(out, 'index.json'));
+      expect(written).toContain(join(out, 'index.html'));
+      expect(written).not.toContain(join(out, 'digests/2026-10-06.html'));
+      expect(await readFile(join(out, 'digests/2026-10-06.html'), 'utf8')).toBe(before);
+      expect(warnings.some((w) => w.includes('2026-10-06.json') && w.includes('not a valid digest'))).toBe(
+        true,
+      );
+      // other shape faults are rejected the same way
+      for (const bad of [
+        { ...makeDigest('2026-10-06'), totals: null },
+        { ...makeDigest('2026-10-06'), totals: { commits: 'many' } },
+        { ...makeDigest('2026-10-06'), headline: 7 },
+        { ...makeDigest('2026-10-06'), window: { since: 1, until: 2 } },
+        { ...makeDigest('2026-10-06'), projects: [null] },
+      ]) {
+        await writeFile(join(out, 'digests/2026-10-06.json'), JSON.stringify(bad));
+        await expect(
+          writeArchive(makeDigest('2026-10-07'), out, { siteTitle: 'Overnight', warn: quietWarn }),
+        ).resolves.toContain(join(out, 'latest.json'));
+      }
+    } finally {
+      await rm(out, { recursive: true, force: true });
+    }
+  });
+
   it('refuses unsafe ids and corrupt index files', async () => {
     const out = await mkdtemp(join(tmpdir(), 'ovn-html-'));
     try {
