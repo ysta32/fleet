@@ -1,5 +1,6 @@
 import { formatLocalTime, formatUtcTime, sessionSpend } from '@fleet/shared';
 import type {
+  Agent,
   Alert,
   AlertKind,
   FleetSnapshot,
@@ -113,6 +114,26 @@ export function nowWorking(
             : 'army',
     }));
   return { rows, agents: rows.reduce((sum, row) => sum + row.activeAgents, 0), projects: rows.length };
+}
+
+/**
+ * Top-bar vitals. Live they read "Today"; in replay they read the playhead ("At 13:04") and count the
+ * working agents and the day's spend in the snapshot at that moment, using the same selectors as the
+ * Overview (nowWorking, sessionSpend), so the bar and the panel never disagree.
+ */
+export function headerVitals(
+  snapshot: FleetSnapshot,
+  at: number,
+  replay: boolean,
+): { label: string; title: string; working: number; costUsd: number } {
+  return {
+    label: replay ? `At ${clockTime(at)}` : 'Today',
+    title: replay
+      ? `Estimated spend for sessions started that day, as of ${clockTime(at)} local time`
+      : 'Estimated spend for sessions started today, local time',
+    working: nowWorking(snapshot, at).agents,
+    costUsd: sessionSpend(snapshot.sessions, at).todayUsd,
+  };
 }
 
 export type SessionSortKey =
@@ -284,7 +305,24 @@ interface Draft {
  * else (for army.blocked / session.waiting) exactly one live task named by an exact token in its
  * text. Anything else stays its own incident, so clearing one incident never clears another's alerts.
  */
-export function incidents(snapshot: FleetSnapshot, dismissed: ReadonlySet<string> = new Set()): Incident[] {
+export function incidents(snapshot: FleetSnapshot, dismissed: ReadonlySet<string> = NONE): Incident[] {
+  // Snapshots are never mutated once published (live, demo, replay frames), so each one's incidents are
+  // computed once per dismissal state; replay re-reads every frame of the tape.
+  const key = snapshot.alerts
+    .filter((alert) => dismissed.has(alert.id))
+    .map((alert) => alert.id)
+    .join('\n');
+  const cached = INCIDENTS.get(snapshot);
+  if (cached?.key === key) return [...cached.list];
+  const list = computeIncidents(snapshot, dismissed);
+  INCIDENTS.set(snapshot, { key, list });
+  return [...list];
+}
+
+const NONE: ReadonlySet<string> = new Set();
+const INCIDENTS = new WeakMap<FleetSnapshot, { key: string; list: Incident[] }>();
+
+function computeIncidents(snapshot: FleetSnapshot, dismissed: ReadonlySet<string>): Incident[] {
   const drafts = new Map<string, Draft>();
   const draft = (id: string, projectId: string, ref: Draft['ref']): Draft => {
     let entry = drafts.get(id);
@@ -322,11 +360,23 @@ export function incidents(snapshot: FleetSnapshot, dismissed: ReadonlySet<string
         at: run.updatedAt,
       });
   }
+  // index agents once: by their session, and by id for sessions that list their agents
+  const agentsBySession = new Map<string, Agent[]>();
+  const agentsById = new Map<string, Agent>();
+  for (const agent of snapshot.agents) {
+    agentsById.set(agent.id, agent);
+    if (!agent.sessionId) continue;
+    const list = agentsBySession.get(agent.sessionId);
+    if (list) list.push(agent);
+    else agentsBySession.set(agent.sessionId, [agent]);
+  }
   for (const session of snapshot.sessions) {
     if (session.status !== 'waiting') continue;
-    const agents = snapshot.agents.filter(
-      (agent) => agent.sessionId === session.id || session.agentIds.includes(agent.id),
-    );
+    const agents = [...(agentsBySession.get(session.id) ?? [])];
+    for (const id of session.agentIds) {
+      const agent = agentsById.get(id);
+      if (agent && agent.sessionId !== session.id) agents.push(agent);
+    }
     const waitingAgents = agents.filter((agent) => agent.status === 'waiting');
     const onTask = new Set(
       (waitingAgents.length ? waitingAgents : agents)
@@ -334,7 +384,20 @@ export function incidents(snapshot: FleetSnapshot, dismissed: ReadonlySet<string
         .filter((task): task is string => !!task)
         .map(taskKey),
     );
-    const task = onTask.size === 1 ? [...onTask][0]! : undefined;
+    // An agent with no current task still waits on the army's one blocked task when the session runs on
+    // that army's branch (a wait raised before the task was dispatched).
+    const run = snapshot.projects.find((project) => project.id === session.projectId)?.orch;
+    const blockedKeys = run
+      ? [...new Set([...run.blocked, ...run.tasks.filter((t) => t.state === 'blocked').map((t) => t.id)])]
+          .map(taskKey)
+          .filter((key, index, keys) => key && keys.indexOf(key) === index)
+      : [];
+    const task =
+      onTask.size === 1
+        ? [...onTask][0]!
+        : !onTask.size && blockedKeys.length === 1 && !!session.gitBranch && session.gitBranch === run?.branch
+          ? blockedKeys[0]!
+          : undefined;
     const entry = task
       ? draft(`${session.projectId}:task:${task}`, session.projectId, 'task')
       : draft(`${session.projectId}:session:${session.id}`, session.projectId, 'session');
@@ -344,7 +407,8 @@ export function incidents(snapshot: FleetSnapshot, dismissed: ReadonlySet<string
         known?.id ??
         (waitingAgents.length ? waitingAgents : agents).find(
           (agent) => agent.currentTask && taskKey(agent.currentTask) === task,
-        )!.currentTask!;
+        )?.currentTask ??
+        task;
       entry.taskSlug = known?.slug;
     }
     entry.sessions.add(session.id);
@@ -459,20 +523,44 @@ export function incidents(snapshot: FleetSnapshot, dismissed: ReadonlySet<string
 }
 
 /** Everything waiting on the operator, as incidents, oldest first. */
-export function needsYou(snapshot: FleetSnapshot, dismissed: ReadonlySet<string> = new Set()): Incident[] {
+export function needsYou(snapshot: FleetSnapshot, dismissed: ReadonlySet<string> = NONE): Incident[] {
   return incidents(snapshot, dismissed);
 }
 
 /**
- * The station's "needs you" count: incidents in this project that come from live state (a blocked
- * task or a waiting session), so one blocked task with its waiting coder reads as 1, not 2.
+ * The station's "needs you" count: this project's share of the same incidents() list the Overview,
+ * Alerts and the nav badge count, so one blocked task with its waiting coder reads as 1 everywhere and
+ * the stations add up to the Overview total. Pass the snapshot through `withDismissed` first so cleared
+ * alerts drop out here too.
  */
 export function stationNeeds(snapshot: FleetSnapshot, projectId: string): number {
-  return incidents(snapshot).filter(
-    (incident) =>
-      incident.projectId === projectId &&
-      incident.reasons.some((reason) => reason.kind === 'waiting' || reason.kind === 'blocked'),
-  ).length;
+  return incidentsByProject(snapshot).get(projectId) ?? 0;
+}
+
+/**
+ * Incidents per project (projects with none are absent): what gates and counts each station's
+ * "needs you" tag, so a CI-failure-only incident raises its station's tag like any other.
+ */
+export function incidentsByProject(snapshot: FleetSnapshot): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const incident of incidents(snapshot))
+    counts.set(incident.projectId, (counts.get(incident.projectId) ?? 0) + 1);
+  return counts;
+}
+
+/**
+ * The snapshot with the operator's dismissed alerts marked cleared, for views (the harbour) that read
+ * incidents without the dismissed set. Returns the same object when nothing changes.
+ */
+export function withDismissed(snapshot: FleetSnapshot, dismissed: ReadonlySet<string>): FleetSnapshot {
+  if (!dismissed.size || !snapshot.alerts.some((alert) => !alert.cleared && dismissed.has(alert.id)))
+    return snapshot;
+  return {
+    ...snapshot,
+    alerts: snapshot.alerts.map((alert) =>
+      !alert.cleared && dismissed.has(alert.id) ? { ...alert, cleared: true } : alert,
+    ),
+  };
 }
 
 export function matches(query: string, ...fields: (string | undefined)[]): boolean {

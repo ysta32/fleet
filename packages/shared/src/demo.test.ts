@@ -185,8 +185,11 @@ describe('createDemoFleet', () => {
 
   it('isolates snapshots, events and historical frames from caller mutation', () => {
     const fleet = createDemoFleet({ now: NOW });
-    const event = fleet.tick(8000).find((entry) => entry.to)!;
-    event.to!.projectId = 'mutated';
+    // tick until a move event comes out (holds can keep the first seconds quiet)
+    let event: FleetEvent | undefined;
+    for (let step = 0; step < 200 && !event; step++) event = fleet.tick(800).find((entry) => entry.to);
+    expect(event).toBeDefined();
+    event!.to!.projectId = 'mutated';
     const before = fleet.snapshot();
     const detached = fleet.snapshot();
     const running = detached.projects.findIndex((project) => project.orch);
@@ -282,18 +285,27 @@ describe('createDemoFleet', () => {
     (seed) => {
       const fleet = createDemoFleet({ now: NOW, seed });
       // The pre-simulated night (with the wait left open at load) plus 24h live, collected once each.
+      // An incident is a wait or the one CI failure a night that needs the operator (its alert).
+      const isStart = (event: FleetEvent) =>
+        event.kind === 'session.waiting' || (event.kind === 'ci' && event.data?.alert === true);
       const events = fleet.history(12).events;
       for (let step = 0; step < 720; step++) {
         events.push(...fleet.tick(120_000));
         // Windows that end mid-step past load (e.g. 361 steps) are read straight from history too.
         if (step === 360) {
-          const night = fleet.history(12).events.filter((event) => event.kind === 'session.waiting');
+          const night = fleet.history(12).events.filter(isStart);
           expect(night.length).toBeGreaterThanOrEqual(3);
           expect(night.length).toBeLessThanOrEqual(5);
         }
       }
-      const starts = events.filter((event) => event.kind === 'session.waiting');
-      expect(events.filter((event) => event.kind === 'blocked')).toHaveLength(starts.length);
+      const starts = events.filter(isStart);
+      const waits = starts.filter((event) => event.kind === 'session.waiting');
+      const ci = starts.filter((event) => event.kind === 'ci');
+      expect(events.filter((event) => event.kind === 'blocked')).toHaveLength(waits.length);
+      // the demo shows a CI-failure incident, at most one in any 12h
+      expect(ci.length).toBeGreaterThanOrEqual(1);
+      for (const [index, failure] of ci.entries())
+        if (index > 0) expect(failure.ts - ci[index - 1]!.ts).toBeGreaterThanOrEqual(12 * 3_600_000);
       const last = NOW + 720 * 120_000;
       for (let from = NOW - 12 * 3_600_000; from + 12 * 3_600_000 <= last; from += 10 * 60_000) {
         const count = starts.filter((event) => event.ts >= from && event.ts < from + 12 * 3_600_000).length;
@@ -308,11 +320,15 @@ describe('createDemoFleet', () => {
           expect(next.ts - begin.ts).toBeGreaterThanOrEqual(185 * 60_000);
           expect(next.ts - begin.ts).toBeLessThan(240 * 60_000);
         }
-        const end = events.find(
-          (event) =>
-            event.ts > begin.ts &&
-            event.sessionId === begin.sessionId &&
-            event.label === 'Approved, resuming',
+        const end = events.find((event) =>
+          begin.kind === 'ci'
+            ? event.ts > begin.ts &&
+              event.projectId === begin.projectId &&
+              event.label === 'CI repaired' &&
+              event.data?.number === begin.data?.number
+            : event.ts > begin.ts &&
+              event.sessionId === begin.sessionId &&
+              event.label === 'Approved, resuming',
         );
         if (!end) continue;
         expect(end.ts - begin.ts).toBeGreaterThanOrEqual(5 * 60_000);
@@ -320,6 +336,79 @@ describe('createDemoFleet', () => {
       }
     },
   );
+
+  it.each([42, 7, 999])('varies tool targets, model mixes and step pacing by seed (seed %i)', (seed) => {
+    const fleet = createDemoFleet({ seed, now: NOW });
+    const snapshot = fleet.snapshot();
+    // last tools ("Read · HANDOFF.md") differ across sessions: none on more than a third of them
+    const targets = snapshot.sessions.flatMap((session) =>
+      session.lastTool ? [`${session.lastTool.name} ${session.lastTool.target}`] : [],
+    );
+    expect(targets.length).toBeGreaterThanOrEqual(6);
+    const most = Math.max(
+      ...[...new Set(targets)].map((target) => targets.filter((t) => t === target).length),
+    );
+    expect(most).toBeLessThanOrEqual(Math.ceil(targets.length / 3));
+    // each army staffs its roles with its own model mix
+    const mixes = snapshot.projects
+      .filter((project) => project.orch)
+      .map((project) =>
+        snapshot.agents
+          .filter((agent) => agent.projectId === project.id && agent.role !== 'lead')
+          .map((agent) => agent.model)
+          .join(','),
+      );
+    expect(new Set(mixes).size).toBeGreaterThan(1);
+    // steps take uneven time: gaps between a task's events span more than the 2.4s turn grid
+    const byTask = new Map<string, number[]>();
+    for (const event of fleet.history(1).events) {
+      if (!event.taskId) continue;
+      const key = `${event.sessionId}/${event.taskId}`;
+      byTask.set(key, [...(byTask.get(key) ?? []), event.ts]);
+    }
+    const gaps = new Set<number>();
+    for (const times of byTask.values())
+      for (let index = 1; index < times.length; index++)
+        gaps.add(Math.round((times[index]! - times[index - 1]!) / 1000));
+    expect([...gaps].filter((gap) => gap >= 5).length).toBeGreaterThanOrEqual(3);
+    // same seed, same choices
+    expect(createDemoFleet({ seed, now: NOW }).snapshot()).toEqual(snapshot);
+  });
+
+  it('raises wait alerts about their task and session, and CI alerts only for incident failures', () => {
+    const fleet = createDemoFleet({ now: NOW, seed: 9 });
+    let ciAlerts = 0;
+    for (let step = 0; step < 360; step++) {
+      const events = fleet.tick(120_000);
+      const snapshot = fleet.snapshot();
+      const incidentFailures = events.filter((event) => event.kind === 'ci' && event.data?.alert === true);
+      for (const failure of incidentFailures) {
+        // the alert names the PR, has no task or session, and lives until the repair
+        const alert = snapshot.alerts.find(
+          (entry) =>
+            entry.kind === 'ci.failed' && entry.at === failure.ts && entry.projectId === failure.projectId,
+        );
+        expect(alert?.body).toContain(`#${failure.data!.number}`);
+        ciAlerts++;
+      }
+      for (const alert of snapshot.alerts) {
+        if (alert.kind === 'ci.failed') {
+          expect(alert.taskId).toBeUndefined();
+          continue;
+        }
+        expect(alert.taskId).toMatch(/^t\d\d$/);
+        expect(snapshot.sessions.some((session) => session.id === alert.sessionId) || alert.cleared).toBe(
+          true,
+        );
+      }
+      for (const agent of snapshot.agents.filter((entry) => entry.status === 'waiting')) {
+        const run = snapshot.projects.find((project) => project.id === agent.projectId)!.orch!;
+        expect(run.blocked).toEqual([agent.currentTask]);
+      }
+    }
+    expect(ciAlerts).toBeGreaterThanOrEqual(1);
+    expect(ciAlerts).toBeLessThanOrEqual(1);
+  });
 
   it('uses realistic, unprefixed titles and ids', () => {
     const fleet = createDemoFleet({ now: NOW });
@@ -393,8 +482,8 @@ describe('createDemoFleet', () => {
     const seen = new Map<string, number>();
     let lastSequence = -1;
     let pairedAlerts = false;
-    // Six hours: waits (paired alerts) and CI failures are rare, so sample a longer span.
-    for (let step = 0; step < 180; step++) {
+    // Twelve hours: waits (paired alerts) are the only alerts and they are rare, so sample a long span.
+    for (let step = 0; step < 360; step++) {
       fleet.tick(120_000);
       const alerts = fleet.snapshot().alerts;
       expect(new Set(alerts.map((alert) => alert.id)).size).toBe(alerts.length);

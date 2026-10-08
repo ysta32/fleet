@@ -252,6 +252,41 @@ describe('nowWorking', () => {
 });
 
 describe('incidents', () => {
+  it('reuses one computation per snapshot and dismissal state, handing out a fresh array each call', () => {
+    const data = snapshot();
+    data.alerts = [
+      {
+        id: 'a1',
+        kind: 'ci.failed',
+        projectId: 'alpha',
+        title: 'ci.failed',
+        body: 'Checks failed on #1',
+        at: now,
+      },
+      {
+        id: 'a2',
+        kind: 'ci.failed',
+        projectId: 'beta',
+        title: 'ci.failed',
+        body: 'Checks failed on #2',
+        at: now,
+      },
+    ];
+    const first = incidents(data);
+    const again = incidents(data);
+    expect(again).not.toBe(first);
+    expect(again[0]).toBe(first[0]);
+    // ids not on this snapshot do not change the key
+    expect(incidents(data, new Set(['elsewhere']))[0]).toBe(first[0]);
+    expect(first.map((entry) => entry.projectId)).toEqual(['alpha', 'beta']);
+    first.length = 0;
+    expect(incidents(data)).toHaveLength(2);
+    // a different dismissal state is its own result
+    expect(incidents(data, new Set(['a1'])).map((entry) => entry.projectId)).toEqual(['beta']);
+    expect(incidents(data, new Set(['a1', 'a2']))).toEqual([]);
+    expect(stationNeeds(data, 'alpha')).toBe(1);
+  });
+
   const coder = (overrides: Partial<Agent> = {}): Agent => ({
     id: 'synthetic-session:coder',
     sessionId: 'synthetic-session',

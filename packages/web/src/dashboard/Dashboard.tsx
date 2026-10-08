@@ -6,7 +6,7 @@ import type { FleetView, Selection } from '../data/contract';
 import { Icon } from '../shell/Icon';
 import { Overnight } from './Overnight.jsx';
 import { Spend } from './Spend';
-import { DAG_NODE_H, DAG_NODE_W, dagEdgePaths, dagFocusNode, dagScrollLeft } from './dag';
+import { DAG_NODE_H, DAG_NODE_W, dagEdgePaths, dagFit, dagFocusNode, dagVisibleHeight } from './dag';
 import {
   aggregateFleet,
   clockTime,
@@ -59,28 +59,56 @@ function ExternalLink({ url, children }: { url?: string; children: ReactNode }) 
 function TaskDag({ tasks }: { tasks: OrchTask[] }) {
   const layout = dagLayout(tasks);
   const scroller = useRef<HTMLDivElement>(null);
+  const [viewport, setViewport] = useState(0);
   const focus = dagFocusNode(layout);
   const focusKey = focus ? `${focus.task.id}:${focus.task.state}` : '';
-  // bring the blocked (else running) task into view whenever it changes, so it never sits under the fade
+  const fit = dagFit(layout, viewport, focus);
+  const [scrollLeft, setScrollLeft] = useState(0);
+  const frame = useRef(0);
+  const height = fit.scroll ? dagVisibleHeight(layout, fit.scale, scrollLeft, viewport) : fit.height;
+  useEffect(() => () => cancelAnimationFrame(frame.current), []);
+  // track the scroller's width: the graph scales to fit it, or scrolls when that would be too small
   useEffect(() => {
     const element = scroller.current;
-    const svg = element?.querySelector('svg');
-    if (!element || !svg || !focus) return;
-    const left = dagScrollLeft(focus, layout.width, svg.getBoundingClientRect().width, element.clientWidth);
-    element.scrollTo({ left, behavior: 'auto' });
-    // keyed on the focus task and graph width only: a re-render with the same focus keeps the user's scroll
-  }, [focusKey, layout.width]);
+    if (!element) return;
+    const measure = () => setViewport(Math.round(element.clientWidth));
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [tasks.length]);
+  // bring the blocked (else running) task into view whenever it changes, snapped to column gaps
+  useEffect(() => {
+    const element = scroller.current;
+    if (!element || !viewport) return;
+    element.scrollTo({ left: fit.scrollLeft, behavior: 'auto' });
+    setScrollLeft(element.scrollLeft);
+    // keyed on the focus task, graph width and viewport only: a re-render with the same focus keeps the user's scroll
+  }, [focusKey, layout.width, viewport]);
   if (!tasks.length) return <p className="dashboard-empty">No tasks planned yet.</p>;
   return (
     <>
       <div
         ref={scroller}
         className="dashboard-dag"
-        tabIndex={0}
-        aria-label="Scrollable task dependency graph"
+        data-scroll={fit.scroll ? '1' : '0'}
+        // a scrolled graph is as tall as the rows in view, so a one-row stretch leaves no dead space
+        style={viewport && fit.scroll ? { height } : undefined}
+        onScroll={(event) => {
+          const element = event.currentTarget;
+          cancelAnimationFrame(frame.current);
+          frame.current = requestAnimationFrame(() => setScrollLeft(element.scrollLeft));
+        }}
+        tabIndex={fit.scroll ? 0 : undefined}
+        aria-label={fit.scroll ? 'Scrollable task dependency graph' : undefined}
       >
         <svg
-          style={{ width: '100%', minWidth: layout.width * 0.75, maxWidth: layout.width, height: 'auto' }}
+          style={
+            viewport
+              ? { width: fit.width, height: fit.height }
+              : { width: '100%', maxWidth: layout.width, height: 'auto' }
+          }
           viewBox={`0 0 ${layout.width} ${layout.height}`}
           role="img"
           aria-label="Task dependencies, from left to right"
@@ -385,11 +413,20 @@ export default function Dashboard({
           {snapshot.sessions.length > 0 && (
             <dl className="kpis">
               <div className="kpi kpi-hero">
-                <dt className="micro">Spend today</dt>
+                <dt className="micro">
+                  {view.mode === 'replay' ? `Spend by ${clockTime(now)}` : 'Spend today'}
+                </dt>
                 <dd className="numeral">{formatCost(totals.costToday)}</dd>
-                <dd className="kpi-note">
+                <dd
+                  className="kpi-note"
+                  title={
+                    totals.spend.earlierUsd >= 0.005
+                      ? 'Today counts sessions started since local midnight; earlier is sessions started before it'
+                      : undefined
+                  }
+                >
                   {totals.spend.earlierUsd >= 0.005
-                    ? `${totals.spend.todaySessions} of ${totals.spend.sessions} sessions started today; ${formatCost(totals.spend.earlierUsd)} before midnight`
+                    ? `${formatCost(totals.costToday)} today across ${totals.spend.todaySessions} ${totals.spend.todaySessions === 1 ? 'session' : 'sessions'} · ${formatCost(totals.spend.earlierUsd)} earlier`
                     : `Across ${snapshot.sessions.length} ${snapshot.sessions.length === 1 ? 'session' : 'sessions'}`}
                 </dd>
               </div>
@@ -502,12 +539,24 @@ export default function Dashboard({
               ))}
             </ol>
             {!events.length && (
-              <Empty quiet icon="live" title={query ? `No events match “${query}”.` : 'No recent events.'}>
+              <Empty
+                quiet
+                icon="live"
+                title={
+                  query
+                    ? `No events match “${query}”.`
+                    : view.mode === 'replay'
+                      ? `Nothing logged before ${clockTime(now)}.`
+                      : 'No recent events.'
+                }
+              >
                 {query
                   ? 'Clear the search with Esc.'
-                  : demo
-                    ? 'Synthetic tool calls, merges and deploys stream in here as the demo runs.'
-                    : 'Tool calls, merges and deploys stream in here as they happen.'}
+                  : view.mode === 'replay'
+                    ? 'The replay starts here. Press play or drag the playhead and events fill in.'
+                    : demo
+                      ? 'Synthetic tool calls, merges and deploys stream in here as the demo runs.'
+                      : 'Tool calls, merges and deploys stream in here as they happen.'}
               </Empty>
             )}
           </section>

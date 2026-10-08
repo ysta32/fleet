@@ -2,8 +2,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import type { Selection } from './data/contract';
 import type { DashboardTab } from './dashboard/Dashboard';
 import { PHONE_PRIMARY, TABS } from './shell/tabs';
-import { sessionSpend } from '@fleet/shared';
-import { formatCost, needsYou } from './dashboard/model';
+import { formatCost, headerVitals, needsYou, withDismissed } from './dashboard/model';
 import { useFleet } from './data/useFleet';
 import { Dashboard, FleetScene } from './shell/slots';
 import { ReplayBar, REPLAY_WINDOWS } from './shell/ReplayBar';
@@ -79,8 +78,20 @@ function Shell() {
   const snapshot = view.snapshot;
   const now = view.mode === 'live' ? Date.now() : (snapshot?.generatedAt ?? Date.now());
   const urgent = useMemo(() => (snapshot ? needsYou(snapshot, dismissed) : []), [snapshot, dismissed]);
-  const working = snapshot?.agents.filter((agent) => agent.status === 'working').length ?? 0;
-  const costToday = snapshot ? sessionSpend(snapshot.sessions, snapshot.generatedAt).todayUsd : 0;
+  const vitals = snapshot
+    ? headerVitals(
+        snapshot,
+        view.mode === 'replay' ? view.replay.at : snapshot.generatedAt,
+        view.mode === 'replay',
+      )
+    : null;
+  const working = vitals?.working ?? 0;
+  // the harbour reads incidents off its snapshot: cleared alerts must drop out there as well
+  const sceneSnapshot = useMemo(
+    () => (snapshot ? withDismissed(snapshot, dismissed) : snapshot),
+    [snapshot, dismissed],
+  );
+  const sceneView = sceneSnapshot === snapshot ? view : { ...view, snapshot: sceneSnapshot };
   const firstRun = !!snapshot && snapshot.sessions.length === 0 && snapshot.projects.length === 0;
 
   const go = useCallback((next: DashboardTab) => {
@@ -348,9 +359,9 @@ function Shell() {
               <span className="unit">{working === 1 ? 'agent' : 'agents'}</span>
             </dd>
           </div>
-          <div title="Estimated spend for sessions started today, local time">
-            <dt>Today</dt>
-            <dd>{formatCost(costToday)}</dd>
+          <div title={vitals?.title ?? 'Estimated spend for sessions started today, local time'}>
+            <dt>{vitals?.label ?? 'Today'}</dt>
+            <dd>{formatCost(vitals?.costUsd ?? 0)}</dd>
           </div>
         </dl>
         <div className="bar-actions">
@@ -463,7 +474,7 @@ function Shell() {
           <Suspense fallback={null}>
             <div className="scene-slot">
               <FleetScene
-                view={view}
+                view={sceneView}
                 selection={selection}
                 onSelect={setSelection}
                 detailCard={!selectionShown(snapshot, selection)}
@@ -473,7 +484,7 @@ function Shell() {
         </ErrorBoundary>
         {firstRun && <Onboarding />}
         {snapshot && !firstRun && (
-          <div className="stage-hud" aria-hidden="true">
+          <div className="stage-hud" aria-hidden="true" data-fl-overlay>
             <span className="micro">Harbour</span>
             <span className="hud-meta">
               {snapshot.projects.length} {snapshot.projects.length === 1 ? 'project' : 'projects'} ·{' '}
@@ -481,7 +492,7 @@ function Shell() {
             </span>
           </div>
         )}
-        <ReplayBar view={view} />
+        <ReplayBar view={view} dismissed={dismissed} />
       </main>
 
       <aside className="inspector" id="inspector" ref={inspector} aria-label="Dashboard" tabIndex={-1}>

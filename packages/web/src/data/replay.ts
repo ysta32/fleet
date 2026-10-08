@@ -1,4 +1,5 @@
 import type { FleetEvent, FleetSnapshot, HistoryResponse, Severity } from '@fleet/shared';
+import { incidents } from '../dashboard/model';
 
 export function normalizeHistory(history: HistoryResponse): HistoryResponse {
   return {
@@ -56,7 +57,7 @@ export function eventsCrossed(history: HistoryResponse, from: number, to: number
 
 /* ---------------- replay tape deck: timeline model ---------------- */
 
-/** Event kinds that mean a person is needed (the orange notches). */
+/** Event kinds that mean a person is needed (event-level moments; the notches read incidents). */
 const NEEDS_KINDS: ReadonlySet<FleetEvent['kind']> = new Set(['session.waiting', 'blocked']);
 /** Pure motion; drawn by the scene, too frequent to be a tick. */
 const SILENT_KINDS: ReadonlySet<FleetEvent['kind']> = new Set(['agent.move']);
@@ -185,13 +186,84 @@ export function needsYouMoments(history: HistoryResponse): NeedsYouMoment[] {
   return out;
 }
 
+const NO_DISMISSALS: ReadonlySet<string> = new Set();
+
+/** One incident's span on the tape, read from the history's frames with the dashboard's incidents(). */
+export interface IncidentMoment extends NeedsYouMoment {
+  /** the incident id (see `incidents`) */
+  id: string;
+  /** when its oldest signal fired; `ts` is when the history first shows it (<= one frame later) */
+  since: number;
+}
+
 /**
- * Bucket a history into `columns` severity-coloured ticks and needs-you notches. Notches closer than
+ * Incidents over a (normalized) history: the same incidents() list the Overview, Alerts, nav badge and
+ * stations read, evaluated on every frame. A moment starts at the first frame that lists the incident
+ * (seeking there shows it), ends at the first later frame that no longer lists it, and is open when the
+ * last frame at or before `to` still lists it. Incidents already open before `from` start at `from`.
+ */
+export function incidentMoments(
+  history: HistoryResponse,
+  dismissed: ReadonlySet<string> = NO_DISMISSALS,
+): IncidentMoment[] {
+  const out: IncidentMoment[] = [];
+  const open = new Map<string, IncidentMoment>();
+  for (const frame of history.frames) {
+    if (frame.generatedAt > history.to) break;
+    const listed = new Set<string>();
+    for (const incident of incidents(frame, dismissed)) {
+      listed.add(incident.id);
+      if (open.has(incident.id)) continue;
+      const moment: IncidentMoment = {
+        id: incident.id,
+        ts: frame.generatedAt,
+        since: Math.min(incident.at, frame.generatedAt),
+        end: history.to,
+        projectId: incident.projectId,
+        open: true,
+      };
+      open.set(incident.id, moment);
+      out.push(moment);
+    }
+    for (const [id, moment] of open) {
+      if (listed.has(id)) continue;
+      moment.end = frame.generatedAt;
+      moment.open = false;
+      open.delete(id);
+    }
+  }
+  return (
+    out
+      // a span that closed at or before the window start is not on this tape
+      .filter((moment) => (moment.open || moment.end > history.from) && moment.ts <= history.to)
+      .map((moment) => (moment.ts < history.from ? { ...moment, ts: history.from } : moment))
+  );
+}
+
+/** Incident ids still open at the end of the history (what the dashboard lists at `to`). */
+export function openIncidentIds(
+  history: HistoryResponse,
+  dismissed: ReadonlySet<string> = NO_DISMISSALS,
+): string[] {
+  return incidentMoments(history, dismissed)
+    .filter((moment) => moment.open)
+    .map((moment) => moment.id);
+}
+
+/**
+ * Bucket a history into `columns` severity-coloured ticks and needs-you notches (one per incident from
+ * `incidentMoments`, so the tape agrees with the Alerts list at every playhead). Notches closer than
  * 1/`notchSlots` of the window merge (the longest wait names the notch), so a busy stretch reads as a
  * comb rather than a solid bar and Shift-stepping always moves visibly. Deterministic: depends only on
  * the history.
  */
-export function buildTimeline(history: HistoryResponse, columns = 120, notchSlots = 48): TimelineModel {
+export function buildTimeline(
+  history: HistoryResponse,
+  columns = 120,
+  notchSlots = 48,
+  /** alerts the operator cleared: their incidents leave the tape as they leave the Alerts list */
+  dismissed: ReadonlySet<string> = NO_DISMISSALS,
+): TimelineModel {
   const span = history.to - history.from;
   const n = Math.max(1, Math.floor(columns));
   const buckets: TimelineBucket[] = Array.from({ length: n }, () => ({ count: 0, severity: null }));
@@ -212,8 +284,8 @@ export function buildTimeline(history: HistoryResponse, columns = 120, notchSlot
   const width = span > 0 ? span / Math.max(1, notchSlots) : Infinity;
   /** first moment of the current cluster: clusters never chain wider than one slot */
   let clusterStart = -Infinity;
-  for (const moment of span > 0 ? needsYouMoments(history) : []) {
-    const waitedMs = moment.end - moment.ts;
+  for (const moment of span > 0 ? incidentMoments(history, dismissed) : []) {
+    const waitedMs = moment.end - moment.since;
     const last = notches.at(-1);
     if (last && moment.ts - clusterStart < width) {
       last.count++;

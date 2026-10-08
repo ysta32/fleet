@@ -795,8 +795,15 @@
     radial-gradient(farthest-side at 100% 50%, var(--fl-scrim, rgb(0 0 0 / 0.35)), transparent) right / 12px
       100% no-repeat scroll;
   overflow-x: auto;
+  overflow-y: hidden;
   overscroll-behavior-x: contain;
   border-radius: var(--fl-radius-md);
+  transition: height var(--fl-dur-fast) var(--fl-ease-land);
+}
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-dag {
+    transition: none;
+  }
 }
 .dashboard-dag svg {
   display: block;

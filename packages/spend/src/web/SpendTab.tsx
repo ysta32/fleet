@@ -1,7 +1,8 @@
 import { useState } from 'react';
+import { formatLocalTime, formatUtcTime } from '@fleet/shared';
 import type { SpendSource, SpendSummary } from '@fleet/shared';
 import { Breakdown, DailyBars, HeroChart, ModelMix, toolName } from './charts.js';
-import { money, moneyWhole, monthModel, monthName, monthShort, timeUtc } from './format.js';
+import { money, moneyWhole, monthModel, monthName, monthShort, stampLocal } from './format.js';
 import { Icon } from './icons.js';
 import type { IconName } from './icons.js';
 import { SPEND_CSS } from './styles.js';
@@ -333,9 +334,9 @@ function Dashboard({ s }: { s: SpendSummary }) {
                 </a>
               )}
               <span className="fls-badge">Estimated</span>
-              <span className="fls-chip">
+              <span className="fls-chip" title={formatUtcTime(s.generatedAt)}>
                 <Icon name="clock" small />
-                <span className="fls-num">Updated {timeUtc(s.generatedAt)}</span>
+                <span className="fls-num">Updated {stampLocal(s.generatedAt)}</span>
               </span>
             </div>
           </div>
@@ -366,7 +367,13 @@ function Dashboard({ s }: { s: SpendSummary }) {
       <div className="fls-kpis">
         <Kpi label="Today" value={money(s.todayUsd)}>
           <span className="fls-kpi-sub">
-            {mon} {m.today}, through {timeUtc(s.generatedAt).split(', ')[1]}
+            {mon} {m.today} · updated{' '}
+            <time
+              dateTime={Number.isFinite(s.generatedAt) ? new Date(s.generatedAt).toISOString() : undefined}
+              title={formatUtcTime(s.generatedAt)}
+            >
+              {formatLocalTime(s.generatedAt)}
+            </time>
           </span>
         </Kpi>
         <Kpi
