@@ -2,6 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createReadStream, promises as fsp } from 'node:fs';
 import http from 'node:http';
 import { isIP } from 'node:net';
+import { networkInterfaces } from 'node:os';
 import path from 'node:path';
 import { PROTOCOL_VERSION } from '@fleet/shared';
 import type { Alert, FleetConfig, FleetEvent, FleetSnapshot, HistoryResponse } from '@fleet/shared';
@@ -29,6 +30,8 @@ export interface CreateServerOptions {
   onExternalAlert?: (alert: ExternalAlert) => void;
   /** extra GET JSON routes keyed by exact path (e.g. "/api/spend"); remote access only with shareContent */
   extraGet?: Record<string, (req: http.IncomingMessage) => Promise<unknown> | unknown>;
+  /** host other devices can reach this collector at (LAN/Tailscale IP); defaults to the first external IPv4 */
+  shareHost?: () => string | undefined;
 }
 
 /**
@@ -91,6 +94,14 @@ const CONTENT_TYPES: Record<string, string> = {
   '.hdr': 'application/octet-stream',
   '.ktx2': 'image/ktx2',
 };
+
+/** First non-internal IPv4 address (LAN or Tailscale), or undefined when offline. */
+function defaultShareHost(): string | undefined {
+  for (const list of Object.values(networkInterfaces())) {
+    for (const i of list ?? []) if (i.family === 'IPv4' && !i.internal) return i.address;
+  }
+  return undefined;
+}
 
 function defaultIsLoopback(req: http.IncomingMessage): boolean {
   const addr = req.socket.remoteAddress;
@@ -355,19 +366,96 @@ export function createServer(opts: CreateServerOptions): http.Server {
     return isLoopback(req) && LOOPBACK_HOSTS.has(hostName(req));
   }
 
+  function setSessionCookie(req: http.IncomingMessage, res: http.ServerResponse): void {
+    const proto = String(req.headers['x-forwarded-proto'] ?? '')
+      .split(',')[0]!
+      .trim()
+      .toLowerCase();
+    res.setHeader(
+      'Set-Cookie',
+      `${TOKEN_COOKIE}=${encodeURIComponent(config.token)}; Path=/; HttpOnly; SameSite=Strict; ` +
+        `Max-Age=${COOKIE_MAX_AGE_S}${proto === 'https' ? '; Secure' : ''}`,
+    );
+  }
+
+  /** Same-origin check for state-changing browser requests: Origin (if sent) must match Host. */
+  function crossSite(req: http.IncomingMessage): boolean {
+    const site = req.headers['sec-fetch-site'];
+    if (typeof site === 'string' && site !== 'same-origin' && site !== 'none') return true;
+    const origin = req.headers.origin;
+    if (origin === undefined) return false;
+    if (typeof origin !== 'string' || origin === 'null') return true;
+    let host: string;
+    try {
+      host = new URL(origin).host.toLowerCase();
+    } catch {
+      return true;
+    }
+    return host !== String(req.headers.host ?? '').toLowerCase();
+  }
+
+  /**
+   * URL another device on the LAN/tailnet can open (no token: the device still has to unlock).
+   * Only computed for local requests when remote access is enabled.
+   */
+  function shareUrl(req: http.IncomingMessage): string | undefined {
+    const host = (opts.shareHost ?? defaultShareHost)();
+    const port = req.socket.localPort;
+    if (!host || !port) return undefined;
+    const literal = isIP(host) === 6 ? `[${host}]` : host;
+    let url: URL;
+    try {
+      url = new URL(`http://${literal}:${port}/`);
+    } catch {
+      return undefined;
+    }
+    return url.toString();
+  }
+
+  /** Failed POST /api/session attempts per client address, to slow token guessing. */
+  const sessionFailures = new Map<string, { count: number; resetAt: number }>();
+  const SESSION_MAX_FAILURES = 10;
+  const SESSION_WINDOW_MS = 60_000;
+
+  /**
+   * POST /api/session: exchanges `Authorization: Bearer <token>` for the HttpOnly session cookie,
+   * so the web UI never has to put the token in a URL. 204 on success, 401 on a bad token.
+   */
+  function handleSession(req: http.IncomingMessage, res: http.ServerResponse): void {
+    req.resume(); // no body expected; drain anything sent
+    if (crossSite(req)) return sendError(res, 403, 'cross-site request');
+    const key = req.socket.remoteAddress ?? 'unknown';
+    const now = Date.now();
+    let entry = sessionFailures.get(key);
+    if (entry && entry.resetAt <= now) {
+      sessionFailures.delete(key);
+      entry = undefined;
+    }
+    if (entry && entry.count >= SESSION_MAX_FAILURES) {
+      res.setHeader('Retry-After', String(Math.ceil((entry.resetAt - now) / 1000)));
+      return sendError(res, 429, 'too many attempts');
+    }
+    if (!tokenMatches(bearerToken(req), config.token)) {
+      if (sessionFailures.size > 10_000) sessionFailures.clear();
+      sessionFailures.set(key, {
+        count: (entry?.count ?? 0) + 1,
+        resetAt: entry?.resetAt ?? now + SESSION_WINDOW_MS,
+      });
+      res.setHeader('WWW-Authenticate', 'Bearer');
+      return sendError(res, 401, 'unauthorized');
+    }
+    sessionFailures.delete(key);
+    setSessionCookie(req, res);
+    res.setHeader('Cache-Control', 'no-store');
+    res.writeHead(204);
+    res.end();
+  }
+
   function authorize(req: http.IncomingMessage, query: URLSearchParams, res: http.ServerResponse): boolean {
     const queryToken = query.get('token') ?? undefined;
     if (tokenMatches(queryToken, config.token)) {
       // lets the web UI load its own assets after being opened with ?token=
-      const proto = String(req.headers['x-forwarded-proto'] ?? '')
-        .split(',')[0]!
-        .trim()
-        .toLowerCase();
-      res.setHeader(
-        'Set-Cookie',
-        `${TOKEN_COOKIE}=${encodeURIComponent(config.token)}; Path=/; HttpOnly; SameSite=Strict; ` +
-          `Max-Age=${COOKIE_MAX_AGE_S}${proto === 'https' ? '; Secure' : ''}`,
-      );
+      setSessionCookie(req, res);
       return true;
     }
     return tokenMatches(bearerToken(req), config.token) || tokenMatches(cookieToken(req), config.token);
@@ -521,6 +609,16 @@ export function createServer(opts: CreateServerOptions): http.Server {
       return undefined;
     }
     if (!isWithin(root, real)) return undefined;
+    // Never serve through an alias: an in-root symlink (e.g. public.txt -> a dotfile) would bypass
+    // the dotfile check on the requested path. Also re-check the resolved path for dot segments.
+    if (real !== candidate) return undefined;
+    if (
+      path
+        .relative(root, real)
+        .split(path.sep)
+        .some((segment) => segment.startsWith('.'))
+    )
+      return undefined;
     const st = await fsp.stat(real).catch(() => undefined);
     if (st?.isDirectory()) {
       return statInRoot(root, path.join(path.relative(root, real), 'index.html'));
@@ -655,21 +753,39 @@ export function createServer(opts: CreateServerOptions): http.Server {
       }
       return handlePostAlert(req, res);
     }
+    if (rawPath === '/api/session') {
+      if (method !== 'POST') {
+        res.setHeader('Allow', 'POST');
+        return sendError(res, 405, 'method not allowed');
+      }
+      return handleSession(req, res);
+    }
     if (method !== 'GET' && method !== 'HEAD') {
       res.setHeader('Allow', 'GET, HEAD');
       return sendError(res, 405, 'method not allowed');
     }
     const local = isLocal(req);
-    if (!local && !authorize(req, query, res)) {
+    const api = rawPath === '/api' || rawPath.startsWith('/api/');
+    // Remote clients may load the static web shell (it holds no fleet data) so a fresh browser can
+    // reach the token gate; every /api route still requires the token. authorize() also turns a
+    // valid ?token= link on a shell path into the session cookie.
+    if (!local && !authorize(req, query, res) && api) {
       res.removeHeader('Set-Cookie');
       res.setHeader('WWW-Authenticate', 'Bearer');
       return sendError(res, 401, 'unauthorized');
     }
 
-    if (rawPath === '/api' || rawPath.startsWith('/api/')) {
+    if (api) {
       switch (rawPath) {
-        case '/api/health':
-          return sendJson(res, 200, { ok: true, version: SERVER_VERSION, protocol: PROTOCOL_VERSION });
+        case '/api/health': {
+          const share = local && config.lan ? shareUrl(req) : undefined;
+          return sendJson(res, 200, {
+            ok: true,
+            version: SERVER_VERSION,
+            protocol: PROTOCOL_VERSION,
+            ...(share ? { shareUrl: share } : {}),
+          });
+        }
         case '/api/snapshot': {
           if (!local) return sendRawJson(res, 200, remoteSnapshot().json);
           return sendJson(res, 200, store.snapshot());

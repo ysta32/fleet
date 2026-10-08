@@ -1,9 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import type { ReactNode } from 'react';
+import type { IconName } from '@fleet/ui';
 import type { ModelFamily, OrchTask } from '@fleet/shared';
 import type { FleetView, Selection } from '../data/contract';
+import { Icon } from '../shell/Icon';
 import {
   aggregateFleet,
+  clockTime,
+  matches,
+  needsYou,
   dagLayout,
   formatCost,
   formatCount,
@@ -21,10 +26,16 @@ export interface DashboardProps {
   selection: Selection;
   onSelect(sel: Selection): void;
   tab: DashboardTab;
+  /** free-text filter from the command bar (sessions, PRs, events) */
+  query?: string;
+  /** alert ids the operator cleared locally */
+  dismissedAlerts?: ReadonlySet<string>;
+  onDismissAlerts?(ids: string[]): void;
+  onGo?(tab: DashboardTab): void;
 }
 function ModelChip({ model, children }: { model: ModelFamily; children?: ReactNode }) {
   return (
-    <span className={`dashboard-chip model-${model}`}>
+    <span className={`dashboard-chip model-tag model-${model}`}>
       {model}
       {children}
     </span>
@@ -43,7 +54,7 @@ function ExternalLink({ url, children }: { url?: string; children: ReactNode }) 
 function TaskDag({ tasks }: { tasks: OrchTask[] }) {
   const layout = dagLayout(tasks);
   const nodes = new Map(layout.nodes.map((node) => [node.task.id, node]));
-  if (!tasks.length) return <p className="dashboard-empty">No tasks yet.</p>;
+  if (!tasks.length) return <p className="dashboard-empty">No tasks planned yet.</p>;
   return (
     <>
       <div className="dashboard-dag" tabIndex={0} aria-label="Scrollable task dependency graph">
@@ -72,7 +83,7 @@ function TaskDag({ tasks }: { tasks: OrchTask[] }) {
               transform={`translate(${node.x},${node.y})`}
             >
               <title>{`${node.task.id}: ${node.task.slug} — ${node.task.state}${node.unresolved ? ' (cyclic dependency or downstream of a cycle)' : ''}`}</title>
-              <rect width="170" height="52" rx="8" />
+              <rect width="170" height="52" rx="6" />
               <text x="10" y="21">
                 {node.task.id} ·{' '}
                 {node.task.slug.length > 15 ? `${node.task.slug.slice(0, 14)}…` : node.task.slug}
@@ -98,18 +109,143 @@ function TaskDag({ tasks }: { tasks: OrchTask[] }) {
   );
 }
 
-const columns: { key: SessionSortKey; label: string }[] = [
+const columns: { key: SessionSortKey; label: string; numeric?: boolean }[] = [
+  { key: 'title', label: 'Session' },
   { key: 'project', label: 'Project' },
-  { key: 'title', label: 'Title' },
   { key: 'model', label: 'Model' },
   { key: 'status', label: 'Status' },
   { key: 'lastTool', label: 'Last tool' },
-  { key: 'tokens', label: 'Tokens' },
-  { key: 'cost', label: 'Cost' },
-  { key: 'lastActivity', label: 'Last activity' },
+  { key: 'tokens', label: 'Tokens', numeric: true },
+  { key: 'cost', label: 'Cost', numeric: true },
+  { key: 'lastActivity', label: 'Last activity', numeric: true },
 ];
 
-export default function Dashboard({ view, selection, onSelect, tab }: DashboardProps) {
+const STATUS_ICON: Record<string, IconName> = {
+  active: 'live',
+  working: 'live',
+  waiting: 'waiting',
+  idle: 'pause',
+  ended: 'check',
+  done: 'check',
+  failed: 'x',
+  blocked: 'blocked',
+};
+
+function Status({ value }: { value: string }) {
+  return (
+    <span className={`status status-${value}`}>
+      <Icon name={STATUS_ICON[value] ?? 'agent'} />
+      {value}
+    </span>
+  );
+}
+
+function PanelHead({ title, meta, children }: { title: string; meta?: ReactNode; children?: ReactNode }) {
+  return (
+    <header className="panel-head">
+      <h2 className="panel-title">{title}</h2>
+      {meta && <p className="panel-meta">{meta}</p>}
+      {children}
+    </header>
+  );
+}
+
+type SessionSort = { key: SessionSortKey; direction: 'asc' | 'desc' };
+
+/**
+ * Sort control for the compact (card) layout, where the table header and its sort buttons are
+ * hidden. Shown only by the narrow-width container query in dashboard.css.
+ */
+function CompactSort({ sort, onSort }: { sort: SessionSort; onSort: (sort: SessionSort) => void }) {
+  const id = useId();
+  const descending = sort.direction === 'desc';
+  return (
+    <div className="compact-sort">
+      <label htmlFor={id}>Sort</label>
+      <select
+        id={id}
+        value={sort.key}
+        onChange={(event) => onSort({ key: event.target.value as SessionSortKey, direction: sort.direction })}
+      >
+        {columns.map((column) => (
+          <option key={column.key} value={column.key}>
+            {column.label}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        aria-label={
+          descending ? 'Sorted descending, switch to ascending' : 'Sorted ascending, switch to descending'
+        }
+        onClick={() => onSort({ key: sort.key, direction: descending ? 'asc' : 'desc' })}
+      >
+        <span className={`sort-caret ${sort.direction}`} aria-hidden="true">
+          <Icon name="chevron" />
+        </span>
+        {descending ? 'Desc' : 'Asc'}
+      </button>
+    </div>
+  );
+}
+
+function Empty({
+  icon,
+  title,
+  children,
+  quiet,
+}: {
+  icon: IconName;
+  title: string;
+  children?: ReactNode;
+  /** a sub-block inside a busier panel: no serif headline (one serif moment per screen) */
+  quiet?: boolean;
+}) {
+  return (
+    <div className={`dashboard-empty empty${quiet ? ' empty-quiet' : ''}`}>
+      <Icon name={icon} className="empty-icon" />
+      <p className="empty-title">{title}</p>
+      {children && <p className="empty-body">{children}</p>}
+    </div>
+  );
+}
+
+export function DashboardSkeleton() {
+  return (
+    <section className="dashboard" aria-busy="true">
+      <p role="status" className="sr-only">
+        Waiting for fleet data…
+      </p>
+      <div className="skeleton skeleton-title" />
+      <div className="skeleton skeleton-block" />
+      <div className="skeleton-kpis">
+        <div className="skeleton skeleton-kpi" />
+        <div className="skeleton skeleton-kpi" />
+      </div>
+      {Array.from({ length: 6 }, (_, index) => (
+        <div key={index} className="skeleton skeleton-row" style={{ animationDelay: `${index * 24}ms` }} />
+      ))}
+    </section>
+  );
+}
+
+const TOKEN_PARTS = [
+  { key: 'input', label: 'Input' },
+  { key: 'output', label: 'Output' },
+  { key: 'cacheRead', label: 'Cache read' },
+  { key: 'cacheWrite', label: 'Cache write' },
+] as const;
+
+export default function Dashboard({
+  view,
+  selection,
+  onSelect,
+  tab,
+  query = '',
+  dismissedAlerts,
+  onDismissAlerts,
+  onGo,
+}: DashboardProps) {
   const [clock, setClock] = useState(() => Date.now());
   const [sort, setSort] = useState<{ key: SessionSortKey; direction: 'asc' | 'desc' }>({
     key: 'lastActivity',
@@ -121,12 +257,7 @@ export default function Dashboard({ view, selection, onSelect, tab }: DashboardP
   }, []);
   if (tab === 'overnight') return <div data-slot="overnight" />;
   const snapshot = view.snapshot;
-  if (!snapshot)
-    return (
-      <section className="dashboard">
-        <p role="status">Waiting for fleet data…</p>
-      </section>
-    );
+  if (!snapshot) return <DashboardSkeleton />;
   const now = view.mode === 'replay' ? view.replay.at : view.mode === 'demo' ? snapshot.generatedAt : clock;
   const names = new Map(snapshot.projects.map((project) => [project.id, project.name]));
   const projectName = (id: string) => names.get(id) ?? id;
@@ -142,131 +273,498 @@ export default function Dashboard({ view, selection, onSelect, tab }: DashboardP
       {projectName(id)}
     </button>
   );
+  const dismissed = dismissedAlerts ?? new Set<string>();
   const totals = aggregateFleet(snapshot, now);
   const armies = snapshot.projects.filter((project) => project.orch);
-  const alerts = snapshot.alerts.filter((alert) => !alert.cleared).sort((a, b) => b.at - a.at);
+  const alerts = snapshot.alerts
+    .filter((alert) => !alert.cleared && !dismissed.has(alert.id))
+    .sort((a, b) => b.at - a.at);
+  const urgent = needsYou(snapshot, dismissed);
+  const waiting = snapshot.sessions
+    .filter((session) => session.status === 'waiting')
+    .sort((a, b) => a.lastActivity - b.lastActivity);
   const blocked = armies.filter(
     (project) =>
       project.orch!.phase === 'blocked' ||
       project.orch!.blocked.length > 0 ||
       project.orch!.tasks.some((task) => task.state === 'blocked'),
   );
+  const working = totals.projects.filter((item) => item.working);
+  const workingAgents = snapshot.agents.filter((agent) => agent.status === 'working').length;
+  const tokenTotal = totalTokens(totals.tokens);
+  const events = [...view.events]
+    .filter((event) => matches(query, event.label, projectName(event.projectId)))
+    .sort((a, b) => b.ts - a.ts)
+    .slice(0, 30);
+  const lastAlert = snapshot.alerts.reduce((latest, alert) => Math.max(latest, alert.at), 0);
+  const sessions = sortSessions(
+    snapshot.sessions.filter((session) =>
+      matches(
+        query,
+        session.title,
+        session.id,
+        projectName(session.projectId),
+        session.model,
+        session.status,
+      ),
+    ),
+    names,
+    sort.key,
+    sort.direction,
+  );
+  const prs = [...snapshot.prs]
+    .filter((pr) => matches(query, pr.title, projectName(pr.projectId), `#${pr.number}`, pr.headRef))
+    .sort((a, b) => b.updatedAt - a.updatedAt);
   return (
     <section className="dashboard" aria-label={`${tab === 'prs' ? 'PRs & Deploys' : tab} dashboard`}>
       {tab === 'overview' && (
         <>
-          <h2>Overview</h2>
-          <div className="dashboard-stats">
-            <article className="dashboard-card">
-              <h3>Cost today</h3>
-              <strong>{formatCost(totals.costToday)}</strong>
-              <small>Sessions started today · local time</small>
-            </article>
-            <article className="dashboard-card">
-              <h3>Total cost</h3>
-              <strong>{formatCost(totals.costTotal)}</strong>
-              <small>Sessions in this snapshot</small>
-            </article>
-            <article className="dashboard-card">
-              <h3>Total tokens</h3>
-              <strong>{formatCount(totalTokens(totals.tokens))}</strong>
-              <small>
-                Input {formatCount(totals.tokens.input)} · output {formatCount(totals.tokens.output)}
-              </small>
-              <small>
-                Cache read {formatCount(totals.tokens.cacheRead)} · write{' '}
-                {formatCount(totals.tokens.cacheWrite)}
-              </small>
-            </article>
+          <div className={`needs ${urgent.length ? 'needs-hot' : 'needs-calm'}`} aria-live="polite">
+            <p className="micro">Needs you</p>
+            {urgent.length ? (
+              <>
+                <h2 className="needs-title">
+                  {urgent.length} {urgent.length === 1 ? 'item is' : 'items are'} waiting on you.
+                </h2>
+                <ul className="needs-list">
+                  {urgent.slice(0, 4).map((item) => (
+                    <li key={item.id}>
+                      <Icon
+                        name={
+                          item.kind === 'waiting' ? 'waiting' : item.kind === 'blocked' ? 'blocked' : 'alert'
+                        }
+                      />
+                      <span className="needs-text">
+                        {projectButton(item.projectId)}
+                        <span>{item.title}</span>
+                      </span>
+                      <time className="num" dateTime={new Date(item.at).toISOString()}>
+                        {relativeTime(item.at, now)}
+                      </time>
+                    </li>
+                  ))}
+                </ul>
+                <button type="button" className="btn btn-primary" onClick={() => onGo?.('alerts')}>
+                  Review oldest
+                  <Icon name="chevron" />
+                </button>
+              </>
+            ) : (
+              <>
+                <h2 className={`needs-title${snapshot.sessions.length ? '' : ' needs-title-quiet'}`}>
+                  {snapshot.sessions.length ? 'Nothing needs you.' : 'Waiting for the first session.'}
+                </h2>
+                <p className="needs-body">
+                  {workingAgents} {workingAgents === 1 ? 'agent' : 'agents'} working across {working.length}{' '}
+                  {working.length === 1 ? 'project' : 'projects'}.{' '}
+                  {lastAlert ? `Last alert ${relativeTime(lastAlert, now)}.` : 'No alerts recorded.'}
+                </p>
+              </>
+            )}
           </div>
-          <h3>Now working</h3>
-          <div className="dashboard-grid">
-            {totals.projects
-              .filter((item) => item.working)
-              .map(({ project, activeByModel, activeAgents }) => (
-                <article className="dashboard-card" key={project.id}>
-                  <h4>{projectButton(project.id)}</h4>
-                  <p>
-                    {activeAgents} active {activeAgents === 1 ? 'agent' : 'agents'}
-                  </p>
-                  <div className="dashboard-chips">
-                    {MODEL_FAMILIES.filter((model) => activeByModel[model] > 0).map((model) => (
-                      <ModelChip key={model} model={model}>
-                        {' '}
-                        · {activeByModel[model]}
-                      </ModelChip>
-                    ))}
-                  </div>
-                  {project.orch && <small>Army {project.orch.phase}</small>}
-                </article>
-              ))}
-          </div>
-          {!totals.projects.some((item) => item.working) && (
-            <p className="dashboard-empty">No projects working right now.</p>
-          )}
-          <h3>Recent events</h3>
-          <ol
-            className="dashboard-list dashboard-ticker"
-            aria-live="polite"
-            aria-relevant="additions"
-            aria-label="Recent events"
-          >
-            {[...view.events]
-              .sort((a, b) => b.ts - a.ts)
-              .slice(0, 30)
-              .map((event) => (
-                <li key={event.id} className={`severity-${event.severity}`}>
-                  <span>
-                    {projectButton(event.projectId)} · {event.label}
+
+          <dl className="kpis">
+            <div className="kpi kpi-hero">
+              <dt className="micro">Spend today</dt>
+              <dd className="numeral">{formatCost(totals.costToday)}</dd>
+              <dd className="kpi-note">
+                {formatCost(totals.costTotal)} across {snapshot.sessions.length}{' '}
+                {snapshot.sessions.length === 1 ? 'session' : 'sessions'}
+              </dd>
+            </div>
+            <div className="kpi">
+              <dt className="micro">Tokens</dt>
+              <dd className="numeral numeral-sm">
+                {formatCount(tokenTotal)}
+                <span className="unit">tok</span>
+              </dd>
+              <dd className={`token-bar${tokenTotal ? '' : ' is-empty'}`} aria-hidden="true">
+                {TOKEN_PARTS.map((part) => (
+                  <i
+                    key={part.key}
+                    className={`token-${part.key}`}
+                    style={{ flexGrow: tokenTotal ? totals.tokens[part.key] / tokenTotal : 0 }}
+                  />
+                ))}
+              </dd>
+              <dd className="kpi-note sr-only">
+                {TOKEN_PARTS.map((part) => `${part.label} ${formatCount(totals.tokens[part.key])}`).join(
+                  ' · ',
+                )}
+              </dd>
+            </div>
+          </dl>
+          <ul className="token-legend" aria-label="Token mix">
+            {TOKEN_PARTS.map((part) => (
+              <li key={part.key}>
+                <i className={`token-${part.key}`} aria-hidden="true" />
+                {part.label}
+                <span className="num">{formatCount(totals.tokens[part.key])}</span>
+              </li>
+            ))}
+          </ul>
+
+          <section className="block">
+            <h3 className="block-title">
+              Now working <span className="num count">{working.length}</span>
+            </h3>
+            {working.length ? (
+              <ul className="rows">
+                {working.map(({ project, activeByModel, activeAgents }) => (
+                  <li key={project.id} className="row" data-selected={selected('project', project.id)}>
+                    <span className="row-main">{projectButton(project.id)}</span>
+                    <span className="dashboard-chips">
+                      {MODEL_FAMILIES.filter((model) => activeByModel[model] > 0).map((model) => (
+                        <ModelChip key={model} model={model}>
+                          <span className="num"> {activeByModel[model]}</span>
+                        </ModelChip>
+                      ))}
+                    </span>
+                    {project.orch && <span className="row-meta">army {project.orch.phase}</span>}
+                    <span className="num row-num">
+                      {activeAgents} <span className="unit">{activeAgents === 1 ? 'agent' : 'agents'}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <Empty quiet icon="pause" title="No projects working right now.">
+                Agents appear here the moment a session starts a tool call.
+              </Empty>
+            )}
+          </section>
+
+          <section className="block">
+            <h3 className="block-title">Log</h3>
+            <ol
+              className="dashboard-list dashboard-ticker log"
+              aria-live="polite"
+              aria-relevant="additions"
+              aria-label="Recent events"
+            >
+              {events.map((event) => (
+                <li key={event.id} className={`log-row severity-${event.severity}`}>
+                  <time
+                    className="num"
+                    dateTime={new Date(event.ts).toISOString()}
+                    title={relativeTime(event.ts, now)}
+                  >
+                    {clockTime(event.ts)}
+                  </time>
+                  <i className="sev" aria-label={event.severity} />
+                  <span className="log-text">
+                    {projectButton(event.projectId)} <span className="log-label">{event.label}</span>
                   </span>
-                  <time dateTime={new Date(event.ts).toISOString()}>{relativeTime(event.ts, now)}</time>
                 </li>
               ))}
-          </ol>
-          {!view.events.length && <p className="dashboard-empty">No recent events.</p>}
+            </ol>
+            {!events.length && (
+              <Empty quiet icon="live" title={query ? `No events match “${query}”.` : 'No recent events.'}>
+                {query
+                  ? 'Clear the search with Esc.'
+                  : 'Tool calls, merges and deploys stream in here as they happen.'}
+              </Empty>
+            )}
+          </section>
         </>
       )}
       {tab === 'sessions' && (
         <>
-          <h2>Sessions</h2>
-          <div className="dashboard-table-wrap">
-            <table className="dashboard-table">
-              <thead>
-                <tr>
-                  {columns.map((column) => (
-                    <th
-                      key={column.key}
-                      scope="col"
-                      aria-sort={
-                        sort.key === column.key
-                          ? sort.direction === 'asc'
-                            ? 'ascending'
-                            : 'descending'
-                          : 'none'
-                      }
-                    >
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setSort((previous) => ({
-                            key: column.key,
-                            direction:
-                              previous.key === column.key && previous.direction === 'asc' ? 'desc' : 'asc',
-                          }))
+          <PanelHead
+            title="Sessions"
+            meta={
+              <>
+                <span className="num">{sessions.length}</span>
+                {query ? ` matching “${query}”` : ` of ${snapshot.sessions.length}`}
+              </>
+            }
+          >
+            {sessions.length > 0 && <CompactSort sort={sort} onSort={setSort} />}
+          </PanelHead>
+          {sessions.length > 0 && (
+            <div className="dashboard-table-wrap">
+              <table className="dashboard-table">
+                <thead>
+                  <tr>
+                    {columns.map((column) => (
+                      <th
+                        key={column.key}
+                        scope="col"
+                        className={column.numeric ? 'numeric' : undefined}
+                        aria-sort={
+                          sort.key === column.key
+                            ? sort.direction === 'asc'
+                              ? 'ascending'
+                              : 'descending'
+                            : 'none'
                         }
                       >
-                        {column.label}
-                        {sort.key === column.key ? (sort.direction === 'asc' ? ' ↑' : ' ↓') : ''}
-                      </button>
-                    </th>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSort((previous) => ({
+                              key: column.key,
+                              direction:
+                                previous.key === column.key && previous.direction === 'asc' ? 'desc' : 'asc',
+                            }))
+                          }
+                        >
+                          {column.label}
+                          {sort.key === column.key && (
+                            <span className={`sort-caret ${sort.direction}`} aria-hidden="true">
+                              <Icon name="chevron" />
+                            </span>
+                          )}
+                        </button>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sessions.map((session) => (
+                    <tr
+                      key={session.id}
+                      data-selected={selected('session', session.id)}
+                      className={`row-${session.status}`}
+                    >
+                      <td data-label="Title" className="cell-title">
+                        <button
+                          type="button"
+                          className="dashboard-link"
+                          aria-pressed={selected('session', session.id)}
+                          onClick={() => onSelect({ kind: 'session', id: session.id })}
+                        >
+                          {session.title ?? session.id}
+                        </button>
+                      </td>
+                      <td data-label="Project" className="cell-project">
+                        {projectButton(session.projectId)}
+                      </td>
+                      <td data-label="Model" className="cell-model">
+                        <ModelChip model={session.model} />
+                      </td>
+                      <td data-label="Status" className="cell-status">
+                        <Status value={session.status} />
+                      </td>
+                      <td data-label="Last tool" className="cell-tool">
+                        {session.lastTool
+                          ? `${session.lastTool.name}${session.lastTool.target ? ` · ${session.lastTool.target}` : ''}`
+                          : '—'}
+                      </td>
+                      <td
+                        data-label="Tokens"
+                        className="numeric cell-tokens"
+                        title={totalTokens(session.tokens).toLocaleString('en-US')}
+                      >
+                        {formatCount(totalTokens(session.tokens))}
+                      </td>
+                      <td data-label="Cost" className="numeric cell-cost">
+                        {formatCost(session.costUsd)}
+                      </td>
+                      <td data-label="Last activity" className="numeric cell-time">
+                        <time dateTime={new Date(session.lastActivity).toISOString()}>
+                          {relativeTime(session.lastActivity, now)}
+                        </time>
+                      </td>
+                    </tr>
                   ))}
-                </tr>
-              </thead>
-              <tbody>
-                {sortSessions(snapshot.sessions, names, sort.key, sort.direction).map((session) => (
-                  <tr key={session.id} data-selected={selected('session', session.id)}>
-                    <td data-label="Project">{projectButton(session.projectId)}</td>
-                    <td data-label="Title">
+                </tbody>
+              </table>
+            </div>
+          )}
+          {!snapshot.sessions.length && (
+            <Empty icon="session" title="No sessions yet.">
+              Start Claude Code in any repo and it appears here within 2 seconds.
+            </Empty>
+          )}
+          {snapshot.sessions.length > 0 && !sessions.length && (
+            <Empty icon="search" title={`No session matches “${query}”.`}>
+              Search covers titles, projects, models and status. Esc clears it.
+            </Empty>
+          )}
+        </>
+      )}
+      {tab === 'armies' && (
+        <>
+          <PanelHead
+            title="Armies"
+            meta={`${armies.length} orchestrated ${armies.length === 1 ? 'project' : 'projects'}`}
+          />
+          {armies.map((project) => {
+            const run = project.orch!;
+            const landed = run.tasks.filter((task) => task.state === 'landed').length;
+            return (
+              <article className="dashboard-army army" key={project.id}>
+                <div className="dashboard-card-heading">
+                  <h3>{projectButton(project.id)}</h3>
+                  <Status value={run.phase} />
+                </div>
+                <label className="dashboard-progress">
+                  <span>
+                    <span className="num">
+                      {landed} / {run.tasks.length}
+                    </span>{' '}
+                    tasks landed
+                  </span>
+                  <progress value={landed} max={Math.max(1, run.tasks.length)} />
+                </label>
+                <TaskDag tasks={run.tasks} />
+                <h4 className="micro">Inflight</h4>
+                <ul className="dashboard-list rows">
+                  {run.inflight.map((entry, index) => (
+                    <li key={`${entry.task}:${entry.role}:${index}`} className="row">
+                      <span className="row-main">
+                        <span className="num">{entry.task}</span> · {entry.role} · {entry.agent}
+                      </span>
+                      <span className="row-meta num">
+                        {entry.worktree} · started {entry.started}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                {!run.inflight.length && <p className="dashboard-empty quiet">No tasks inflight.</p>}
+              </article>
+            );
+          })}
+          {!armies.length && (
+            <Empty icon="army" title="No armies running.">
+              An army appears when a repo has an orchestrator state folder. Its task graph, inflight agents
+              and blockers show here.
+            </Empty>
+          )}
+        </>
+      )}
+      {tab === 'prs' && (
+        <>
+          <PanelHead title="PRs & deploys" />
+          <section className="block">
+            <h3 className="block-title">
+              Pull requests <span className="num count">{prs.length}</span>
+            </h3>
+            <ul className="dashboard-list rows">
+              {prs.map((pr) => (
+                <li key={`${pr.projectId}:${pr.number}`} className="row row-2">
+                  <span className="row-main">
+                    <ExternalLink url={pr.url}>
+                      <span className="num">#{pr.number}</span> {pr.title}
+                    </ExternalLink>
+                  </span>
+                  <span className={`dashboard-chip ci ci-${pr.ci}`}>
+                    <Icon name={pr.ci === 'failure' ? 'x' : pr.ci === 'success' ? 'check' : 'ci'} />
+                    CI {pr.ci}
+                  </span>
+                  <span className="row-meta">
+                    {projectButton(pr.projectId)} · {pr.state}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {!snapshot.prs.length && (
+              <Empty quiet icon="merge" title="No pull requests.">
+                Fleet reads PRs and CI with your GitHub token. Run fleet doctor to check it.
+              </Empty>
+            )}
+          </section>
+          <section className="block">
+            <h3 className="block-title">Releases</h3>
+            <ul className="dashboard-list rows">
+              {[...snapshot.releases]
+                .sort((a, b) => b.publishedAt - a.publishedAt)
+                .map((release) => (
+                  <li key={`${release.projectId}:${release.tag}`} className="row">
+                    <span className="row-main">
+                      <ExternalLink url={release.url}>
+                        <span className="num">{release.tag}</span> · {release.name}
+                      </ExternalLink>
+                    </span>
+                    <span className="row-meta">{projectButton(release.projectId)}</span>
+                    <time className="num row-num" dateTime={new Date(release.publishedAt).toISOString()}>
+                      {relativeTime(release.publishedAt, now)}
+                    </time>
+                  </li>
+                ))}
+            </ul>
+            {!snapshot.releases.length && <p className="dashboard-empty quiet">No releases published yet.</p>}
+          </section>
+          <section className="block">
+            <h3 className="block-title">Deploys</h3>
+            <ul className="dashboard-list rows">
+              {[...snapshot.deploys]
+                .sort((a, b) => b.createdAt - a.createdAt)
+                .map((deploy) => (
+                  <li key={`${deploy.projectId}:${deploy.id}`} className="row">
+                    <span className="row-main">
+                      <ExternalLink url={deploy.url}>{deploy.environment}</ExternalLink>
+                      <span className="row-meta"> · {projectButton(deploy.projectId)}</span>
+                    </span>
+                    <span className={`dashboard-chip deploy-${deploy.state}`}>{deploy.state}</span>
+                    <time className="num row-num" dateTime={new Date(deploy.createdAt).toISOString()}>
+                      {relativeTime(deploy.createdAt, now)}
+                    </time>
+                  </li>
+                ))}
+            </ul>
+            {!snapshot.deploys.length && (
+              <p className="dashboard-empty quiet">
+                No deploys. Connect Vercel in the collector config to see them.
+              </p>
+            )}
+          </section>
+        </>
+      )}
+      {tab === 'alerts' && (
+        <>
+          <PanelHead title="Alerts" meta={`${urgent.length} waiting on you`}>
+            {alerts.length > 1 && onDismissAlerts && (
+              <button
+                type="button"
+                className="btn btn-quiet btn-sm"
+                onClick={() => onDismissAlerts(alerts.map((alert) => alert.id))}
+              >
+                <Icon name="check" />
+                Clear all
+              </button>
+            )}
+          </PanelHead>
+          {blocked.length > 0 && (
+            <section className="block">
+              <h3 className="block-title">Blocked</h3>
+              {blocked.map((project) => (
+                <article className="blocked" key={project.id}>
+                  <h4>
+                    <Icon name="blocked" />
+                    {projectButton(project.id)} <span className="row-meta">army {project.orch!.phase}</span>
+                  </h4>
+                  <ul>
+                    {project.orch!.blocked.map((item, index) => (
+                      <li key={index}>{item}</li>
+                    ))}
+                    {project
+                      .orch!.tasks.filter((task) => task.state === 'blocked')
+                      .map((task) => (
+                        <li key={task.id}>
+                          <span className="num">{task.id}</span> · {task.slug}
+                        </li>
+                      ))}
+                  </ul>
+                </article>
+              ))}
+            </section>
+          )}
+          {waiting.length > 0 && (
+            <section className="block">
+              <h3 className="block-title">
+                Waiting on you <span className="num count">{waiting.length}</span>
+              </h3>
+              <ul className="dashboard-list rows">
+                {waiting.map((session) => (
+                  <li
+                    key={session.id}
+                    className="alert-row waiting-row"
+                    data-selected={selected('session', session.id)}
+                  >
+                    <Icon name="waiting" />
+                    <div className="alert-text">
                       <button
                         type="button"
                         className="dashboard-link"
@@ -275,169 +773,60 @@ export default function Dashboard({ view, selection, onSelect, tab }: DashboardP
                       >
                         {session.title ?? session.id}
                       </button>
-                    </td>
-                    <td data-label="Model">
-                      <ModelChip model={session.model} />
-                    </td>
-                    <td data-label="Status">{session.status}</td>
-                    <td data-label="Last tool">
-                      {session.lastTool
-                        ? `${session.lastTool.name}${session.lastTool.target ? ` · ${session.lastTool.target}` : ''}`
-                        : '—'}
-                    </td>
-                    <td data-label="Tokens" title={totalTokens(session.tokens).toLocaleString('en-US')}>
-                      {formatCount(totalTokens(session.tokens))}
-                    </td>
-                    <td data-label="Cost">{formatCost(session.costUsd)}</td>
-                    <td data-label="Last activity">
-                      <time dateTime={new Date(session.lastActivity).toISOString()}>
-                        {relativeTime(session.lastActivity, now)}
-                      </time>
-                    </td>
-                  </tr>
+                      <small className="row-meta">
+                        {projectButton(session.projectId)} · <span className="num">{session.model}</span> ·
+                        waiting{' '}
+                        <time dateTime={new Date(session.lastActivity).toISOString()}>
+                          {relativeTime(session.lastActivity, now)}
+                        </time>
+                      </small>
+                    </div>
+                  </li>
                 ))}
-              </tbody>
-            </table>
-          </div>
-          {!snapshot.sessions.length && <p className="dashboard-empty">No sessions yet.</p>}
-        </>
-      )}
-      {tab === 'armies' && (
-        <>
-          <h2>Armies</h2>
-          {armies.map((project) => {
-            const run = project.orch!;
-            const landed = run.tasks.filter((task) => task.state === 'landed').length;
-            return (
-              <article className="dashboard-card dashboard-army" key={project.id}>
-                <div className="dashboard-card-heading">
-                  <h3>{projectButton(project.id)}</h3>
-                  <span className="dashboard-chip">{run.phase}</span>
-                </div>
-                <label className="dashboard-progress">
-                  {landed} / {run.tasks.length} tasks landed
-                  <progress value={landed} max={Math.max(1, run.tasks.length)} />
-                </label>
-                <TaskDag tasks={run.tasks} />
-                <h4>Inflight</h4>
-                <ul className="dashboard-list">
-                  {run.inflight.map((entry, index) => (
-                    <li key={`${entry.task}:${entry.role}:${index}`}>
-                      <span>
-                        {entry.task} · {entry.role} · {entry.agent}
-                      </span>
-                      <span>
-                        {entry.worktree} · started {entry.started}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-                {!run.inflight.length && <p className="dashboard-empty">No tasks inflight.</p>}
-              </article>
-            );
-          })}
-          {!armies.length && <p className="dashboard-empty">No orchestration projects.</p>}
-        </>
-      )}
-      {tab === 'prs' && (
-        <>
-          <h2>PRs &amp; Deploys</h2>
-          <h3>Pull requests</h3>
-          <ul className="dashboard-list">
-            {[...snapshot.prs]
-              .sort((a, b) => b.updatedAt - a.updatedAt)
-              .map((pr) => (
-                <li key={`${pr.projectId}:${pr.number}`}>
-                  <span>
-                    {projectButton(pr.projectId)} ·{' '}
-                    <ExternalLink url={pr.url}>
-                      #{pr.number} {pr.title}
-                    </ExternalLink>
-                  </span>
-                  <span>
-                    {pr.state} <span className={`dashboard-chip ci-${pr.ci}`}>CI {pr.ci}</span>
-                  </span>
-                </li>
-              ))}
-          </ul>
-          {!snapshot.prs.length && <p className="dashboard-empty">No pull requests.</p>}
-          <h3>Releases</h3>
-          <ul className="dashboard-list">
-            {[...snapshot.releases]
-              .sort((a, b) => b.publishedAt - a.publishedAt)
-              .map((release) => (
-                <li key={`${release.projectId}:${release.tag}`}>
-                  <span>
-                    {projectButton(release.projectId)} ·{' '}
-                    <ExternalLink url={release.url}>
-                      {release.tag} · {release.name}
-                    </ExternalLink>
-                  </span>
-                  <time dateTime={new Date(release.publishedAt).toISOString()}>
-                    {relativeTime(release.publishedAt, now)}
-                  </time>
-                </li>
-              ))}
-          </ul>
-          {!snapshot.releases.length && <p className="dashboard-empty">No releases.</p>}
-          <h3>Deploys</h3>
-          <ul className="dashboard-list">
-            {[...snapshot.deploys]
-              .sort((a, b) => b.createdAt - a.createdAt)
-              .map((deploy) => (
-                <li key={`${deploy.projectId}:${deploy.id}`}>
-                  <span>
-                    {projectButton(deploy.projectId)} ·{' '}
-                    <ExternalLink url={deploy.url}>{deploy.environment}</ExternalLink>
-                  </span>
-                  <span className={`dashboard-chip deploy-${deploy.state}`}>{deploy.state}</span>
-                  <time dateTime={new Date(deploy.createdAt).toISOString()}>
-                    {relativeTime(deploy.createdAt, now)}
-                  </time>
-                </li>
-              ))}
-          </ul>
-          {!snapshot.deploys.length && <p className="dashboard-empty">No deploys.</p>}
-        </>
-      )}
-      {tab === 'alerts' && (
-        <>
-          <h2>Alerts</h2>
-          <h3>Blocked items</h3>
-          {blocked.map((project) => (
-            <article className="dashboard-card" key={project.id}>
-              <h4>
-                {projectButton(project.id)} · {project.orch!.phase}
-              </h4>
-              <ul>
-                {project.orch!.blocked.map((item, index) => (
-                  <li key={index}>{item}</li>
-                ))}
-                {project
-                  .orch!.tasks.filter((task) => task.state === 'blocked')
-                  .map((task) => (
-                    <li key={task.id}>
-                      {task.id} · {task.slug}
-                    </li>
-                  ))}
               </ul>
-            </article>
-          ))}
-          {!blocked.length && <p className="dashboard-empty">No blocked items.</p>}
-          <h3>Active alerts</h3>
-          <ul className="dashboard-list">
-            {alerts.map((alert) => (
-              <li key={alert.id}>
-                <div>
-                  {projectButton(alert.projectId)} · <strong>{alert.title}</strong>
-                  <p>{alert.body}</p>
-                  <small>{alert.kind}</small>
-                </div>
-                <time dateTime={new Date(alert.at).toISOString()}>{relativeTime(alert.at, now)}</time>
-              </li>
-            ))}
-          </ul>
-          {!alerts.length && <p className="dashboard-empty">No active alerts.</p>}
+            </section>
+          )}
+          <section className="block">
+            <h3 className="block-title">
+              Active <span className="num count">{alerts.length}</span>
+            </h3>
+            <ul className="dashboard-list rows">
+              {alerts.map((alert) => (
+                <li key={alert.id} className="alert-row">
+                  <Icon name="alert" />
+                  <div className="alert-text">
+                    <strong>{alert.title}</strong>
+                    <p>{alert.body}</p>
+                    <small className="row-meta">
+                      {projectButton(alert.projectId)} · <span className="num">{alert.kind}</span> ·{' '}
+                      <time dateTime={new Date(alert.at).toISOString()}>{relativeTime(alert.at, now)}</time>
+                    </small>
+                  </div>
+                  {onDismissAlerts && (
+                    <button
+                      type="button"
+                      className="btn btn-quiet btn-sm"
+                      onClick={() => onDismissAlerts([alert.id])}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+            {!urgent.length && (
+              <div className="needs needs-calm">
+                <h2 className="needs-title">Nothing needs you.</h2>
+                <p className="needs-body">
+                  {lastAlert ? `Last alert ${relativeTime(lastAlert, now)}.` : 'No alerts recorded yet.'}{' '}
+                  Blocked agents, failed CI and spend spikes land here first.
+                </p>
+              </div>
+            )}
+            {!alerts.length && urgent.length > 0 && (
+              <p className="dashboard-empty quiet">No active alerts.</p>
+            )}
+          </section>
         </>
       )}
     </section>
