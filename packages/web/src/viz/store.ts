@@ -17,6 +17,8 @@ import {
   type Vec3,
 } from './layout';
 import { vizTheme, type VizTheme } from './theme';
+import type { Rect } from './labels';
+import type { TagRecord } from './Tags';
 
 export interface ProjectLayout {
   id: string;
@@ -95,6 +97,11 @@ export class SceneStore {
   botPos = new Map<string, THREE.Vector3>();
   /** active theme (colours for effects) */
   vt: VizTheme = vizTheme('dark');
+  /** projectId -> station tag, laid out together by TagLayout */
+  tags = new Map<string, TagRecord>();
+  /** DOM overlays over the canvas (legend, HUD, drawer), canvas px; sampled by TagLayout */
+  overlays: Rect[] = [];
+  overlaysAt = -Infinity;
   /**
    * projectId -> one-shot `alert` motion (DESIGN.md: one overshoot pulse, never looped).
    * kind 'needs' = blocked/waiting (signal orange), 'fail' = failure/CI red (danger).

@@ -29,8 +29,11 @@ import {
   layoutRadius,
   needsRefit,
 } from './layout';
+import { focusHeading } from './focusFrame';
+import { clearRect, viewOffsetFor } from './labels';
 import { Station, type StationData } from './Station';
 import { SceneStore, SceneStoreContext, useSceneStore } from './store';
+import { TagLayout } from './Tags';
 import { TaskSatellites } from './TaskSatellites';
 import { FONTS, VizThemeContext, useThemeName, useVizTheme, vizTheme, type VizTheme } from './theme';
 
@@ -232,6 +235,9 @@ const homeRel = new THREE.Vector3();
  */
 const DOLLY_SWING = 0.6;
 const DOLLY_PUSH = 0.07;
+/** neighbours considered when choosing a focus heading */
+const neighbourPts: { x: number; y: number; z: number }[] = [];
+const focusSph = new THREE.Spherical();
 
 function CameraRig({
   selection,
@@ -274,10 +280,15 @@ function CameraRig({
   const scrubAt = useRef(-Infinity);
   const push = useRef(0);
   const pushApplied = useRef(1);
+  /** applied setViewOffset shift (px): a focused target sits in the middle of the uncovered canvas */
+  const viewOff = useRef({ x: 0, y: 0 });
+  /** azimuth the focus eases to (keeps neighbours out from under the legend); null: not chosen yet */
+  const headingGoal = useRef<number | null>(null);
   const hasSelection = !!selection;
 
   useEffect(() => {
     focusStart.current = selKey ? store.t : -Infinity;
+    headingGoal.current = null;
     // deselect: ease back out to the harbour instead of staying parked at the old focus
     if (prevSel.current && !selKey) {
       homeStart.current = store.t;
@@ -315,10 +326,34 @@ function CameraRig({
     else pending.current = null;
   }, [framed, projectCount]);
 
-  useFrame((_, dtRaw) => {
+  useFrame(({ size }, dtRaw) => {
     const c = controls.current;
     if (!c) return;
     const dt = Math.min(dtRaw, 0.05);
+    // focus framing: shift the projection so the selection sits in the canvas area no overlay covers
+    const cam = camera as THREE.PerspectiveCamera;
+    if (cam.isPerspectiveCamera) {
+      const want = selection
+        ? viewOffsetFor(size.width, size.height, clearRect(size.width, size.height, store.overlays))
+        : { x: 0, y: 0 };
+      const k = store.reduced ? 1 : damp(4, dt);
+      const v = viewOff.current;
+      v.x += (want.x - v.x) * k;
+      v.y += (want.y - v.y) * k;
+      if (Math.abs(v.x) < 0.25 && Math.abs(v.y) < 0.25 && !selection) {
+        v.x = 0;
+        v.y = 0;
+        if (cam.view?.enabled) cam.clearViewOffset();
+      } else if (
+        !cam.view?.enabled ||
+        cam.view.fullWidth !== size.width ||
+        cam.view.fullHeight !== size.height ||
+        Math.abs(cam.view.offsetX - v.x) > 0.05 ||
+        Math.abs(cam.view.offsetY - v.y) > 0.05
+      ) {
+        cam.setViewOffset(size.width, size.height, v.x, v.y, size.width, size.height);
+      }
+    }
     const userActive = performance.now() - lastInteract.current < 8000;
     c.autoRotate = !store.reduced && !selection && !userActive;
     c.autoRotateSpeed = 0.22;
@@ -362,6 +397,35 @@ function CameraRig({
       if (focusing) {
         const want = focusDistance(selection?.kind ?? 'session', fitted.current ?? framed);
         offset.copy(camera.position).sub(c.target);
+        if (headingGoal.current === null && cam.isPerspectiveCamera) {
+          // once per focus: pick the heading that keeps neighbouring stations out from under overlays
+          neighbourPts.length = 0;
+          for (const l of store.layouts.values()) neighbourPts.push(l.pos);
+          focusSph.setFromVector3(offset);
+          headingGoal.current = focusHeading({
+            target: desired,
+            distance: want,
+            phi: focusSph.phi,
+            theta: focusSph.theta,
+            fov: cam.fov,
+            width: size.width,
+            height: size.height,
+            offset: viewOffsetFor(
+              size.width,
+              size.height,
+              clearRect(size.width, size.height, store.overlays),
+            ),
+            neighbours: neighbourPts,
+            avoid: store.overlays,
+          });
+        }
+        if (headingGoal.current !== null && Number.isFinite(headingGoal.current)) {
+          const theta = Math.atan2(offset.x, offset.z);
+          let turn = headingGoal.current - theta;
+          turn = Math.atan2(Math.sin(turn), Math.cos(turn));
+          const swing = store.reduced ? turn : turn * damp(2.4, dt);
+          if (Math.abs(swing) > 1e-5) offset.applyAxisAngle(UP, swing);
+        }
         const len = offset.length();
         const next = store.reduced ? want : THREE.MathUtils.lerp(len, want, damp(2.4, dt));
         if (len > 1e-4) offset.multiplyScalar(next / len);
@@ -407,6 +471,8 @@ function CameraRig({
         refitStart.current = -Infinity;
         // the user takes the camera: stop easing home so the rig never fights the drag
         homeStart.current = -Infinity;
+        // ...nor swings the focus heading under their hand
+        headingGoal.current = Number.NaN;
       }}
       onEnd={() => {
         lastInteract.current = performance.now();
@@ -530,6 +596,7 @@ function SceneContents({ view, selection, onSelect, detailCard = true }: FleetSc
           onSelect={selectProject}
         />
       ))}
+      <TagLayout compact={narrow} />
       {snap && <TaskSatellites snapshot={snap} onSelectProject={selectProject} />}
       <Bots
         entries={agents}
@@ -692,7 +759,7 @@ export default function FleetScene({ view: viewProp, selection, onSelect, detail
           </SceneStoreContext.Provider>
         </VizThemeContext.Provider>
       </Canvas>
-      <style>{`@media (min-width: 561px) { .fl-viz-tag[data-flip='1'] svg { transform: scaleX(-1); transform-origin: 0 100%; } .fl-viz-tag[data-flip='1'] .fl-viz-block { left: auto !important; right: 34px; text-align: right; } } @media (max-width: 560px) { .fl-viz-name { font-size: 11px !important; } .fl-viz-tag svg { display: none; } .fl-viz-block { left: 0 !important; bottom: 4px !important; transform: translateX(-50%); text-align: center; } .fl-viz-tag[data-needs='1'] .fl-viz-block { bottom: auto !important; top: 6px; } .fl-viz-sub[data-needs='0'] { display: none; } }`}</style>
+      <style>{`.fl-viz-tag[data-side^='left'] .fl-viz-block { text-align: right; } .fl-viz-tag[data-side='above'] .fl-viz-block, .fl-viz-tag[data-side='below'] .fl-viz-block { text-align: center; } @media (max-width: 560px) { .fl-viz-name { font-size: 11px !important; } .fl-viz-tag svg { display: none; } .fl-viz-sub[data-needs='0'] { display: none; } }`}</style>
       {/* depth: Halyard vignette + film grain (DOM, composited by the browser; no per-frame GPU cost) */}
       <div
         aria-hidden
@@ -711,7 +778,9 @@ export default function FleetScene({ view: viewProp, selection, onSelect, detail
         }}
       />
       {view.snapshot?.demo && (
-        <div style={{ ...overlayText(vt), top: 14, right: 16, color: vt.fgMuted }}>synthetic data</div>
+        <div data-fl-overlay style={{ ...overlayText(vt), top: 14, right: 16, color: vt.fgMuted }}>
+          synthetic data
+        </div>
       )}
       {(view.snapshot?.projects.length ?? 0) > 0 && <Legend vt={vt} />}
       {!view.snapshot && (

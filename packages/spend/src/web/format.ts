@@ -1,3 +1,4 @@
+import { formatLocalTime } from '@fleet/shared';
 import type { SpendBucket, SpendSummary } from '@fleet/shared';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -80,12 +81,11 @@ export function daysInMonth(y: number, m: number): number {
   return new Date(Date.UTC(y, m, 0)).getUTCDate();
 }
 
-/** HH:MM UTC, deterministic across server and client. */
-export function timeUtc(ms: number): string {
+/** "Oct 8, 17:31" in the viewer's local time zone (the stamp's UTC form goes in a tooltip). */
+export function stampLocal(ms: number): string {
   const d = new Date(ms);
-  const hh = String(d.getUTCHours()).padStart(2, '0');
-  const mm = String(d.getUTCMinutes()).padStart(2, '0');
-  return `${monthShort(d.getUTCMonth() + 1)} ${d.getUTCDate()}, ${hh}:${mm} UTC`;
+  if (!Number.isFinite(d.getTime())) return '';
+  return `${monthShort(d.getMonth() + 1)} ${d.getDate()}, ${formatLocalTime(ms)}`;
 }
 
 export function totalTokens(b: SpendBucket): number {

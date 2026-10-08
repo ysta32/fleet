@@ -1080,6 +1080,11 @@ time {
   padding: var(--fl-space-6) var(--fl-space-5);
   color: var(--fl-fg-muted);
 }
+/* dialogs take focus on open (tabindex=-1); the container itself never draws a ring */
+.dialog:focus,
+.dialog:focus-visible {
+  outline: none;
+}
 .dialog-head {
   display: flex;
   align-items: center;

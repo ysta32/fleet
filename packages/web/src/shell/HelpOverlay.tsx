@@ -5,12 +5,12 @@ import { useModal } from './modal';
 import { PushToggle } from '../push/PushToggle';
 
 export function HelpOverlay({ onClose, demo = false }: { onClose(): void; demo?: boolean }) {
-  const close = useRef<HTMLButtonElement>(null);
   const overlay = useRef<HTMLDivElement>(null);
   const dialog = useRef<HTMLDivElement>(null);
   useModal(dialog, overlay);
+  // focus lands on the dialog itself, so no control shows a ring until the keyboard moves it
   useEffect(() => {
-    close.current?.focus();
+    dialog.current?.focus({ preventScroll: true });
   }, []);
   const groups = [...new Set(KEYMAP.map((entry) => entry.group))];
   return (
@@ -19,12 +19,19 @@ export function HelpOverlay({ onClose, demo = false }: { onClose(): void; demo?:
       className="overlay"
       onMouseDown={(event) => event.target === event.currentTarget && onClose()}
     >
-      <div ref={dialog} className="dialog help" role="dialog" aria-modal="true" aria-labelledby="help-title">
+      <div
+        ref={dialog}
+        className="dialog help"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="help-title"
+        tabIndex={-1}
+      >
         <header className="dialog-head">
           <h2 id="help-title" className="dialog-title">
             Keyboard
           </h2>
-          <button ref={close} type="button" className="icon-button" aria-label="Close" onClick={onClose}>
+          <button type="button" className="icon-button" aria-label="Close" onClick={onClose}>
             <Icon name="close" />
           </button>
         </header>

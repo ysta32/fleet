@@ -135,3 +135,72 @@ export function dagScrollLeft(node: DagNode, layoutWidth: number, drawn: number,
   const centre = (node.x + DAG_NODE_W / 2) * scale;
   return Math.round(Math.min(drawn - viewport, Math.max(0, centre - viewport / 2)));
 }
+
+/** Column pitch and outer padding of dagLayout (viewBox units). */
+export const DAG_COL = 210;
+export const DAG_PAD = 24;
+/** Smallest scale the graph is drawn at: below it, node text stops being legible and the graph scrolls. */
+export const DAG_MIN_SCALE = 0.75;
+
+export interface DagFit {
+  /** px per viewBox unit */
+  scale: number;
+  /** true when the drawn graph is wider than the viewport */
+  scroll: boolean;
+  /** drawn size in px */
+  width: number;
+  height: number;
+  /** initial scrollLeft (0 when it fits) */
+  scrollLeft: number;
+}
+
+/**
+ * How to draw a task graph in a viewport `viewport` px wide. If the whole graph fits at
+ * DAG_MIN_SCALE or more it is scaled to fit (never enlarged past 1:1). Otherwise it scrolls at the
+ * scale that shows a whole number of columns exactly, and the window is snapped to column gaps
+ * with the focus column in the middle slot, so no node is cut at either edge.
+ */
+export function dagFit(layout: DagLayout, viewport: number, focus?: DagNode): DagFit {
+  const draw = (scale: number, scrollLeft = 0, scroll = false): DagFit => ({
+    scale,
+    scroll,
+    width: layout.width * scale,
+    height: layout.height * scale,
+    scrollLeft,
+  });
+  if (!(viewport > 0) || !(layout.width > 0)) return draw(1);
+  const fit = viewport / layout.width;
+  if (fit >= DAG_MIN_SCALE) return draw(Math.min(1, fit));
+  const visible = Math.max(1, Math.floor(viewport / (DAG_COL * DAG_MIN_SCALE)));
+  const scale = Math.min(1, Math.max(DAG_MIN_SCALE, viewport / (visible * DAG_COL)));
+  const columns = layout.nodes.reduce((max, node) => Math.max(max, node.layer + 1), 1);
+  const width = layout.width * scale;
+  const maxLeft = Math.max(0, width - viewport);
+  if (!focus) return draw(scale, 0, true);
+  const first = Math.min(
+    Math.max(0, columns - visible),
+    Math.max(0, focus.layer - Math.floor((visible - 1) / 2)),
+  );
+  // a window that starts at a column starts in the gap before that column's nodes
+  const left = first === 0 ? 0 : (first * DAG_COL + (DAG_PAD - (DAG_COL - DAG_NODE_W) / 2)) * scale;
+  return draw(scale, Math.round(Math.min(maxLeft, Math.max(0, left))), true);
+}
+
+/**
+ * Height (px) the graph needs to show every node at least partly inside the horizontal window
+ * [left, left + viewport]: a scrolled graph only reserves the rows it is showing, so a one-row
+ * stretch of a deep graph does not leave dead space under it. Never more than the whole graph.
+ */
+export function dagVisibleHeight(layout: DagLayout, scale: number, left: number, viewport: number): number {
+  const full = layout.height * scale;
+  if (!(viewport > 0) || !(scale > 0)) return full;
+  const right = left + viewport;
+  let bottom = 0;
+  for (const node of layout.nodes) {
+    const a = node.x * scale;
+    const b = (node.x + DAG_NODE_W) * scale;
+    if (b <= left || a >= right) continue;
+    bottom = Math.max(bottom, node.y + DAG_NODE_H + DAG_PAD);
+  }
+  return bottom > 0 ? Math.min(full, Math.ceil(bottom * scale)) : full;
+}

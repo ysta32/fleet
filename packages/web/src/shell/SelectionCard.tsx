@@ -35,6 +35,7 @@ function Drawer({
     <section
       ref={node}
       className="selection-card drawer"
+      data-fl-overlay
       role="dialog"
       aria-modal={modal ? true : undefined}
       aria-labelledby={`${id}-title`}

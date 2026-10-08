@@ -8,6 +8,9 @@ import {
   dagEdgePaths,
   dagFocusNode,
   dagScrollLeft,
+  dagFit,
+  dagVisibleHeight,
+  DAG_MIN_SCALE,
   roundedPath,
 } from './dag';
 
@@ -152,5 +155,83 @@ describe('dag focus and scroll', () => {
     expect(dagScrollLeft(b, layout.width, layout.width, 300)).toBe(Math.round(b.x + DAG_NODE_W / 2 - 150));
     // fits: no scroll
     expect(dagScrollLeft(d, layout.width, 200, 300)).toBe(0);
+  });
+});
+
+describe('dagFit (M9)', () => {
+  const chain = (n: number, blockedAt = -1) =>
+    Array.from({ length: n }, (_, i) =>
+      task(`t${i}`, i ? [`t${i - 1}`] : [], i === blockedAt ? 'blocked' : 'queued'),
+    );
+
+  it('scales to fit when the whole graph fits at DAG_MIN_SCALE or more, never above 1:1', () => {
+    const layout = dagLayout(chain(2));
+    const wide = dagFit(layout, layout.width + 200);
+    expect(wide).toMatchObject({ scale: 1, scroll: false, scrollLeft: 0 });
+    const snug = dagFit(layout, Math.ceil(layout.width * 0.8));
+    expect(snug.scroll).toBe(false);
+    expect(snug.scale).toBeGreaterThanOrEqual(DAG_MIN_SCALE);
+    expect(snug.width).toBeLessThanOrEqual(Math.ceil(layout.width * 0.8));
+    // the card follows the drawn content: height scales with the graph, no fixed box
+    expect(snug.height).toBeCloseTo(layout.height * snug.scale);
+  });
+
+  it('scrolls below DAG_MIN_SCALE, with the focus node whole and no node cut at either edge', () => {
+    for (const viewport of [300, 368, 480, 640]) {
+      for (let blocked = 0; blocked < 8; blocked++) {
+        const layout = dagLayout(chain(8, blocked));
+        const focus = dagFocusNode(layout)!;
+        const fit = dagFit(layout, viewport, focus);
+        expect(fit.scroll).toBe(true);
+        expect(fit.scale).toBeGreaterThanOrEqual(DAG_MIN_SCALE);
+        expect(fit.scale).toBeLessThanOrEqual(1);
+        const left = fit.scrollLeft;
+        const right = left + viewport;
+        expect(left).toBeGreaterThanOrEqual(0);
+        expect(left).toBeLessThanOrEqual(Math.max(0, fit.width - viewport) + 0.5);
+        const fx0 = focus.x * fit.scale;
+        expect(fx0).toBeGreaterThanOrEqual(left - 0.5);
+        expect(fx0 + DAG_NODE_W * fit.scale).toBeLessThanOrEqual(right + 0.5);
+        // whole-column windows are exact whenever the column scale is not clamped at 1:1
+        if (fit.scale < 1)
+          for (const node of layout.nodes) {
+            const a = node.x * fit.scale;
+            const b = (node.x + DAG_NODE_W) * fit.scale;
+            const inside = a >= left - 0.5 && b <= right + 0.5;
+            const outside = b <= left + 0.5 || a >= right - 0.5;
+            expect(inside || outside).toBe(true);
+          }
+      }
+    }
+  });
+
+  it('keeps the focus column in the middle slot when there is room on both sides', () => {
+    const layout = dagLayout(chain(9, 4));
+    const focus = dagFocusNode(layout)!;
+    const fit = dagFit(layout, 3 * 210 * 0.8, focus);
+    const mid = (focus.x + DAG_NODE_W / 2) * fit.scale - fit.scrollLeft;
+    expect(Math.abs(mid - (3 * 210 * 0.8) / 2)).toBeLessThan(30);
+  });
+
+  it('does not scroll before the viewport is measured', () => {
+    const layout = dagLayout(chain(8, 3));
+    expect(dagFit(layout, 0, dagFocusNode(layout))).toMatchObject({ scale: 1, scroll: false, scrollLeft: 0 });
+  });
+});
+
+describe('dagVisibleHeight (M9 dead space)', () => {
+  // a: one row at layer 0; b, c, d fan out under a; e depends on b only
+  const tasks = [task('a'), task('b', ['a']), task('c', ['a']), task('d', ['a']), task('e', ['b'])];
+  const layout = dagLayout(tasks);
+  it('reserves only the rows in the horizontal window', () => {
+    const scale = 0.8;
+    const col0 = dagVisibleHeight(layout, scale, 0, 180 * scale);
+    expect(col0).toBe(Math.ceil((24 + DAG_NODE_H + 24) * scale));
+    const col1 = dagVisibleHeight(layout, scale, 210 * scale, 180 * scale);
+    expect(col1).toBe(Math.ceil(layout.height * scale));
+  });
+  it('falls back to the full height when nothing is measured or in view', () => {
+    expect(dagVisibleHeight(layout, 1, 0, 0)).toBe(layout.height);
+    expect(dagVisibleHeight(layout, 1, 5000, 300)).toBe(layout.height);
   });
 });

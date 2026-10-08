@@ -473,7 +473,7 @@ function Shell() {
         </ErrorBoundary>
         {firstRun && <Onboarding />}
         {snapshot && !firstRun && (
-          <div className="stage-hud" aria-hidden="true">
+          <div className="stage-hud" aria-hidden="true" data-fl-overlay>
             <span className="micro">Harbour</span>
             <span className="hud-meta">
               {snapshot.projects.length} {snapshot.projects.length === 1 ? 'project' : 'projects'} ·{' '}

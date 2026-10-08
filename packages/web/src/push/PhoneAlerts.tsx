@@ -8,12 +8,12 @@ import { PushToggle } from './PushToggle';
  * bottom sheet, like the More sheet it is usually opened from.
  */
 export function PhoneAlerts({ onClose, demo = false }: { onClose(): void; demo?: boolean }) {
-  const close = useRef<HTMLButtonElement>(null);
   const overlay = useRef<HTMLDivElement>(null);
   const dialog = useRef<HTMLDivElement>(null);
   useModal(dialog, overlay);
+  // focus lands on the dialog itself, so no control shows a ring until the keyboard moves it
   useEffect(() => {
-    close.current?.focus();
+    dialog.current?.focus({ preventScroll: true });
   }, []);
   return (
     <div
@@ -27,12 +27,13 @@ export function PhoneAlerts({ onClose, demo = false }: { onClose(): void; demo?:
         role="dialog"
         aria-modal="true"
         aria-labelledby="phone-alerts-title"
+        tabIndex={-1}
       >
         <header className="dialog-head">
           <h2 id="phone-alerts-title" className="dialog-title">
             Phone alerts
           </h2>
-          <button ref={close} type="button" className="icon-button" aria-label="Close" onClick={onClose}>
+          <button type="button" className="icon-button" aria-label="Close" onClick={onClose}>
             <Icon name="close" />
           </button>
         </header>

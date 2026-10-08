@@ -17,6 +17,7 @@ import {
   vec3,
 } from './layout';
 import { useSceneStore } from './store';
+import type { TagRecord } from './Tags';
 import { stationNeeds } from '../dashboard/model';
 import { FONTS, useVizTheme } from './theme';
 
@@ -131,11 +132,6 @@ const RAISE = 0.42;
 
 const tmpColor = new THREE.Color();
 const tmpOff = vec3();
-const tmpProj = new THREE.Vector3();
-/** keep station tags this far inside the canvas edge */
-const TAG_MARGIN = 8;
-/** horizontal reach of the leader hairline before the text block (matches the svg + block offset) */
-const TAG_LEAD = 34;
 /** first-load choreography: the harbour fades up station by station (cinematic, land easing) */
 export { INTRO_DELAY, INTRO_DUR, INTRO_STAGGER } from './layout';
 const ALERT_DUR = 0.64;
@@ -173,27 +169,43 @@ function StationImpl({
   const orbMat = useRef<THREE.MeshBasicMaterial>(null);
   const label = useRef<HTMLDivElement>(null);
   const block = useRef<HTMLDivElement | null>(null);
+  const leader = useRef<SVGPathElement>(null);
   const blockObs = useRef<ResizeObserver | null>(null);
+  const tagAnchor = useRef<THREE.Group>(null);
+  const tagBelow = useRef<THREE.Group>(null);
+  const mastLo = useRef<THREE.Group>(null);
+  const mastHi = useRef<THREE.Group>(null);
+  const ciLo = useRef<THREE.Group>(null);
+  const ciHi = useRef<THREE.Group>(null);
+  const postsOn = useRef({ needs, ci: d.ci !== 'none' });
+  postsOn.current = { needs, ci: d.ci !== 'none' };
+  const tagSize = useRef({ w: 0, h: 0 });
+  /** this station's tag in the scene-wide layout (TagLayout places every tag together) */
+  const tag = useRef<TagRecord | null>(null);
   // callback ref: drei mounts the Html children late, so observe the block whenever it appears
   const setBlock = useCallback((el: HTMLDivElement | null) => {
     blockObs.current?.disconnect();
     blockObs.current = null;
     block.current = el;
-    if (!el || typeof ResizeObserver === 'undefined') return;
+    if (!el) return;
+    const measure = (w: number, h: number) => {
+      tagSize.current = { w, h };
+      if (tag.current) {
+        tag.current.w = w;
+        tag.current.h = h;
+      }
+    };
+    measure(el.offsetWidth, el.offsetHeight);
+    if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver((entries) => {
       const e = entries[entries.length - 1];
-      if (e) blockW.current = e.borderBoxSize?.[0]?.inlineSize ?? e.contentRect.width;
+      if (!e) return;
+      const box = e.borderBoxSize?.[0];
+      measure(box?.inlineSize ?? e.contentRect.width, box?.blockSize ?? e.contentRect.height);
     });
     ro.observe(el);
     blockObs.current = ro;
   }, []);
-  const compactRef = useRef(compact);
-  compactRef.current = compact;
-  const tagAnchor = useRef<THREE.Group>(null);
-  const blockW = useRef(0);
-  const tagFlip = useRef(false);
-  const tagShift = useRef(0);
-  const tagHidden = useRef(false);
   const mast = useRef<THREE.Group>(null);
   const pennant = useRef<THREE.Mesh>(null);
   const raisedAt = useRef<number | null>(null);
@@ -247,7 +259,59 @@ function StationImpl({
     return new THREE.Vector3(o.x, o.y, o.z);
   }, [d, s]);
 
-  useFrame(({ camera, size }, dtRaw) => {
+  // register the tag once drei has mounted its DOM; keep its priority inputs current every render
+  const tagShown = d.labelled || needs || selected;
+  const busyRank = d.working + d.running;
+  if (tag.current) {
+    tag.current.needs = needs;
+    tag.current.selected = selected;
+    tag.current.busy = busyRank;
+    tag.current.index = d.index;
+    tag.current.eligible = tagShown;
+  }
+  useEffect(
+    () => () => {
+      blockObs.current?.disconnect();
+      if (tag.current && store.tags.get(d.id) === tag.current) store.tags.delete(d.id);
+      tag.current = null;
+    },
+    [store, d.id],
+  );
+
+  useFrame((_, dtRaw) => {
+    if (
+      !tag.current &&
+      label.current &&
+      block.current &&
+      leader.current &&
+      tagAnchor.current &&
+      tagBelow.current &&
+      mastLo.current &&
+      mastHi.current &&
+      ciLo.current &&
+      ciHi.current
+    ) {
+      tag.current = {
+        anchor: tagAnchor.current,
+        below: tagBelow.current,
+        posts: [
+          { lo: mastLo.current, hi: mastHi.current, on: () => postsOn.current.needs },
+          { lo: ciLo.current, hi: ciHi.current, on: () => postsOn.current.ci },
+        ],
+        root: label.current,
+        block: block.current,
+        leader: leader.current,
+        w: tagSize.current.w,
+        h: tagSize.current.h,
+        needs,
+        selected,
+        busy: busyRank,
+        index: d.index,
+        eligible: tagShown,
+        applied: { shown: false, x: NaN, y: NaN, side: '', d: '' },
+      };
+      store.tags.set(d.id, tag.current);
+    }
     const dt = store.reduced ? 0 : Math.min(dtRaw, 0.05);
     const t = store.t;
     // intro: fade up in layout order
@@ -260,43 +324,6 @@ function StationImpl({
     if (label.current && Math.abs(labelOp.current - ie) > 0.004) {
       labelOp.current = ie;
       label.current.style.opacity = String(ie);
-    }
-    // keep the tag inside the canvas: flip the leader to the other side, then nudge as a last resort
-    const lab = label.current;
-    const blk = block.current;
-    const anchor = tagAnchor.current;
-    // a tag whose station is off-screen (or behind the camera) hides instead of pinning to the edge
-    let offscreen = false;
-    if (lab && anchor) {
-      anchor.getWorldPosition(tmpProj).project(camera);
-      offscreen = !(tmpProj.z < 1 && Math.abs(tmpProj.x) <= 1 && Math.abs(tmpProj.y) <= 1);
-      if (offscreen !== tagHidden.current) {
-        tagHidden.current = offscreen;
-        lab.style.visibility = offscreen ? 'hidden' : '';
-      }
-    }
-    if (lab && blk && anchor && !offscreen && blockW.current > 0) {
-      const ax = (tmpProj.x * 0.5 + 0.5) * size.width;
-      const w = blockW.current;
-      const narrow = compactRef.current;
-      let flip = false;
-      let l: number;
-      if (narrow) l = ax - w / 2;
-      else {
-        flip = ax + TAG_LEAD + w > size.width - TAG_MARGIN && ax - TAG_LEAD - w >= TAG_MARGIN;
-        l = flip ? ax - TAG_LEAD - w : ax + TAG_LEAD;
-      }
-      const r = l + w;
-      const shift =
-        l < TAG_MARGIN ? TAG_MARGIN - l : r > size.width - TAG_MARGIN ? size.width - TAG_MARGIN - r : 0;
-      if (flip !== tagFlip.current) {
-        tagFlip.current = flip;
-        lab.dataset.flip = flip ? '1' : '0';
-      }
-      if (Math.abs(shift - tagShift.current) > 0.5) {
-        tagShift.current = shift;
-        blk.style.translate = shift ? `${shift}px 0` : '';
-      }
     }
     const activity = store.activityAt.get(d.id);
     const recent = activity === undefined ? 0 : Math.max(0, 1 - (t - activity) / 1.2);
@@ -350,11 +377,11 @@ function StationImpl({
       orbMat.current.color.copy(colors.ci).multiplyScalar(vt.gain(d.ci === 'none' ? 0.8 : 1.5));
   });
 
-  const tagPos: [number, number, number] = needs
-    ? compact
-      ? [0, -0.9 * s, 0]
-      : [0, 0.5 * s + MAST_H - 0.17, 0]
-    : [0, 0.55 * s, 0];
+  // the tag hangs off the mast top when it needs you (wide) or the station top; "below" is the
+  // narrow-viewport slot under the station, clear of the pennant
+  const tagPos: [number, number, number] =
+    needs && !compact ? [0, 0.5 * s + MAST_H - 0.17, 0] : [0, 0.55 * s, 0];
+  const belowPos: [number, number, number] = [0, -0.9 * s, 0];
   const click = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
     onSelect(d.id);
@@ -366,7 +393,6 @@ function StationImpl({
       : d.working > 0
         ? 'working'
         : 'idle';
-  const tagShown = d.labelled || needs || selected;
   // idle stations recede: their instruments draw at a lower level so live work leads the eye
   const awake = (d.orch && d.phase !== 'idle') || d.working > 0 || needs;
   const lineOp = vt.lineGain * (awake ? 1 : vt.dark ? 0.55 : 0.7);
@@ -502,6 +528,8 @@ function StationImpl({
 
         {/* CI / deploy beacon (only when there is a PR to report on) */}
         <group position={ciPos} visible={d.ci !== 'none'}>
+          <group ref={ciLo} position={[0, -0.8, 0]} />
+          <group ref={ciHi} position={[0, 0.72, 0]} />
           <lineSegments geometry={shared.pillar}>
             <lineBasicMaterial color={colors.line} transparent opacity={ink(0.3)} depthWrite={false} />
           </lineSegments>
@@ -510,31 +538,35 @@ function StationImpl({
           </mesh>
         </group>
 
-        {/* ATC-style data block: tag offset up-right of the target on a hairline leader */}
+        {/* ATC-style data block on a hairline leader; TagLayout picks the slot and draws the leader */}
         <group ref={tagAnchor} position={tagPos} />
+        <group ref={tagBelow} position={belowPos} />
+        <group ref={mastLo} position={[0, 0.5 * s, 0]} />
+        <group ref={mastHi} position={[0, 0.5 * s + MAST_H + 0.2, 0]} />
         <Html position={tagPos} zIndexRange={[20, 0]} style={{ pointerEvents: 'none', userSelect: 'none' }}>
           <div
             ref={label}
             className="fl-viz-tag"
             data-needs={needs ? '1' : '0'}
-            data-flip="0"
+            data-side="right"
             style={{
               position: 'absolute',
               left: 0,
-              bottom: 0,
+              top: 0,
+              width: 0,
+              height: 0,
               opacity: 0,
-              display: tagShown ? 'block' : 'none',
+              visibility: 'hidden',
             }}
           >
             <svg
-              width="30"
-              height="30"
-              viewBox="0 0 30 30"
-              style={{ position: 'absolute', left: 0, bottom: 0, overflow: 'visible' }}
+              width="1"
+              height="1"
+              style={{ position: 'absolute', left: 0, top: 0, overflow: 'visible' }}
               aria-hidden
             >
               <path
-                d="M0.5 29.5 L18 12 L30 12"
+                ref={leader}
                 fill="none"
                 stroke={needs ? vt.accent : selected ? vt.focus : vt.fgSubtle}
                 strokeWidth="1"
@@ -546,8 +578,8 @@ function StationImpl({
               className="fl-viz-block"
               style={{
                 position: 'absolute',
-                left: 34,
-                bottom: 10,
+                left: 0,
+                top: 0,
                 whiteSpace: 'nowrap',
                 fontFamily: FONTS.mono,
                 fontVariantNumeric: 'tabular-nums',
