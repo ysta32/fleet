@@ -410,9 +410,16 @@ describe('review regressions', () => {
       const res = spawnSync(
         process.execPath,
         [vitestBin, 'run', relative(root, thisFile), '-t', NOV_END_TEST, '--reporter', 'verbose'],
-        { cwd: root, env: { ...process.env, TZ: 'America/New_York' }, encoding: 'utf8', timeout: 60_000 },
+        {
+          cwd: root,
+          // CI forces color; plain output keeps the summary line matchable
+          env: { ...process.env, TZ: 'America/New_York', NO_COLOR: '1', FORCE_COLOR: '0' },
+          encoding: 'utf8',
+          timeout: 60_000,
+        },
       );
-      const out = `${res.stdout ?? ''}${res.stderr ?? ''}`;
+      // eslint-disable-next-line no-control-regex
+      const out = `${res.stdout ?? ''}${res.stderr ?? ''}`.replace(/\u001b\[[0-9;]*m/g, '');
       expect(res.status, out).toBe(0);
       // must have actually executed (not skipped / filtered out)
       expect(out).toMatch(/Tests\s+1 passed/);
