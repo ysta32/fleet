@@ -58,7 +58,7 @@ async function chromeBinary() {
  */
 function capture(chrome, args, screenshot, timeoutMs = 60_000) {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(chrome, args, { stdio: 'ignore' });
+    const child = spawn(chrome, args, { stdio: 'ignore', detached: true });
     let lastSize = -1;
     let settled = false;
     const finish = (error) => {
@@ -66,7 +66,11 @@ function capture(chrome, args, screenshot, timeoutMs = 60_000) {
       settled = true;
       clearInterval(poll);
       clearTimeout(timer);
-      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      try {
+        process.kill(-child.pid, 'SIGKILL'); // the whole group: GPU/renderer helpers too
+      } catch {
+        // already gone
+      }
       if (error) reject(error);
       else resolvePromise();
     };
