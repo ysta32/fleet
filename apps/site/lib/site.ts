@@ -7,7 +7,7 @@ export const SITE_URL =
 export const REPO_URL = 'https://github.com/ysta32/fleet';
 export const ACTIONS_URL = `${REPO_URL}/actions`;
 export const CI_BADGE_URL = `${REPO_URL}/actions/workflows/ci.yml/badge.svg`;
-export const INSTALL_CMD = 'npm i -g fleet-collector && fleet install';
+export const INSTALL_CMD = 'curl -fsSL https://raw.githubusercontent.com/ysta32/fleet/main/scripts/install.sh | bash';
 
 export const NAV = [
   { href: '/features', label: 'Features' },
