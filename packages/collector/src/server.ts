@@ -54,7 +54,7 @@ export type ExternalAlert = Omit<Alert, 'kind'> & { kind: 'spend.budget' };
 
 export type RedactSalt = string | Uint8Array;
 
-export const SERVER_VERSION = '1.1.1';
+export const SERVER_VERSION = '1.1.2';
 const SNAPSHOT_MIN_INTERVAL_MS = 2000;
 const PING_INTERVAL_MS = 15000;
 const DEFAULT_HISTORY_MS = 6 * 3600_000;
