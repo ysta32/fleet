@@ -145,7 +145,7 @@ try {
                 `--screenshot=${screenshot}`,
                 pathToFileURL(htmlPath).href,
               ],
-              { timeout: 60_000, stdio: 'pipe' },
+              { timeout: 60_000, killSignal: 'SIGKILL', stdio: 'pipe' },
             );
             const png = PNG.sync.read(await readFile(screenshot));
             if (png.width !== width || png.height !== (surface === 'page' ? 2400 : 1600)) {
