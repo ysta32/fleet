@@ -20,10 +20,9 @@ export default function Home() {
   return (
     <>
       {/* 1. Hook */}
-      <section className="hero fl-ink grain" aria-labelledby="hero-title">
+      <section className="hero grain" aria-labelledby="hero-title">
         <div className="hero-stage">
           <FleetStage
-            poster="/poster/fleet-1920.webp"
             posterAlt="A night harbour of glowing vessels: a synthetic fleet of Claude Code agents grouped by project"
           />
         </div>

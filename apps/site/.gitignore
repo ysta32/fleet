@@ -5,3 +5,4 @@ app/ink.generated.css
 public/island/
 *.tsbuildinfo
 lib/brand.generated.ts
+lib/spend.generated.tsx

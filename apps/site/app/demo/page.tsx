@@ -7,7 +7,7 @@ export const metadata = pageMeta('demo', 'Live demo', 'The real Fleet 3D view, r
 
 export default function Demo() {
   return (
-    <section className="demo-stage fl-ink" aria-labelledby="demo-title">
+    <section className="demo-stage" aria-labelledby="demo-title">
       <h1 id="demo-title" className="sr-only">
         Fleet live demo
       </h1>

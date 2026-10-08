@@ -14,7 +14,6 @@ export function DemoStage() {
     <>
       <FleetStage
         interactive
-        poster="/poster/fleet-1920.webp"
         posterAlt="Still render of the Fleet 3D view with a synthetic fleet"
         onState={setWhy}
       />

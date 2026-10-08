@@ -13,7 +13,8 @@ const SWATCHES = [
 ] as const;
 
 const SHOTS = [
-  ['/poster/fleet-1920.webp', 'Fleet 3D view, wide', 1920, 1080],
+  ['/poster/fleet-dark-1920.webp', 'Fleet 3D view, night (dark theme)', 1920, 1080],
+  ['/poster/fleet-light-1920.webp', 'Fleet 3D view, paper (light theme)', 1920, 1080],
   ['/poster/fleet-close-1280.webp', 'Fleet 3D view, close', 1280, 800],
 ] as const;
 

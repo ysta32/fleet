@@ -19,7 +19,7 @@ export function InboxPreview({ limit = 3 }: { limit?: number }) {
   return (
     <div>
       <div className="label-row" style={{ marginBottom: 'var(--fl-space-3)' }}>
-        <span className="label">Needs you</span>
+        <span className="label">Inbox</span>
         <span className="rule" />
         <span className="label">{String(inbox.length).padStart(2, '0')} open</span>
       </div>

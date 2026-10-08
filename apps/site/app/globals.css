@@ -725,7 +725,7 @@ kbd {
 .media-tag {
   position: absolute;
   left: var(--fl-space-3);
-  bottom: var(--fl-space-3);
+  top: var(--fl-space-3);
   padding: var(--fl-space-1) var(--fl-space-3);
   background: var(--fl-glass);
   backdrop-filter: blur(var(--fl-blur-sm));
@@ -1510,4 +1510,101 @@ pre.code .c {
   border: var(--fl-hairline) solid var(--fl-border);
   border-radius: var(--fl-radius-md);
   font-size: var(--fl-text-sm);
+}
+
+/* ---- Overnight digest embed: the package's scoped CSS, re-pointed at Halyard tokens ---- */
+.digest-frame {
+  margin: 0;
+  border: var(--fl-hairline) solid var(--fl-border);
+  border-radius: var(--fl-radius-lg);
+  background: var(--fl-surface-1);
+  box-shadow: var(--fl-elev-2);
+  overflow: hidden;
+}
+.digest-scroll {
+  max-height: min(78vh, 760px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: var(--fl-scrollbar) transparent;
+}
+.digest-scroll:focus-visible {
+  outline: var(--fl-focus-width) solid var(--fl-focus);
+  outline-offset: calc(-1 * var(--fl-focus-width));
+}
+.digest-cap {
+  padding: var(--fl-space-3) var(--fl-space-5);
+  border-top: var(--fl-hairline) solid var(--fl-border);
+  font: var(--fl-text-xs) / var(--fl-leading-normal) var(--fl-font-mono);
+  color: var(--fl-fg-muted);
+}
+.digest-frame .ovn-root {
+  --ovn-bg: var(--fl-surface-1);
+  --ovn-surface: var(--fl-bg);
+  --ovn-surface-2: var(--fl-surface-2);
+  --ovn-border: var(--fl-border);
+  --ovn-text: var(--fl-fg);
+  --ovn-muted: var(--fl-fg-muted);
+  --ovn-faint: var(--fl-fg-subtle);
+  --ovn-accent: var(--fl-accent);
+  --ovn-accent-soft: var(--fl-accent-soft);
+  --ovn-red: var(--fl-danger);
+  --ovn-red-soft: var(--fl-danger-soft);
+  --ovn-yellow: var(--fl-warn);
+  --ovn-yellow-soft: var(--fl-warn-soft);
+  --ovn-green: var(--fl-success);
+  --ovn-green-soft: var(--fl-success-soft);
+  --ovn-blue: var(--fl-info);
+  --ovn-blue-soft: var(--fl-accent-soft);
+  --ovn-agent: var(--fl-model-opus);
+  --ovn-agent-soft: var(--fl-accent-soft);
+  --ovn-quiet: var(--fl-fg-subtle);
+  --ovn-shadow: var(--fl-elev-1);
+  --ovn-radius: var(--fl-radius-md);
+  --ovn-font: var(--fl-font-sans);
+  --ovn-mono: var(--fl-font-mono);
+}
+
+/* ---- round 1 fixes ---- */
+.hero-copy {
+  grid-template-columns: minmax(0, 1fr);
+}
+.install code {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+@media (max-width: 520px) {
+  .install {
+    display: flex;
+    width: 100%;
+  }
+  .install code {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    padding-block: var(--fl-space-3);
+    line-height: var(--fl-leading-snug);
+  }
+}
+/* The scene reads left to right; keep the headline column clean of station labels. */
+.hero-shade {
+  background:
+    linear-gradient(to top, var(--fl-bg) 0%, color-mix(in srgb, var(--fl-bg) 90%, transparent) 30%, transparent 64%),
+    linear-gradient(
+      to right,
+      color-mix(in srgb, var(--fl-bg) 94%, transparent) 0%,
+      color-mix(in srgb, var(--fl-bg) 84%, transparent) clamp(380px, 38%, 800px),
+      transparent clamp(600px, 58%, 1180px)
+    );
+}
+/* Narrow screens: the scene owns the top of the hero, the words own the bottom. */
+@media (max-width: 720px) {
+  .hero-stage {
+    bottom: auto;
+    height: 58%;
+  }
+  .hero-shade {
+    background: linear-gradient(to top, var(--fl-bg) 0%, var(--fl-bg) 46%, transparent 74%);
+  }
+  .hero-copy {
+    padding-top: 46svh;
+  }
 }

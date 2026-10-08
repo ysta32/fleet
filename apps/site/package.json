@@ -8,7 +8,9 @@
     "build": "next build",
     "dev": "node scripts/prebuild.mjs && next dev -p 4530",
     "preview": "node scripts/serve.mjs 4530",
-    "typecheck": "tsc --noEmit -p ."
+    "typecheck": "tsc --noEmit -p .",
+    "assets": "node scripts/prebuild.mjs && node scripts/assets.mjs",
+    "postbuild": "node scripts/check-out.mjs"
   },
   "dependencies": {
     "@fleet/shared": "0.1.0",
@@ -22,6 +24,7 @@
     "@types/react": "18.3.12",
     "@types/react-dom": "18.3.1",
     "vite": "5.4.11",
-    "@vitejs/plugin-react": "4.3.4"
+    "@vitejs/plugin-react": "4.3.4",
+    "sharp": "0.34.5"
   }
 }
