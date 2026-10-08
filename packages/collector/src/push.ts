@@ -183,7 +183,7 @@ export class PushManager {
       subscriptions.map(async (sub) => {
         try {
           await webPush.sendNotification(sub, payload, {
-            vapidDetails: { subject: 'mailto:fleet@localhost', ...keys },
+            vapidDetails: { subject: 'https://github.com/ysta32/fleet', ...keys },
             TTL: 300,
             timeout: 10_000,
           });
