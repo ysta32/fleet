@@ -33,22 +33,24 @@ export default function Home() {
         <div className="hero-horizon" aria-hidden="true" />
         <div className="hero-shade" aria-hidden="true" />
         <div className="wrap hero-copy">
-          <p className="label">Local mission control for Claude Code</p>
-          <h1 id="hero-title" className="display display-xl">
+          <p className="label" data-keepout>
+            Local mission control for Claude Code
+          </p>
+          <h1 id="hero-title" className="display display-xl" data-keepout>
             One of your agents is <em className="hero-sync">waiting on you.</em>
           </h1>
-          <p className="lead">
+          <p className="lead" data-keepout>
             Fleet watches every Claude Code session on your Mac and raises one signal, here and on your phone,
             the moment an agent stops for you.
           </p>
-          <div className="hero-actions">
+          <div className="hero-actions" data-keepout="children">
             <InstallCommand cmd={INSTALL_CMD} />
             <Link className="link-arrow" href="/demo">
               Open the live demo <Icon name="chevron" />
             </Link>
           </div>
         </div>
-        <div className="wrap hero-meta">
+        <div className="wrap hero-meta" data-keepout>
           <span className="label">
             <span className="live-dot" aria-hidden="true" />
             Real WebGL render · synthetic fleet

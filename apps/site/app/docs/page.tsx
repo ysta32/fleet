@@ -1,5 +1,6 @@
 import { CodeBlock } from '@/components/CodeBlock';
 import { DocToc } from '@/components/DocToc';
+import { Icon } from '@/components/Icon';
 import { PageHead } from '@/components/PageHead';
 import { INSTALL_CMD, REPO_URL, pageMeta } from '@/lib/site';
 
@@ -50,10 +51,36 @@ const CONFIG = [
   ['allowedHosts', 'none', 'Extra Host names accepted in LAN mode, for example your-mac.tailnet.ts.net.'],
 ] as const;
 
+/** The setup path, in the order the page walks it: each step is one section below. */
+const PATH = [
+  ['install', 'Install', 'One command. The collector starts at login.'],
+  ['cli', 'Check', 'fleet doctor checks Node, transcripts, gh and the port.'],
+  ['phone', 'Phone', 'Reach the dashboard over Tailscale with your token.'],
+  ['notifications', 'Alerts', 'Get the five alert kinds on your phone with ntfy.'],
+] as const;
+
 export default function Docs() {
   return (
     <>
       <PageHead
+        aside={
+          <nav aria-label="Setup path">
+            <ol className="feature-index">
+              {PATH.map(([id, label, line], i) => (
+                <li key={id}>
+                  <a href={`#${id}`}>
+                    <span className="num">{String(i + 1).padStart(2, '0')}</span>
+                    <span>
+                      <b>{label}</b>
+                      <span>{line}</span>
+                    </span>
+                    <Icon name="chevron" />
+                  </a>
+                </li>
+              ))}
+            </ol>
+          </nav>
+        }
         label="Docs"
         title={
           <>

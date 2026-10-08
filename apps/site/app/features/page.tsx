@@ -1,3 +1,4 @@
+import { Fragment } from 'react';
 import Link from 'next/link';
 import { Icon } from '@/components/Icon';
 import { OptionalSections } from '@/components/Optional';
@@ -18,6 +19,14 @@ const FEATURES = [
   { label: 'Sessions and cost', line: 'Tokens and dollars per session, priced per model' },
   { label: 'Phone and alerts', line: 'macOS and ntfy alerts, to a topic you own' },
   { label: 'GitHub and replay', line: 'PR and CI state, and a tape of the last hours' },
+] as const;
+/** The five alert kinds (config notify.kinds, all on by default) and what raises each one. */
+const ALERT_KINDS = [
+  ['session.waiting', 'An agent stopped to ask you something.'],
+  ['army.blocked', 'An army cannot go on without you.'],
+  ['army.done', 'An army finished its plan.'],
+  ['ci.failed', 'Checks failed on a pull request Fleet watches.'],
+  ['deploy.failed', 'A deployment failed.'],
 ] as const;
 const featureId = (label: string) => `f-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
 
@@ -110,7 +119,25 @@ export default function Features() {
           ]}
           flip
         >
-          <PhonePreview />
+          <div className="phone-pair">
+            <PhonePreview />
+            <div className="panel">
+              <span className="label">notify.kinds</span>
+              <dl className="keys" style={{ marginTop: 'var(--fl-space-4)' }}>
+                {ALERT_KINDS.map(([kind, what]) => (
+                  <Fragment key={kind}>
+                    <dt>
+                      <code>{kind}</code>
+                    </dt>
+                    <dd>{what}</dd>
+                  </Fragment>
+                ))}
+              </dl>
+              <p className="caption" style={{ marginTop: 'var(--fl-space-4)' }}>
+                One push per incident. macOS notifications are on by default; ntfy once you set a topic.
+              </p>
+            </div>
+          </div>
         </Feature>
         <Feature
           label={FEATURES[4].label}

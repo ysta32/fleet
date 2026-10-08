@@ -111,14 +111,14 @@ const NEEDS_ANCHOR = () => {
   return { x: r.left / innerWidth, y: r.bottom / innerHeight };
 };
 
-async function renderScene(browser, { theme, width, height, settleMs, scale = 1 }) {
+async function renderScene(browser, { theme, width, height, settleMs, scale = 1, frame = false }) {
   const html = `<!doctype html><html data-theme="${theme}"><head><meta charset="utf-8">
 <link rel="stylesheet" href="${FONTS_CSS}">
 <style>html,body{margin:0;height:100%;overflow:hidden}#h{position:fixed;inset:0}</style></head>
 <body><div id="h"></div><script type="module">
 import { mount } from '/island/fleet-scene.js';
 await document.fonts.ready;
-mount(document.getElementById('h'), { world: ${JSON.stringify(world)}, onReady: () => { window.__ready = true; } });
+mount(document.getElementById('h'), { world: ${JSON.stringify(world)}, frame: ${frame}, onReady: () => { window.__ready = true; } });
 </script></body></html>`;
   const { page, ctx, errors } = await newPage(
     browser,
@@ -149,7 +149,14 @@ async function posters(browser) {
     return { x: r(a.x), y: r(a.y) };
   };
   for (const theme of ['dark', 'light']) {
-    const { png, anchor } = await renderScene(browser, { theme, width: 1920, height: 1080, settleMs: 7000 });
+    // the hero posters use the hero's camera framing (island `frame`), so the live scene takes over in place
+    const { png, anchor } = await renderScene(browser, {
+      theme,
+      width: 1920,
+      height: 1080,
+      settleMs: 7000,
+      frame: true,
+    });
     anchors[`${theme}-wide`] = need(anchor, `poster ${theme}`);
     for (const w of [768, 1280, 1920]) {
       await sharp(png)
@@ -157,7 +164,14 @@ async function posters(browser) {
         .webp({ quality: w <= 768 ? 70 : 74, effort: 6 })
         .toFile(path.join(pub, `poster/fleet-${theme}-${w}.webp`));
     }
-    const phone = await renderScene(browser, { theme, width: 420, height: 420, scale: 3, settleMs: 7000 });
+    const phone = await renderScene(browser, {
+      theme,
+      width: 420,
+      height: 420,
+      scale: 3,
+      settleMs: 7000,
+      frame: true,
+    });
     anchors[`${theme}-m`] = need(phone.anchor, `phone poster ${theme}`);
     await sharp(phone.png)
       .webp({ quality: 70, effort: 6 })

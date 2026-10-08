@@ -9,6 +9,7 @@ interface Island {
     opts: {
       world?: { seed: number; now: number };
       interactive?: boolean;
+      frame?: boolean;
       onReady?: () => void;
     },
   ): { unmount(): void };
@@ -22,6 +23,11 @@ const POSTER_WIDTHS = [768, 1280, 1920] as const;
 const srcSet = (t: Theme) => POSTER_WIDTHS.map((w) => `/poster/fleet-${t}-${w}.webp ${w}w`).join(', ');
 /** Square 840px phone poster (scripts/assets.mjs: public/poster/fleet-<theme>-m.webp). */
 const phonePoster = (t: Theme) => `/poster/fleet-${t}-m.webp`;
+/** Mirrors the <picture> sources below for a visitor on the system scheme (the common case and Lighthouse's). */
+const POSTER_PRELOADS = (['light', 'dark'] as const).flatMap((t) => [
+  { media: `(max-width: 720px) and (prefers-color-scheme: ${t})`, href: phonePoster(t) },
+  { media: `(min-width: 721px) and (prefers-color-scheme: ${t})`, srcSet: srcSet(t) },
+]);
 
 /**
  * The scene follows html[data-theme], else the system scheme. The <picture> covers the system case
@@ -92,6 +98,44 @@ const ANCHOR_VARS = Object.fromEntries(
   ]),
 ) as React.CSSProperties;
 
+/** Clearance (px) a station tag keeps from the hero copy. */
+const KEEPOUT_PAD = 14;
+
+/**
+ * Keeps the scene's station tags out of the words: a tag whose text block would sit over a [data-keepout]
+ * element of the section (eyebrow, headline, lead, meta row; for a [data-keepout="children"] row, each of its
+ * items: install box, demo link) or in the top band under the header fades out (data-occluded, globals.css). The waiting station's tag is never hidden; the
+ * camera framing keeps it clear. All reads happen before any write, so this costs one layout per frame.
+ */
+function keepLabelsClear(tags: HTMLElement[], section: Element, stage: DOMRect) {
+  const zones = [
+    ...section.querySelectorAll(
+      '[data-keepout]:not([data-keepout="children"]), [data-keepout="children"] > *',
+    ),
+  ].map((el) => el.getBoundingClientRect());
+  const band = stage.top + Math.min(80, stage.height * 0.14);
+  const hits = tags.map((tag) => {
+    if (tag.dataset.needs === '1') return false;
+    const b = (tag.querySelector('.fl-viz-block') ?? tag).getBoundingClientRect();
+    if (b.width === 0 && b.height === 0) return false;
+    if (b.top < band) return true;
+    return zones.some(
+      (z) =>
+        b.left < z.right + KEEPOUT_PAD &&
+        b.right > z.left - KEEPOUT_PAD &&
+        b.top < z.bottom + KEEPOUT_PAD &&
+        b.bottom > z.top - KEEPOUT_PAD,
+    );
+  });
+  tags.forEach((tag, i) => {
+    const want = hits[i] ? '1' : undefined;
+    if (tag.dataset.occluded !== want) {
+      if (want) tag.dataset.occluded = want;
+      else delete tag.dataset.occluded;
+    }
+  });
+}
+
 /**
  * Follows the live scene's waiting station: its tag anchor (the signal pennant), measured each frame in the
  * stage's own, untransformed coordinates and handed to the stylesheet, which frames it and raises the beacon.
@@ -106,14 +150,17 @@ function trackSignal(stage: HTMLElement, frame: HTMLElement, host: HTMLElement):
     if (visible && !raf) raf = requestAnimationFrame(step);
   });
   io.observe(stage);
+  const section = stage.closest('section') ?? document.body;
   function step() {
     raf = 0;
     if (!visible) return;
-    const tag = [...host.querySelectorAll<HTMLElement>('.fl-viz-tag[data-needs="1"]')].find(
+    const tags = [...host.querySelectorAll<HTMLElement>('.fl-viz-tag')].filter(
       (el) => el.style.visibility !== 'hidden' && el.style.display !== 'none',
     );
+    const tag = tags.find((el) => el.dataset.needs === '1');
     const sr = stage.getBoundingClientRect();
     const fr = frame.getBoundingClientRect();
+    keepLabelsClear(tags, section, sr);
     if (tag && sr.width > 0 && fr.width > 0) {
       const z = fr.width / sr.width;
       const r = tag.getBoundingClientRect();
@@ -191,6 +238,7 @@ export function FleetStage({
           handle = mod.mount(el, {
             world,
             interactive,
+            frame: signal,
             onReady: () => {
               if (!disposed) {
                 setReady(true);
@@ -218,51 +266,64 @@ export function FleetStage({
       mq.removeEventListener('change', onChange);
       handle?.unmount();
     };
-  }, [interactive]);
+  }, [interactive, signal]);
 
   return (
-    <div
-      ref={stage}
-      className="stage"
-      data-signal={signal ? 'poster' : undefined}
-      style={signal ? ANCHOR_VARS : undefined}
-    >
-      <div ref={frame} className="stage-frame">
-        <picture>
-          {/* Phones get a square still rendered at phone size, so its station labels stay legible. */}
-          {forced ? null : (
-            <source
-              media="(max-width: 720px) and (prefers-color-scheme: light)"
-              srcSet={phonePoster('light')}
+    <>
+      {/* The poster is the LCP element: fetch the one this viewport and scheme will show first, at high priority,
+          from the head (React hoists these), before the fonts and scripts compete for the connection. */}
+      {POSTER_PRELOADS.map((p) => (
+        <link
+          key={p.media}
+          rel="preload"
+          as="image"
+          media={p.media}
+          {...('href' in p ? { href: p.href } : { imageSrcSet: p.srcSet, imageSizes: '100vw' })}
+          fetchPriority="high"
+        />
+      ))}
+      <div
+        ref={stage}
+        className="stage"
+        data-signal={signal ? 'poster' : undefined}
+        style={signal ? ANCHOR_VARS : undefined}
+      >
+        <div ref={frame} className="stage-frame">
+          <picture>
+            {/* Phones get a square still rendered at phone size, so its station labels stay legible. */}
+            {forced ? null : (
+              <source
+                media="(max-width: 720px) and (prefers-color-scheme: light)"
+                srcSet={phonePoster('light')}
+              />
+            )}
+            <source media="(max-width: 720px)" srcSet={phonePoster(forced ?? 'dark')} />
+            {forced ? null : (
+              <source media="(prefers-color-scheme: light)" srcSet={srcSet('light')} sizes="100vw" />
+            )}
+            <img
+              className="hero-poster"
+              src={`/poster/fleet-${forced ?? 'dark'}-1920.webp`}
+              srcSet={srcSet(forced ?? 'dark')}
+              sizes="100vw"
+              alt={posterAlt}
+              fetchPriority="high"
+              width={1920}
+              height={1080}
+              aria-hidden={ready ? true : undefined}
             />
-          )}
-          <source media="(max-width: 720px)" srcSet={phonePoster(forced ?? 'dark')} />
-          {forced ? null : (
-            <source media="(prefers-color-scheme: light)" srcSet={srcSet('light')} sizes="100vw" />
-          )}
-          <img
-            className="hero-poster"
-            src={`/poster/fleet-${forced ?? 'dark'}-1920.webp`}
-            srcSet={srcSet(forced ?? 'dark')}
-            sizes="100vw"
-            alt={posterAlt}
-            fetchPriority="high"
-            decoding="async"
-            width={1920}
-            height={1080}
-            aria-hidden={ready ? true : undefined}
-          />
-        </picture>
-        <div ref={host} className="hero-live" data-ready={ready} aria-hidden={!interactive} />
+          </picture>
+          <div ref={host} className="hero-live" data-ready={ready} aria-hidden={!interactive} />
+        </div>
+        {signal ? (
+          <span className="beacon" aria-hidden="true">
+            <span className="beacon-beam" />
+            <span className="beacon-ring" />
+            <span className="beacon-ring beacon-ring-2" />
+            <span className="beacon-core" />
+          </span>
+        ) : null}
       </div>
-      {signal ? (
-        <span className="beacon" aria-hidden="true">
-          <span className="beacon-beam" />
-          <span className="beacon-ring" />
-          <span className="beacon-ring beacon-ring-2" />
-          <span className="beacon-core" />
-        </span>
-      ) : null}
-    </div>
+    </>
   );
 }

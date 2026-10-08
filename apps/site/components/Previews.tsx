@@ -72,7 +72,9 @@ export function SessionsPreview({ rows = 5 }: { rows?: number }) {
           <thead>
             <tr>
               <th scope="col">Project</th>
-              <th scope="col">Model</th>
+              <th scope="col" className="col-model">
+                Model
+              </th>
               <th scope="col">State</th>
               <th scope="col" className="r">
                 Tokens
@@ -86,7 +88,7 @@ export function SessionsPreview({ rows = 5 }: { rows?: number }) {
             {shown.map((s) => (
               <tr key={s.id}>
                 <td>{s.project}</td>
-                <td>
+                <td className="col-model">
                   <span
                     className="dot"
                     style={{ background: `var(--fl-model-${s.model})` }}

@@ -519,7 +519,8 @@ kbd {
 }
 .hero-poster {
   object-fit: cover;
-  object-position: 60% 50%;
+  /* centred: the hero camera centres the waiting station, and the posters are stills of that framing */
+  object-position: 50% 50%;
 }
 .hero-live {
   opacity: 0;
@@ -613,6 +614,10 @@ kbd {
 .split {
   display: grid;
   gap: var(--fl-space-8);
+}
+/* a long unbreakable line (a command in a code block) scrolls inside its column, never widens the page */
+.split > * {
+  min-width: 0;
 }
 @media (min-width: 1024px) {
   .split {
@@ -823,6 +828,16 @@ kbd {
   text-align: right;
   font-family: var(--fl-font-mono);
   font-variant-numeric: tabular-nums;
+}
+/* Narrow phones: the money column stays; the model is the column that goes (M10). */
+@media (max-width: 419px) {
+  .table .col-model {
+    display: none;
+  }
+  .table th,
+  .table td {
+    padding-inline: var(--fl-space-3);
+  }
 }
 .dot {
   display: inline-block;
@@ -1787,9 +1802,6 @@ main {
       linear-gradient(to right, transparent 0, #000 24%), linear-gradient(to top, transparent 0, #000 22%);
     mask-composite: intersect;
   }
-  .hero-poster {
-    object-position: 50% 50%;
-  }
   .hero-shade {
     background: linear-gradient(to top, var(--fl-bg) 0%, transparent 24%);
   }
@@ -1876,6 +1888,13 @@ main {
 .digest-keys {
   margin-top: var(--fl-space-7);
 }
+.digest-try {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--fl-space-3);
+  margin-top: var(--fl-space-8);
+  min-width: 0;
+}
 /* The demo fixture has one recorded night; a sparkline with no line is just noise, so drop it. */
 .digest-frame .ovn-spark:not(:has(.ovn-spark-line)) {
   display: none;
@@ -1888,6 +1907,25 @@ main {
   content: '';
   display: block;
   height: 96px;
+}
+/* The preview is a half-width column at every viewport: one column, and what needs you right under the
+   headline, so the faded foot of the frame crops projects, never the one thing to act on (M11). */
+.digest-frame .ovn-root .ovn-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ovn-space-8);
+}
+.digest-frame .ovn-root .ovn-body > * {
+  margin-bottom: 0;
+}
+.digest-frame .ovn-root .ovn-rail {
+  display: contents;
+}
+.digest-frame .ovn-root .ovn-needs {
+  order: 2;
+}
+.digest-frame .ovn-root .ovn-numbers {
+  order: 3;
 }
 
 /* ---- spend beat (fleet-spend example month) on the 64px container ---- */
@@ -1925,7 +1963,39 @@ main {
 }
 .spend-chart {
   position: relative;
-  height: 220px;
+  height: 200px;
+  /* room for the dollar axis on the left and the day axis below */
+  margin: 0 0 var(--fl-space-6) 40px;
+}
+.spend-grid {
+  stroke: var(--fl-border);
+  stroke-width: 1;
+}
+.spend-axis {
+  position: absolute;
+  white-space: nowrap;
+  font: var(--fl-text-2xs) / 1 var(--fl-font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--fl-fg-subtle);
+}
+.spend-axis-y {
+  right: calc(100% + var(--fl-space-2));
+  transform: translateY(-50%);
+}
+.spend-axis-x {
+  top: calc(100% + var(--fl-space-2));
+  transform: translateX(-50%);
+}
+.spend-axis-x[data-edge='start'] {
+  transform: none;
+}
+.spend-axis-x[data-edge='end'] {
+  transform: translateX(-100%);
+}
+@media (max-width: 480px) {
+  .spend-axis-x[data-minor] {
+    display: none;
+  }
 }
 .spend-chart svg {
   position: absolute;
@@ -2340,22 +2410,17 @@ main {
   inset: 0;
 }
 /* Where the waiting station's signal sits, in stage pixels. Poster state: the anchor recorded by
-   scripts/assets.mjs (fractions of the still) mapped through object-fit: cover. Live: measured each frame. */
+   scripts/assets.mjs (fractions of the still) mapped through object-fit: cover. Live: measured each frame.
+   The camera itself frames the station (island `frame`), so the stage is never zoomed or panned in CSS: a CSS
+   scale would also skew the scene's own label projection, which measures the scaled box. */
 .stage[data-signal] {
   --ia: 1.7778;
-  --px: 0.6;
-  --py: 0.5;
   --fx: var(--fx-dark-wide);
   --fy: var(--fy-dark-wide);
-  --z: 1;
   --dw: max(100cqw, 100cqh * var(--ia));
   --dh: max(100cqh, 100cqw / var(--ia));
-  --ax: calc((100cqw - var(--dw)) * var(--px) + var(--fx) * var(--dw));
-  --ay: calc((100cqh - var(--dh)) * var(--py) + var(--fy) * var(--dh));
-  /* Frame: put the signal near the middle at zoom --z, never uncovering an edge of the stage. */
-  --tx: clamp(calc(100cqw * (1 - var(--z))), calc(50cqw - var(--ax) * var(--z)), 0px);
-  --cy: 46cqh;
-  --ty: clamp(calc(100cqh * (1 - var(--z))), calc(var(--cy) - var(--ay) * var(--z)), 0px);
+  --ax: calc((100cqw - var(--dw)) * 0.5 + var(--fx) * var(--dw));
+  --ay: calc((100cqh - var(--dh)) * 0.5 + var(--fy) * var(--dh));
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme='dark']) .stage[data-signal] {
@@ -2367,18 +2432,10 @@ main {
   --fx: var(--fx-light-wide);
   --fy: var(--fy-light-wide);
 }
-@media (min-width: 1024px) {
-  .stage[data-signal] {
-    --px: 0.5;
-  }
-}
-/* Phones get the square poster (FleetStage <picture>), framed tighter on the waiting station (N12). */
+/* Phones get the square poster (FleetStage <picture>), rendered closer in on the waiting station (N12). */
 @media (max-width: 720px) {
   .stage[data-signal] {
     --ia: 1;
-    --z: 1.7;
-    /* a little above centre: the station's tag sits under it, and the poster's corner label stays out */
-    --cy: 40cqh;
     --fx: var(--fx-dark-m);
     --fy: var(--fy-dark-m);
   }
@@ -2397,14 +2454,6 @@ main {
   --ax: var(--live-ax);
   --ay: var(--live-ay);
 }
-/* Nothing waiting in the live scene: show the whole harbour. */
-.stage[data-signal='none'] {
-  --z: 1;
-}
-.stage[data-signal] .stage-frame {
-  transform-origin: 0 0;
-  transform: translate(var(--tx), var(--ty)) scale(var(--z));
-}
 .beacon {
   position: absolute;
   left: 0;
@@ -2412,19 +2461,21 @@ main {
   width: 0;
   height: 0;
   pointer-events: none;
-  transform: translate(calc(var(--tx) + var(--ax) * var(--z)), calc(var(--ty) + var(--ay) * var(--z)));
+  transform: translate(var(--ax), var(--ay));
   transition: opacity var(--fl-dur-slow) ease-out;
 }
 .stage[data-signal='none'] .beacon {
   opacity: 0;
 }
-/* A light column from the signal to the sky, a soft halo, and rings on the harbour plane. */
+/* A light column from the signal to the sky, a soft halo, and rings on the harbour plane. The column stops
+   --beam-clear short of the stage top, so it never runs into the header rule or the scene's corner tag. */
 .beacon-beam {
+  --beam-clear: 80px;
   position: absolute;
   left: -1px;
   bottom: 0;
   width: 2px;
-  height: 100cqh;
+  height: max(0px, calc(var(--ay) - var(--beam-clear)));
   background: linear-gradient(to top, var(--fl-accent) 0%, transparent 85%);
   transform-origin: 50% 100%;
 }
@@ -2449,10 +2500,11 @@ main {
     transparent
   );
 }
+/* Rings sit just below the signal anchor, clear of the tag text that rises up and out from it. */
 .beacon-ring {
   position: absolute;
   left: -60px;
-  top: -20px;
+  top: -6px;
   width: 120px;
   height: 40px;
   border: 1.5px solid var(--fl-accent);
@@ -2463,17 +2515,29 @@ main {
   opacity: 0;
 }
 @media (max-width: 720px) {
+  .beacon-beam {
+    --beam-clear: 40px;
+  }
   .beacon-ring {
     left: -44px;
-    top: -15px;
+    top: -4px;
     width: 88px;
     height: 30px;
   }
 }
-@media (prefers-reduced-motion: no-preference) {
-  .stage[data-signal] .stage-frame {
-    transition: transform 1.2s var(--fl-ease-land);
+/* Phones set the waiting tag centred under its anchor (FleetScene): no ring there would clear the text, and the
+   scene already draws the station's own signal floor, so the beam and its core carry the signal alone. */
+@media (max-width: 560px) {
+  .beacon-ring {
+    display: none;
   }
+}
+/* Station tags that would sit over the hero copy or under the header (FleetStage keepLabelsClear). */
+.stage .fl-viz-tag[data-occluded='1'] {
+  opacity: 0 !important;
+  transition: opacity var(--fl-dur-slow) ease-out;
+}
+@media (prefers-reduced-motion: no-preference) {
   .beacon-beam {
     animation: beacon-rise 1.1s 0.6s var(--fl-ease-land) both;
   }
@@ -2710,6 +2774,25 @@ main {
   /* The lock screen holds one notification per incident; a shorter screen keeps the row from towering. */
   .depth .phone-screen {
     min-height: 420px;
+  }
+}
+
+/* ---- features 04: the lock screen beside the alert kinds it can show ---- */
+.phone-pair {
+  display: grid;
+  gap: var(--fl-space-6);
+  justify-items: center;
+}
+.phone-pair > .panel {
+  width: 100%;
+}
+@media (min-width: 1100px) {
+  .phone-pair {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+  }
+  .phone-pair .phone-screen {
+    min-height: 440px;
   }
 }
 

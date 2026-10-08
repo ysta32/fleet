@@ -1,4 +1,5 @@
 // Sections that exist only when their packages resolve at build time (see scripts/prebuild.mjs).
+import { CodeBlock } from '@/components/CodeBlock';
 import { Icon } from '@/components/Icon';
 import { LocalizeTimes } from '@/components/LocalTime';
 import { SpendChart } from '@/components/SpendChart';
@@ -41,6 +42,20 @@ export function DigestSection() {
             </dt>
             <dd>One light per project: red, yellow, green or quiet.</dd>
           </dl>
+          <div className="digest-try">
+            <p className="label">Try it without a token</p>
+            <CodeBlock label="digest demo commands">
+              <code>
+                <span className="c"># from a clone of the repo: fourteen synthetic nights</span>
+                {'\n'}npm run build -w @fleet/digest{'\n'}
+                {'node packages/digest/dist/cli.js demo --out public --days 14'}
+              </code>
+            </CodeBlock>
+            <p className="caption">
+              Real runs read GitHub and Vercel with read-only tokens, and can deliver to Notion, email or
+              ntfy.
+            </p>
+          </div>
         </div>
         <figure className="digest-frame">
           {digestCss ? <style dangerouslySetInnerHTML={{ __html: digestCss }} /> : null}
