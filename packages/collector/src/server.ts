@@ -5,6 +5,7 @@ import { isIP } from 'node:net';
 import { networkInterfaces } from 'node:os';
 import path from 'node:path';
 import { PROTOCOL_VERSION } from '@fleet/shared';
+import { PushInputError, type PushManager } from './push.js';
 import type { Alert, FleetConfig, FleetEvent, FleetSnapshot, HistoryResponse } from '@fleet/shared';
 
 /** Minimal store surface the server needs (FleetStore satisfies this). */
@@ -19,6 +20,7 @@ export interface StoreLike {
 
 export interface CreateServerOptions {
   store: StoreLike;
+  push?: PushManager;
   config: FleetConfig;
   webDir?: string;
   digestDir?: string;
@@ -739,6 +741,51 @@ export function createServer(opts: CreateServerOptions): http.Server {
     res.end();
   }
 
+  async function handlePush(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    rawPath: string,
+  ): Promise<void> {
+    const push = opts.push;
+    if (!push || store.snapshot().demo) return sendError(res, 404, 'push disabled');
+    const method = req.method ?? 'GET';
+    const keyRoute = rawPath === '/api/push/key';
+    if (keyRoute ? method !== 'GET' : method !== 'POST' && method !== 'DELETE') {
+      res.setHeader('Allow', keyRoute ? 'GET' : 'POST, DELETE');
+      return sendError(res, 405, 'method not allowed');
+    }
+    if (keyRoute) return sendJson(res, 200, { publicKey: await push.publicKey() });
+    if (crossSite(req)) return sendError(res, 403, 'cross-site request');
+    const ctype = String(req.headers['content-type'] ?? '')
+      .split(';')[0]!
+      .trim()
+      .toLowerCase();
+    if (ctype !== 'application/json') return sendError(res, 415, 'expected application/json');
+    const tooLarge = (): void => {
+      res.setHeader('Connection', 'close');
+      sendError(res, 413, 'payload too large');
+    };
+    const declared = req.headers['content-length'];
+    if (declared !== undefined && !(Number(declared) <= MAX_ALERT_BODY_BYTES)) return tooLarge();
+    const raw = await readBody(req, MAX_ALERT_BODY_BYTES);
+    if (raw === undefined) return tooLarge();
+    let body: unknown;
+    try {
+      body = JSON.parse(raw.toString('utf8'));
+    } catch {
+      return sendError(res, 400, 'invalid json');
+    }
+    try {
+      if (method === 'POST') await push.subscribe(body);
+      else await push.unsubscribe(body);
+    } catch (err) {
+      if (err instanceof PushInputError) return sendError(res, err.status, err.message);
+      throw err;
+    }
+    res.writeHead(204);
+    res.end();
+  }
+
   async function handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
 
@@ -759,6 +806,13 @@ export function createServer(opts: CreateServerOptions): http.Server {
         return sendError(res, 405, 'method not allowed');
       }
       return handleSession(req, res);
+    }
+    if (rawPath === '/api/push/key' || rawPath === '/api/push/subscribe') {
+      if (!isLocal(req) && !authorize(req, query, res)) {
+        res.setHeader('WWW-Authenticate', 'Bearer');
+        return sendError(res, 401, 'unauthorized');
+      }
+      return handlePush(req, res, rawPath);
     }
     if (method !== 'GET' && method !== 'HEAD') {
       res.setHeader('Allow', 'GET, HEAD');

@@ -17,7 +17,11 @@
     "typecheck": "tsc -b"
   },
   "dependencies": {
-    "@fleet/shared": "0.1.0"
+    "@fleet/shared": "0.1.0",
+    "web-push": "^3.6.7"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@types/web-push": "^3.6.4"
+  }
 }
