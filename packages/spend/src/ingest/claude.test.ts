@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { IngestContext, SpendConfig } from '../contracts.js';
-import { clearClaudeCache, ingestClaudeCode } from './claude.js';
+import { claudeCacheSize, clearClaudeCache, ingestClaudeCode } from './claude.js';
 
 let tmp: string;
 beforeEach(async () => {
@@ -202,5 +202,24 @@ describe('ingestClaudeCode file cache', () => {
     await rm(b);
     const r2 = await ingestClaudeCode(ctx(join(tmp, 'p')));
     expect(r2.records.map((r) => r.tokens.output)).toEqual([1]);
+  });
+
+  it('re-derives repo attribution on warm scans when .git appears', async () => {
+    const proj = join(tmp, 'work', 'mono', 'pkg');
+    await mkdir(proj, { recursive: true });
+    await put('a/s.jsonl', [line({ cwd: proj })]);
+    expect((await ingestClaudeCode(ctx(join(tmp, 'p')))).records[0]!.repo).toBe('pkg');
+    await mkdir(join(tmp, 'work', 'mono', '.git'));
+    expect((await ingestClaudeCode(ctx(join(tmp, 'p')))).records[0]!.repo).toBe('mono');
+  });
+
+  it('evicts cached files when the projects root disappears', async () => {
+    await put('a/s.jsonl', [line()]);
+    await ingestClaudeCode(ctx(join(tmp, 'p')));
+    expect(claudeCacheSize()).toBe(1);
+    await rm(join(tmp, 'p'), { recursive: true });
+    const r = await ingestClaudeCode(ctx(join(tmp, 'p')));
+    expect(r.status).toBe('missing');
+    expect(claudeCacheSize()).toBe(0);
   });
 });

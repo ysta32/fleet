@@ -1,8 +1,11 @@
 import { createReadStream, existsSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, sep } from 'node:path';
 import { createInterface } from 'node:readline';
 import type { IngestContext, IngestResult, Ingester, UsageRecord } from '../contracts.js';
+
+/** a parsed log line: record without filesystem-derived attribution, plus the raw cwd */
+type Row = { key: string | undefined; rec: UsageRecord; cwd: string | undefined };
 
 const WT_RE = /^(.*)\/\.orch\/wt\/([^/]+)(?:\/|$)/;
 
@@ -64,7 +67,7 @@ function obj(v: unknown): Record<string, unknown> | undefined {
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
 }
 
-function toRecord(line: unknown, memo: Map<string, string>): { key: string | undefined; rec: UsageRecord } | undefined {
+function toRecord(line: unknown): Row | undefined {
   const o = obj(line);
   if (!o || o.type !== 'assistant') return undefined;
   const msg = obj(o.message);
@@ -89,20 +92,6 @@ function toRecord(line: unknown, memo: Map<string, string>): { key: string | und
   const key = msgId && reqId ? `${msgId}:${reqId}` : undefined;
   const cwd = str(o.cwd);
   const branch = str(o.gitBranch);
-  let repo: string | undefined;
-  let army: string | undefined;
-  let task: string | undefined;
-  if (cwd) {
-    const m = WT_RE.exec(cwd);
-    if (m) {
-      repo = basename(m[1] as string);
-      task = m[2];
-    } else {
-      repo = gitRootName(cwd, memo);
-    }
-    if (m) army = repo;
-    else if (branch?.startsWith('orch/')) army = `${repo}:${branch}`;
-  }
 
   const rec: UsageRecord = {
     id: `claude-code:${key ?? `${str(o.sessionId) ?? 'nosession'}:${ts}:${str(o.uuid) ?? ''}`}`,
@@ -117,16 +106,31 @@ function toRecord(line: unknown, memo: Map<string, string>): { key: string | und
       cacheWrite1h: w1,
     },
   };
-  if (repo) rec.repo = repo;
   if (branch) rec.branch = branch;
   const sid = str(o.sessionId);
   if (sid) rec.sessionId = sid;
-  if (army) rec.army = army;
-  if (task) rec.task = task;
-  return { key, rec };
+  return { key, rec, cwd };
 }
 
-type Row = { key: string | undefined; rec: UsageRecord };
+/**
+ * repo/army/task depend on the filesystem (where `.git` is), not just the log line, so they are derived on
+ * every scan (memoized per cwd within the scan) and applied to a fresh copy; cached rows stay untouched.
+ */
+function attribute(row: Row, memo: Map<string, string>): UsageRecord {
+  const rec: UsageRecord = { ...row.rec };
+  const { cwd } = row;
+  if (!cwd) return rec;
+  const branch = rec.branch;
+  const m = WT_RE.exec(cwd);
+  const repo = m ? basename(m[1] as string) : gitRootName(cwd, memo);
+  rec.repo = repo;
+  if (m) {
+    rec.task = m[2];
+    rec.army = repo;
+  } else if (branch?.startsWith('orch/')) rec.army = `${repo}:${branch}`;
+  return rec;
+}
+
 
 /**
  * Per-process cache of parsed rows, keyed by file path and invalidated by mtime or size. Long-lived hosts
@@ -140,7 +144,12 @@ export function clearClaudeCache(): void {
   fileCache.clear();
 }
 
-async function parseFile(path: string, memo: Map<string, string>): Promise<Row[]> {
+/** Test hook: number of cached files. */
+export function claudeCacheSize(): number {
+  return fileCache.size;
+}
+
+async function parseFile(path: string): Promise<Row[]> {
   const rows: Row[] = [];
   const rl = createInterface({ input: createReadStream(path, { encoding: 'utf8' }), crlfDelay: Infinity });
   for await (const raw of rl) {
@@ -151,7 +160,7 @@ async function parseFile(path: string, memo: Map<string, string>): Promise<Row[]
     } catch {
       continue;
     }
-    const r = toRecord(parsed, memo);
+    const r = toRecord(parsed);
     if (r) rows.push(r);
   }
   return rows;
@@ -159,8 +168,11 @@ async function parseFile(path: string, memo: Map<string, string>): Promise<Row[]
 
 export const ingestClaudeCode: Ingester = async (ctx: IngestContext): Promise<IngestResult> => {
   const root = ctx.config.paths.claudeProjectsDir ?? join(ctx.home, '.claude', 'projects');
-  if (!existsSync(root))
+  if (!existsSync(root)) {
+    const prefix = root.endsWith(sep) ? root : root + sep;
+    for (const k of fileCache.keys()) if (k.startsWith(prefix)) fileCache.delete(k);
     return { source: 'claude-code', records: [], status: 'missing', note: 'projects dir not found' };
+  }
 
   const files: FileStat[] = [];
   await walk(root, ctx.since, files);
@@ -176,7 +188,7 @@ export const ingestClaudeCode: Ingester = async (ctx: IngestContext): Promise<In
     let parsed = fileCache.get(f.path);
     if (!parsed || parsed.mtimeMs !== f.mtimeMs || parsed.size !== f.size) {
       try {
-        parsed = { mtimeMs: f.mtimeMs, size: f.size, rows: await parseFile(f.path, memo) };
+        parsed = { mtimeMs: f.mtimeMs, size: f.size, rows: await parseFile(f.path) };
         fileCache.set(f.path, parsed);
       } catch {
         fileCache.delete(f.path);
@@ -187,8 +199,8 @@ export const ingestClaudeCode: Ingester = async (ctx: IngestContext): Promise<In
     for (const r of parsed.rows) {
       if (r.key) {
         byKey.delete(r.key); // keep LAST occurrence
-        byKey.set(r.key, r.rec);
-      } else loose.push(r.rec);
+        byKey.set(r.key, attribute(r, memo));
+      } else loose.push(attribute(r, memo));
     }
   }
   for (const k of fileCache.keys()) if (!seen.has(k)) fileCache.delete(k);
