@@ -83,7 +83,8 @@ export function safeUrl(u: unknown): string {
 function safeHref(u: unknown): string {
   if (typeof u !== 'string' || u.length === 0) return '#';
   // Browsers ignore ASCII whitespace/control chars inside schemes ("java\tscript:"), so check a stripped copy.
-  const stripped = u.replace(/[\u0000- \u007f]/g, '');
+  // Browsers also read "\\" like "/" at the start of a URL ("\\\\evil.com", "/\\evil.com" are protocol-relative).
+  const stripped = u.replace(/[\u0000- \u007f]/g, '').replace(/\\/g, '/');
   if (/^[a-z][a-z0-9+.-]*:/i.test(stripped)) return safeUrl(u);
   if (stripped.startsWith('//')) return safeUrl(`https:${stripped}`);
   return escapeHtml(u);

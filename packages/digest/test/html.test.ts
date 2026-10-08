@@ -17,7 +17,7 @@ import type { Digest, DigestIndex, DigestTotals, ProjectActivity } from '../src/
 const stripOwnSvgs = (html: string) => html.replace(/<svg class="ovn-(icon|shape|spark)[^"]*"[^>]*>/g, '');
 
 const bot = { login: 'claude[bot]', isBot: true };
-const human = { login: 'ysta32', isBot: false };
+const human = { login: 'acme-dev', isBot: false };
 
 function totals(over: Partial<DigestTotals> = {}): DigestTotals {
   return {
@@ -60,13 +60,13 @@ function makeDigest(id = '2026-10-07', over: Partial<Digest> = {}): Digest {
     id,
     generatedAt: `${id}T06:00:00.000Z`,
     window: { since: `2026-10-06T06:00:00.000Z`, until: `${id}T06:00:00.000Z` },
-    owner: 'ysta32',
+    owner: 'acme-dev',
     headline: 'Agents shipped a new Fleet release overnight; one production deploy on lumen failed.',
     summarizer: { kind: 'llm', model: 'claude-sonnet-4-5' },
     totals: totals(),
     projects: [
       project({
-        id: 'ysta32/lumen',
+        id: 'acme-dev/lumen',
         name: 'lumen',
         health: 'red',
         siteUrl: 'https://lumen.example.com',
@@ -79,7 +79,7 @@ function makeDigest(id = '2026-10-07', over: Partial<Digest> = {}): Digest {
           {
             number: 88,
             title: 'Rebuild search index with embeddings',
-            url: 'https://github.com/ysta32/lumen/pull/88',
+            url: 'https://github.com/acme-dev/lumen/pull/88',
             author: bot,
             at: '2026-10-07T02:14:00.000Z',
             additions: 412,
@@ -91,7 +91,7 @@ function makeDigest(id = '2026-10-07', over: Partial<Digest> = {}): Digest {
           {
             number: 91,
             title: 'Bump sharp to 0.34',
-            url: 'https://github.com/ysta32/lumen/pull/91',
+            url: 'https://github.com/acme-dev/lumen/pull/91',
             author: { login: 'dependabot[bot]', isBot: true },
             at: '2026-10-06T21:02:00.000Z',
             labels: ['deps'],
@@ -102,7 +102,7 @@ function makeDigest(id = '2026-10-07', over: Partial<Digest> = {}): Digest {
           {
             sha: 'a1b2c3d4e5f6a7b8c9d0a1b2c3d4e5f6a7b8c9d0',
             message: 'search: switch to embedding index',
-            url: 'https://github.com/ysta32/lumen/commit/a1b2c3d',
+            url: 'https://github.com/acme-dev/lumen/commit/a1b2c3d',
             author: bot,
             at: '2026-10-07T02:10:00.000Z',
             branch: 'main',
@@ -110,7 +110,7 @@ function makeDigest(id = '2026-10-07', over: Partial<Digest> = {}): Digest {
           {
             sha: 'b1b2c3d4e5f6a7b8c9d0a1b2c3d4e5f6a7b8c9d0',
             message: 'fix: guard empty album',
-            url: 'https://github.com/ysta32/lumen/commit/b1b2c3d',
+            url: 'https://github.com/acme-dev/lumen/commit/b1b2c3d',
             author: human,
             at: '2026-10-06T23:40:00.000Z',
             branch: 'main',
@@ -120,7 +120,7 @@ function makeDigest(id = '2026-10-07', over: Partial<Digest> = {}): Digest {
           {
             workflow: 'test',
             runId: 1,
-            url: 'https://github.com/ysta32/lumen/actions/runs/1',
+            url: 'https://github.com/acme-dev/lumen/actions/runs/1',
             branch: 'main',
             at: '2026-10-07T02:20:00.000Z',
             conclusion: 'failure',
@@ -150,7 +150,7 @@ function makeDigest(id = '2026-10-07', over: Partial<Digest> = {}): Digest {
         ],
       }),
       project({
-        id: 'ysta32/fleet',
+        id: 'acme-dev/fleet',
         name: 'fleet',
         health: 'yellow',
         summary: 'Fleet 0.9 shipped with the digest package; one PR is waiting on review.',
@@ -160,7 +160,7 @@ function makeDigest(id = '2026-10-07', over: Partial<Digest> = {}): Digest {
           {
             tag: 'v0.9.0',
             name: 'Overnight',
-            url: 'https://github.com/ysta32/fleet/releases/tag/v0.9.0',
+            url: 'https://github.com/acme-dev/fleet/releases/tag/v0.9.0',
             at: '2026-10-07T04:00:00.000Z',
             prerelease: false,
           },
@@ -169,7 +169,7 @@ function makeDigest(id = '2026-10-07', over: Partial<Digest> = {}): Digest {
           {
             number: 301,
             title: 'Add digest package',
-            url: 'https://github.com/ysta32/fleet/pull/301',
+            url: 'https://github.com/acme-dev/fleet/pull/301',
             author: bot,
             at: '2026-10-07T03:30:00.000Z',
             additions: 2300,
@@ -181,7 +181,7 @@ function makeDigest(id = '2026-10-07', over: Partial<Digest> = {}): Digest {
           {
             number: 305,
             title: 'Daemon: serve latest.json',
-            url: 'https://github.com/ysta32/fleet/pull/305',
+            url: 'https://github.com/acme-dev/fleet/pull/305',
             author: human,
             at: '2026-10-01T10:00:00.000Z',
             labels: [],
@@ -192,7 +192,7 @@ function makeDigest(id = '2026-10-07', over: Partial<Digest> = {}): Digest {
           {
             number: 77,
             title: 'Docs: explain agent detection',
-            url: 'https://github.com/ysta32/fleet/issues/77',
+            url: 'https://github.com/acme-dev/fleet/issues/77',
             author: human,
             at: '2026-10-07T01:00:00.000Z',
             state: 'opened',
@@ -200,10 +200,10 @@ function makeDigest(id = '2026-10-07', over: Partial<Digest> = {}): Digest {
           },
         ],
       }),
-      project({ id: 'ysta32/dotfiles', name: 'dotfiles', health: 'quiet' }),
-      project({ id: 'ysta32/notes', name: 'notes', health: 'quiet' }),
+      project({ id: 'acme-dev/dotfiles', name: 'dotfiles', health: 'quiet' }),
+      project({ id: 'acme-dev/notes', name: 'notes', health: 'quiet' }),
     ],
-    warnings: ['ysta32/private-thing: 403 Resource not accessible by integration'],
+    warnings: ['acme-dev/private-thing: 403 Resource not accessible by integration'],
     ...over,
   };
 }
@@ -315,6 +315,18 @@ describe('escaping and URL safety', () => {
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
     expect(html).toContain('&quot;&gt;&lt;svg onload=alert(4)&gt;');
     expect(html).toContain('&lt;i&gt;bot&lt;/i&gt;');
+  });
+
+  it('treats backslash-prefixed nav links as protocol-relative, never as relative paths', () => {
+    const html = renderDigestHtml(d, {
+      siteTitle: 'Overnight',
+      nav: { prev: '\\\\evil.example', next: '/\\evil.example', index: '\\/javascript:alert(1)' },
+    });
+    const hrefs = [...html.matchAll(/href="([^"]*)"/g)].map((m) => m[1] ?? '');
+    expect(hrefs.some((h) => h.includes('\\'))).toBe(false);
+    expect(html).not.toMatch(/javascript:/i);
+    for (const h of hrefs)
+      expect(h === '#' || /^https?:\/\//.test(h) || /^\.\.?\/|^[\w-]+\.html$|^#/.test(h)).toBe(true);
   });
 
   it('neutralises non-http(s) urls to #', () => {
@@ -470,8 +482,8 @@ describe('states', () => {
         deployments: 0,
       }),
       projects: [
-        project({ id: 'ysta32/a', name: 'alpha', health: 'quiet' }),
-        project({ id: 'ysta32/b', name: 'beta', health: 'quiet' }),
+        project({ id: 'acme-dev/a', name: 'alpha', health: 'quiet' }),
+        project({ id: 'acme-dev/b', name: 'beta', health: 'quiet' }),
       ],
       warnings: [],
     });
@@ -493,7 +505,7 @@ describe('states', () => {
     const d = makeDigest('2026-10-07', {
       projects: [
         project({
-          id: 'ysta32/a',
+          id: 'acme-dev/a',
           name: 'alpha',
           health: 'green',
           commits: makeDigest().projects[0]!.commits,
@@ -512,7 +524,7 @@ describe('states', () => {
     const ci = base.projects[0]!.ciFailures[0]!;
     const reds = [0, 1, 2].map((i) =>
       project({
-        id: `ysta32/r${i}`,
+        id: `acme-dev/r${i}`,
         name: `red${i}`,
         health: 'red',
         ciFailures: [ci, { ...ci, runId: 2 + i }, { ...ci, runId: 9 + i }],
@@ -538,10 +550,10 @@ describe('states', () => {
 
   it('partial warnings render a collapsible warn notice and tag the affected project', () => {
     const html = renderDigestFragment(
-      makeDigest('2026-10-07', { warnings: ['ysta32/lumen: 403 forbidden', 'vercel: timeout'] }),
+      makeDigest('2026-10-07', { warnings: ['acme-dev/lumen: 403 forbidden', 'vercel: timeout'] }),
     );
     expect(html).toMatch(/<details class="ovn-notice">.*2 sources were unavailable or degraded/);
-    expect(html).toContain('<li>ysta32/lumen: 403 forbidden</li>');
+    expect(html).toContain('<li>acme-dev/lumen: 403 forbidden</li>');
     expect(html).toContain('<span class="ovn-pill ovn-pill-yellow">partial data</span>');
     expect(html.match(/partial data/g)).toHaveLength(1);
   });
@@ -690,7 +702,7 @@ describe('renderIndexHtml', () => {
     });
     const index: DigestIndex = {
       schema: 'overnight.index/v1',
-      owner: 'ysta32',
+      owner: 'acme-dev',
       updatedAt: '2026-10-07T06:00:00.000Z',
       digests: [
         entry('2026-09-30', 'Sept <b>end</b>'),
@@ -726,7 +738,7 @@ describe('renderIndexHtml', () => {
     });
     const index: DigestIndex = {
       schema: 'overnight.index/v1',
-      owner: 'ysta32',
+      owner: 'acme-dev',
       updatedAt: '2026-10-07T06:00:00.000Z',
       digests: [
         {
@@ -747,7 +759,7 @@ describe('renderIndexHtml', () => {
   it('first run shows the single edition and what to expect', () => {
     const index: DigestIndex = {
       schema: 'overnight.index/v1',
-      owner: 'ysta32',
+      owner: 'acme-dev',
       updatedAt: '2026-10-07T06:00:00.000Z',
       digests: [
         {
@@ -797,7 +809,7 @@ describe('writeArchive', () => {
 
       const index = JSON.parse(await readFile(join(out, 'index.json'), 'utf8')) as DigestIndex;
       expect(index.schema).toBe('overnight.index/v1');
-      expect(index.owner).toBe('ysta32');
+      expect(index.owner).toBe('acme-dev');
       expect(index.digests.map((e) => e.id)).toEqual(['2026-10-07', '2026-10-06']);
       expect(index.digests[1]?.headline).toBe('Updated headline');
       expect(index.digests[1]?.path).toBe('digests/2026-10-06.html');
