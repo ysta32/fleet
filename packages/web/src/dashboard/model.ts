@@ -268,11 +268,13 @@ export function taskKey(id: string): string {
 interface Draft {
   id: string;
   projectId: string;
-  ref: 'task' | 'session' | 'army' | 'attention' | 'kind';
+  ref: 'task' | 'session' | 'army' | 'alert' | 'kind';
   taskId?: string;
   taskSlug?: string;
   sessionId?: string;
   sessionTitle?: string;
+  /** every waiting session folded into this incident */
+  sessions: Set<string>;
   reasons: IncidentReason[];
   alerts: Alert[];
   order: number;
@@ -281,15 +283,17 @@ interface Draft {
 /**
  * Group everything that is waiting on the operator into incidents, oldest first.
  * Sources: blocked army tasks (run.blocked and tasks in state "blocked", deduped by task id),
- * waiting sessions (joined to the task their agent is on), and uncleared, undismissed alerts
- * (army.blocked / session.waiting alerts join the incident they describe).
+ * waiting sessions (joined to the task their agent is on), and uncleared, undismissed alerts.
+ * An alert joins an incident only on a confident subject match: its structured taskId/sessionId,
+ * else (for army.blocked / session.waiting) exactly one live task named by an exact token in its
+ * text. Anything else stays its own incident, so clearing one incident never clears another's alerts.
  */
 export function incidents(snapshot: FleetSnapshot, dismissed: ReadonlySet<string> = new Set()): Incident[] {
   const drafts = new Map<string, Draft>();
   const draft = (id: string, projectId: string, ref: Draft['ref']): Draft => {
     let entry = drafts.get(id);
     if (!entry) {
-      entry = { id, projectId, ref, reasons: [], alerts: [], order: drafts.size };
+      entry = { id, projectId, ref, sessions: new Set(), reasons: [], alerts: [], order: drafts.size };
       drafts.set(id, entry);
     }
     return entry;
@@ -347,6 +351,7 @@ export function incidents(snapshot: FleetSnapshot, dismissed: ReadonlySet<string
         )!.currentTask!;
       entry.taskSlug = known?.slug;
     }
+    entry.sessions.add(session.id);
     if (!entry.sessionId) {
       entry.sessionId = session.id;
       entry.sessionTitle = session.title;
@@ -354,27 +359,51 @@ export function incidents(snapshot: FleetSnapshot, dismissed: ReadonlySet<string
     entry.reasons.push({ kind: 'waiting', label: 'Waiting on you', at: session.lastActivity });
   }
   const live = [...drafts.values()];
-  for (const alert of snapshot.alerts) {
-    if (alert.cleared || dismissed.has(alert.id)) continue;
-    let entry: Draft | undefined;
+  const alertIncident = (alert: Alert): Draft => {
+    const projectId = alert.projectId;
+    const task = alert.taskId?.trim();
+    if (task) {
+      const key = taskKey(task);
+      const entry = draft(`${projectId}:task:${key}`, projectId, 'task');
+      if (!entry.taskId) {
+        const known = tasksByProject.get(projectId)?.get(key);
+        entry.taskId = known?.id ?? task;
+        entry.taskSlug = known?.slug;
+      }
+      return entry;
+    }
+    const sessionId = alert.sessionId;
+    if (sessionId) {
+      const holder = live.find((item) => item.projectId === projectId && item.sessions.has(sessionId));
+      if (holder) return holder;
+      const entry = draft(`${projectId}:session:${sessionId}`, projectId, 'session');
+      if (!entry.sessionId) {
+        entry.sessionId = sessionId;
+        entry.sessionTitle = snapshot.sessions.find((session) => session.id === sessionId)?.title;
+        entry.sessions.add(sessionId);
+      }
+      return entry;
+    }
     if (alert.kind === 'army.blocked' || alert.kind === 'session.waiting') {
-      const inProject = live.filter((item) => item.projectId === alert.projectId);
-      // an alert that names a task belongs to that task's incident
+      // exact tokens only: "t4" names task 4, never task 40
       const words = new Set(
         `${alert.title} ${alert.body}`
           .split(/[^A-Za-z0-9_-]+/)
           .filter(Boolean)
           .map(taskKey),
       );
-      const reasonKind = alert.kind === 'army.blocked' ? 'blocked' : 'waiting';
-      entry =
-        inProject.find((item) => item.ref === 'task' && words.has(taskKey(item.taskId ?? ''))) ??
-        inProject.find((item) => item.reasons.some((reason) => reason.kind === reasonKind)) ??
-        inProject[0] ??
-        draft(`${alert.projectId}:attention`, alert.projectId, 'attention');
-    } else {
-      entry = draft(`${alert.projectId}:${alert.kind}`, alert.projectId, 'kind');
+      const named = live.filter(
+        (item) => item.projectId === projectId && item.ref === 'task' && words.has(taskKey(item.taskId!)),
+      );
+      if (named.length === 1) return named[0]!;
+      return draft(`${projectId}:alert:${alert.id}`, projectId, 'alert');
     }
+    // repeats of the same alert collapse; a different body (another PR, another deploy) is its own
+    return draft(`${projectId}:${alert.kind}:${alert.body.trim().toLowerCase()}`, projectId, 'kind');
+  };
+  for (const alert of snapshot.alerts) {
+    if (alert.cleared || dismissed.has(alert.id)) continue;
+    const entry = alertIncident(alert);
     const label = alertKindLabel(alert.kind);
     const title = alertTitle(alert);
     entry.alerts.push(alert);

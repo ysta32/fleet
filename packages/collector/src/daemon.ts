@@ -299,10 +299,11 @@ async function runReal(cfg: FleetConfig, opts: DaemonOptions): Promise<Daemon> {
     if (closed || replaying) return;
     if (!alertKindOf(e)) return notifier.observe(e);
     if (Date.now() - e.ts > NOTIFY_MAX_AGE_MS) return;
-    const alert = notifier.handle(e, store.snapshot());
-    if (alert) {
-      store.addAlert(alert);
-      void push.send(alert, store.snapshot()).catch(() => log('push delivery failed'));
+    const result = notifier.handle(e, store.snapshot());
+    if (result) {
+      store.addAlert(result.alert);
+      if (result.notify)
+        void push.send(result.alert, store.snapshot()).catch(() => log('push delivery failed'));
     }
   });
 

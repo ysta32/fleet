@@ -64,32 +64,62 @@ function taskKey(id: string): string {
   return numeric ? numeric[1]! : trimmed;
 }
 
+/** What an alert-worthy event is about. */
+export interface IncidentSubject {
+  /** incident ref within the project: `task:<key>`, `agent:<id>`, `session:<id>` or `kind:<kind>` */
+  ref: string;
+  /** the task id as written by its source, when the event is about a task */
+  taskId?: string;
+}
+
 /**
- * What an alert-worthy event is about: the task (directly, or via the agent/session that is on it),
- * else the agent or session, else the alert kind for project-level events. Events about the same
- * subject are one incident, whatever their kind: a blocked task and its waiting coder push once.
+ * The task (directly, or via the agent/session that is on it), else the agent or session, else the
+ * alert kind for project-level events. Events about the same subject are one incident, whatever their
+ * kind: a blocked task and its waiting coder are one incident.
  */
-export function incidentRef(e: FleetEvent, kind: AlertKind, snap: FleetSnapshot): string {
-  if (e.taskId) return `task:${taskKey(e.taskId)}`;
+export function incidentSubject(e: FleetEvent, kind: AlertKind, snap: FleetSnapshot): IncidentSubject {
+  if (e.taskId) return { ref: `task:${taskKey(e.taskId)}`, taskId: e.taskId };
   if (e.agentId || e.sessionId) {
     const agents = snap.agents.filter(
       (a) => a.projectId === e.projectId && (e.agentId ? a.id === e.agentId : a.sessionId === e.sessionId),
     );
     const waiting = agents.filter((a) => a.status === 'waiting');
-    const tasks = new Set(
-      (waiting.length ? waiting : agents)
-        .map((a) => a.currentTask)
-        .filter((t): t is string => !!t)
-        .map(taskKey),
+    const onTask = (waiting.length ? waiting : agents).filter(
+      (a): a is typeof a & { currentTask: string } => !!a.currentTask,
     );
-    if (tasks.size === 1) return `task:${[...tasks][0]!}`;
-    return e.agentId ? `agent:${e.agentId}` : `session:${e.sessionId!}`;
+    const tasks = new Set(onTask.map((a) => taskKey(a.currentTask)));
+    if (tasks.size === 1) {
+      const key = [...tasks][0]!;
+      return { ref: `task:${key}`, taskId: onTask.find((a) => taskKey(a.currentTask) === key)!.currentTask };
+    }
+    return { ref: e.agentId ? `agent:${e.agentId}` : `session:${e.sessionId!}` };
   }
-  return `kind:${kind}`;
+  return { ref: `kind:${kind}` };
+}
+
+/** Result of handling an alert-worthy event: the alert to store, and whether it was notified. */
+export interface NotifyResult {
+  alert: Alert;
+  /** true when this alert was delivered (macOS / ntfy) and should also go out as web push */
+  notify: boolean;
+}
+
+interface OpenIncident {
+  /** when it was last notified */
+  at: number;
+  /** a high-priority alert has been notified for it */
+  high: boolean;
+  /** waiting sessions/agents holding it open */
+  holders: Set<string>;
+  /** a blocked task holds it open */
+  task: boolean;
 }
 
 export class Notifier {
-  private readonly seen = new Map<string, number>();
+  /** alert dedupe: identical alerts (kind + incident + holder) inside the window are dropped */
+  private readonly seen = new Map<string, { at: number; incident: string; holder?: string }>();
+  /** delivery dedupe: one notification per incident transition */
+  private readonly open = new Map<string, OpenIncident>();
   private sent: number[] = [];
   private readonly exec: NotifyExec;
   private readonly fetchFn: NotifyFetch | undefined;
@@ -112,30 +142,58 @@ export class Notifier {
   }
 
   /**
-   * Watch non-alert events for incidents ending: a task leaving "blocked" closes its incident, so
-   * blocking again later is a new transition that notifies again (instead of waiting out the window).
+   * Watch non-alert events for incidents ending, so the next one is a new transition that notifies
+   * (instead of waiting out the window): a task leaving "blocked" closes its incident; any later
+   * activity (or end) of a waiting session or agent releases its hold, closing the incident when
+   * nothing else holds it open.
    */
   observe(e: FleetEvent): void {
-    if (e.kind !== 'task.state' || !e.taskId || e.data?.state === 'blocked') return;
-    this.seen.delete(`${e.projectId}\u0000task:${taskKey(e.taskId)}`);
+    if (e.kind === 'task.state' && e.taskId && e.data?.state !== 'blocked') {
+      this.close(`${e.projectId}\u0000task:${taskKey(e.taskId)}`);
+      return;
+    }
+    if (!this.seen.size && !this.open.size) return;
+    const holders = new Set<string>();
+    if (e.agentId) holders.add(e.agentId);
+    if (e.sessionId && (e.kind === 'session.end' || !e.agentId || e.agentId === e.sessionId))
+      holders.add(e.sessionId);
+    if (holders.size) this.release(e.projectId, holders);
   }
 
-  handle(e: FleetEvent, snap: FleetSnapshot): Alert | undefined {
+  handle(e: FleetEvent, snap: FleetSnapshot): NotifyResult | undefined {
     const kind = alertKindOf(e);
     if (!kind || !this.cfg.kinds.includes(kind)) return undefined;
 
     const now = this.now();
-    for (const [k, t] of this.seen) if (now - t >= DEDUPE_MS) this.seen.delete(k);
-    const key = `${e.projectId}\u0000${incidentRef(e, kind, snap)}`;
-    if (this.seen.has(key)) return undefined;
+    for (const [k, v] of this.seen) if (now - v.at >= DEDUPE_MS) this.seen.delete(k);
+    for (const [k, v] of this.open) if (now - v.at >= DEDUPE_MS) this.open.delete(k);
+    const subject = incidentSubject(e, kind, snap);
+    const incident = `${e.projectId}\u0000${subject.ref}`;
+    const holder = kind === 'session.waiting' ? (e.agentId ?? e.sessionId) : undefined;
+    const alertKey = `${kind}\u0000${incident}\u0000${holder ?? ''}`;
+    if (this.seen.has(alertKey)) return undefined;
+    this.seen.set(alertKey, { at: now, incident, ...(holder ? { holder } : {}) });
 
+    const meta = LABELS[kind];
+    const existing = this.open.get(incident);
+    const holds = (entry: OpenIncident) => {
+      if (holder) entry.holders.add(holder);
+      if (kind === 'army.blocked' && subject.taskId) entry.task = true;
+    };
+    // a new incident notifies; so does a high-priority escalation of one notified at low priority
+    let notify = !existing || (meta.high && !existing.high);
     this.sent = this.sent.filter((t) => now - t < RATE_WINDOW_MS);
-    if (this.sent.length >= RATE_MAX) return undefined;
-    this.seen.set(key, now);
-    this.sent.push(now);
+    if (notify && this.sent.length >= RATE_MAX) notify = false;
+    if (notify) {
+      this.sent.push(now);
+      const entry: OpenIncident = existing ?? { at: now, high: false, holders: new Set(), task: false };
+      entry.at = now;
+      entry.high ||= meta.high;
+      holds(entry);
+      this.open.set(incident, entry);
+    } else if (existing) holds(existing);
 
     const project = snap.projects.find((p) => p.id === e.projectId)?.name ?? 'project';
-    const meta = LABELS[kind];
     const alert: Alert = {
       id: `alert-${e.ts}-${this.seq++}`,
       kind,
@@ -144,8 +202,27 @@ export class Notifier {
       body: project,
       at: e.ts,
     };
-    this.deliver(alert, meta);
-    return alert;
+    if (subject.taskId) alert.taskId = subject.taskId;
+    if (e.sessionId) alert.sessionId = e.sessionId;
+    if (notify) this.deliver(alert, meta);
+    return { alert, notify };
+  }
+
+  private close(incident: string): void {
+    this.open.delete(incident);
+    for (const [k, v] of this.seen) if (v.incident === incident) this.seen.delete(k);
+  }
+
+  private release(projectId: string, holders: ReadonlySet<string>): void {
+    const prefix = `${projectId}\u0000`;
+    for (const [k, v] of this.seen)
+      if (v.holder && holders.has(v.holder) && v.incident.startsWith(prefix)) this.seen.delete(k);
+    for (const [incident, entry] of this.open) {
+      if (!incident.startsWith(prefix)) continue;
+      let changed = false;
+      for (const h of holders) changed = entry.holders.delete(h) || changed;
+      if (changed && !entry.holders.size && !entry.task) this.close(incident);
+    }
   }
 
   private deliver(alert: Alert, meta: { tags: string; high: boolean }): void {

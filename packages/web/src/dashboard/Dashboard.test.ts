@@ -263,6 +263,7 @@ describe('Dashboard', () => {
         ...project,
         orch: { ...project.orch!, blocked: ['01'] },
       })),
+      alerts: base.snapshot!.alerts.map((alert) => ({ ...alert, taskId: '01' })),
       sessions: base.snapshot!.sessions.map((session) => ({
         ...session,
         status: 'waiting' as const,

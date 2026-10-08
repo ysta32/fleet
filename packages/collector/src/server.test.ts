@@ -330,6 +330,8 @@ describe('redaction', () => {
     const agent2 = { ...snap.agents[0], id: 's1:x', currentTask: 'SYNTHETIC free text task' };
     snap.agents.push(agent2);
     snap.alerts[0] = { ...snap.alerts[0], title: 'SYNTHETIC alert', body: 'SYNTHETIC body' };
+    snap.alerts.push({ ...snap.alerts[0], id: 'al2', taskId: 'SYNTHETIC free text task' });
+    snap.alerts[0].taskId = 't01';
     const orch = snap.projects[0].orch!;
     orch.inflight = [
       {
@@ -404,6 +406,8 @@ describe('redaction', () => {
     expect(r.agents[0].location.projectId).toBe(op);
     expect(r.agents[1].currentTask).toBeUndefined();
     expect(r.alerts[0]).toMatchObject({ projectId: op, title: 'Army finished', body: '' });
+    expect(r.alerts[0]!.taskId).toBe('t01');
+    expect(r.alerts[1]!.taskId).toBeUndefined();
     expect(r.prs.map((x) => x.url)).toEqual(['https://github.com/o/r/pull/1', '']);
     expect(r.deploys.map((x) => x.url)).toEqual(['https://ok.example', undefined]);
     expect(JSON.stringify(r)).not.toContain(PID);

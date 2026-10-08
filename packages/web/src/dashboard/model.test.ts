@@ -374,7 +374,7 @@ describe('incidents', () => {
     expect(result.map((incident) => incident.id)).toEqual([
       'beta:session:other',
       'alpha:task:4',
-      'alpha:ci.failed',
+      'alpha:ci.failed:synthetic checks failed on #3',
     ]);
     expect(result[0]!.title).toBe('Synthetic review is waiting on you');
     expect(result[2]).toMatchObject({
@@ -405,7 +405,7 @@ describe('incidents', () => {
     expect(result[0]!.alertIds).toEqual([]);
   });
 
-  it('collapses stale waiting and blocked alerts for one project into one incident', () => {
+  it('keeps alerts with no confident subject as their own incidents', () => {
     const data = snapshot();
     data.alerts = [
       {
@@ -426,17 +426,104 @@ describe('incidents', () => {
       },
     ];
     const result = incidents(data);
-    expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject({
-      id: 'alpha:attention',
-      kind: 'waiting',
-      title: 'Synthetic run stuck',
-      alertIds: ['a1', 'a2'],
+    expect(result.map((incident) => [incident.id, incident.kind, incident.title, incident.alertIds])).toEqual(
+      [
+        ['alpha:alert:a1', 'waiting', 'Waiting on you', ['a1']],
+        ['alpha:alert:a2', 'blocked', 'Synthetic run stuck', ['a2']],
+      ],
+    );
+  });
+
+  it('matches task tokens exactly: an alert about t4 never joins t40, and ambiguity stays apart', () => {
+    const data = blockedArmy();
+    data.sessions = [];
+    const orch = data.projects[0]!.orch!;
+    orch.tasks = [
+      { ...task('t4'), slug: 'four', state: 'blocked' },
+      { ...task('t40'), slug: 'forty', state: 'blocked' },
+    ];
+    orch.blocked = [];
+    data.alerts = [
+      {
+        id: 'b4',
+        kind: 'army.blocked',
+        projectId: 'alpha',
+        title: 'army.blocked',
+        body: 'Synthetic t4 checkpoint',
+        at: now,
+      },
+      {
+        id: 'b40',
+        kind: 'army.blocked',
+        projectId: 'alpha',
+        title: 'army.blocked',
+        body: 'Synthetic t40 checkpoint',
+        at: now,
+      },
+      {
+        id: 'both',
+        kind: 'army.blocked',
+        projectId: 'alpha',
+        title: 'army.blocked',
+        body: 'Synthetic t4 and t40',
+        at: now,
+      },
+    ];
+    const byId = new Map(incidents(data).map((incident) => [incident.id, incident.alertIds]));
+    expect(byId.get('alpha:task:4')).toEqual(['b4']);
+    expect(byId.get('alpha:task:40')).toEqual(['b40']);
+    expect(byId.get('alpha:alert:both')).toEqual(['both']);
+  });
+
+  it('uses structured alert subjects: taskId joins the task, sessionId joins the session it holds', () => {
+    const data = blockedArmy();
+    data.alerts = [
+      {
+        id: 's1',
+        kind: 'session.waiting',
+        projectId: 'alpha',
+        title: 'Waiting',
+        body: '',
+        sessionId: 'synthetic-session',
+        at: now,
+      },
+      {
+        id: 't1',
+        kind: 'army.blocked',
+        projectId: 'alpha',
+        title: 'Blocked',
+        body: '',
+        taskId: '04',
+        at: now,
+      },
+      {
+        id: 't5',
+        kind: 'army.blocked',
+        projectId: 'alpha',
+        title: 'Blocked',
+        body: '',
+        taskId: 't05',
+        at: now,
+      },
+      {
+        id: 'gone',
+        kind: 'session.waiting',
+        projectId: 'alpha',
+        title: 'Waiting',
+        body: '',
+        sessionId: 'ended',
+        at: now,
+      },
+    ];
+    const byId = new Map(incidents(data).map((incident) => [incident.id, incident]));
+    expect(byId.get('alpha:task:4')!.alertIds).toEqual(['s1', 't1']);
+    expect(byId.get('alpha:task:5')).toMatchObject({
+      taskId: 't05',
+      title: 't05 · synthetic-t05 is blocked',
+      alertIds: ['t5'],
     });
-    expect(result[0]!.reasons.map((reason) => [reason.label, reason.text])).toEqual([
-      ['Waiting on you', undefined],
-      ['Army blocked', 'Synthetic run stuck'],
-    ]);
+    expect(byId.get('alpha:session:ended')).toMatchObject({ kind: 'waiting', alertIds: ['gone'] });
+    expect(byId.size).toBe(3);
   });
 
   it('reports an army blocked with no task ids as one incident', () => {
