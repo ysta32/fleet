@@ -13,7 +13,11 @@ export function HelpOverlay({ onClose }: { onClose(): void }) {
   }, []);
   const groups = [...new Set(KEYMAP.map((entry) => entry.group))];
   return (
-    <div ref={overlay} className="overlay" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <div
+      ref={overlay}
+      className="overlay"
+      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
+    >
       <div ref={dialog} className="dialog help" role="dialog" aria-modal="true" aria-labelledby="help-title">
         <header className="dialog-head">
           <h2 id="help-title" className="dialog-title">

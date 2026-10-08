@@ -36,7 +36,11 @@ describe('service worker policy', () => {
       '<link rel="icon" href="/favicon.svg"><script type="module" crossorigin src="/assets/index-a1.js"></script>' +
       '<link rel="modulepreload" href="/assets/vendor-b2.js"><link rel="stylesheet" href="/assets/index-c3.css">' +
       '<script src="/assets/index-a1.js"></script>';
-    expect(policy.shellAssets(html)).toEqual(['/assets/index-a1.js', '/assets/vendor-b2.js', '/assets/index-c3.css']);
+    expect(policy.shellAssets(html)).toEqual([
+      '/assets/index-a1.js',
+      '/assets/vendor-b2.js',
+      '/assets/index-c3.css',
+    ]);
   });
   it('caches only static shell paths', () => {
     expect(policy.isCacheableAsset('/assets/x.js', ['/favicon.svg'])).toBe(true);

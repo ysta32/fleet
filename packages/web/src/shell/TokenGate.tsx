@@ -25,11 +25,7 @@ export function TokenGate() {
   };
   return (
     <main className="gate">
-      <form
-        className="gate-card"
-        onSubmit={(event) => void submit(event)}
-        noValidate
-      >
+      <form className="gate-card" onSubmit={(event) => void submit(event)} noValidate>
         <Mark className="gate-mark" />
         <h1 className="gate-title">This fleet is locked.</h1>
         <p className="gate-lead">
@@ -68,7 +64,8 @@ export function TokenGate() {
           </p>
         )}
         <p className="gate-meta">
-          The token is exchanged for a session cookie in this browser and is never sent anywhere but this collector.
+          The token is exchanged for a session cookie in this browser and is never sent anywhere but this
+          collector.
         </p>
       </form>
     </main>
@@ -101,7 +98,9 @@ export async function unlock(token: string, fetcher: typeof fetch = fetch): Prom
 }
 
 const UNLOCK_ERRORS: Record<Exclude<UnlockResult, 'ok'>, string> = {
-  rejected: 'That token was rejected. Run fleet token on the machine running Fleet and paste the token it prints.',
+  rejected:
+    'That token was rejected. Run fleet token on the machine running Fleet and paste the token it prints.',
   throttled: 'Too many attempts. Wait a minute, then try again.',
-  unreachable: 'Collector unreachable, so the token could not be checked. Make sure Fleet is running and try again.',
+  unreachable:
+    'Collector unreachable, so the token could not be checked. Make sure Fleet is running and try again.',
 };

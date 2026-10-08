@@ -717,7 +717,11 @@ export default function Dashboard({
               </h3>
               <ul className="dashboard-list rows">
                 {waiting.map((session) => (
-                  <li key={session.id} className="alert-row waiting-row" data-selected={selected('session', session.id)}>
+                  <li
+                    key={session.id}
+                    className="alert-row waiting-row"
+                    data-selected={selected('session', session.id)}
+                  >
                     <Icon name="waiting" />
                     <div className="alert-text">
                       <button
@@ -729,7 +733,8 @@ export default function Dashboard({
                         {session.title ?? session.id}
                       </button>
                       <small className="row-meta">
-                        {projectButton(session.projectId)} · <span className="num">{session.model}</span> · waiting{' '}
+                        {projectButton(session.projectId)} · <span className="num">{session.model}</span> ·
+                        waiting{' '}
                         <time dateTime={new Date(session.lastActivity).toISOString()}>
                           {relativeTime(session.lastActivity, now)}
                         </time>
