@@ -9,8 +9,7 @@
   "main": "dist/index.js",
   "files": [
     "dist",
-    "web",
-    "launchd"
+    "web"
   ],
   "scripts": {
     "build": "tsc -b && npm run copy-web",

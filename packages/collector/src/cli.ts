@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 import { execFile } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { createServer } from 'node:net';
-import { networkInterfaces } from 'node:os';
+import { homedir as osHomedir, networkInterfaces } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import type { FleetSnapshot } from '@fleet/shared';
-import { configPath, dataDir, loadConfig } from './config.js';
-import { install, installEnv, uninstall } from './launchd.js';
+import { configPath, dataDir, defaultConfig, loadConfig } from './config.js';
+import { exitCode, formatLine, runDoctor } from './doctor.js';
+import { install, installEnv, planInstall, uninstall } from './launchd.js';
 
 const pexec = promisify(execFile);
 
@@ -27,12 +27,12 @@ Usage: fleet <command>
 
 Commands:
   start       run the collector daemon in the foreground
-  install     install and load the launchd agent (macOS)
+  install     install and load the launchd agent (macOS); --dry-run prints the plist only
   uninstall   unload and remove the launchd agent
   status      show daemon health and counts
   token       print the access token and LAN URL
   open        open the dashboard in a browser
-  doctor      check the environment
+  doctor      check the environment (exit 0 ok, 1 warnings, 2 failures)
   demo        run the daemon with synthetic demo data
 
 Options:
@@ -98,34 +98,65 @@ async function status(): Promise<number> {
   }
 }
 
-function portFree(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const srv = createServer();
-    srv.once('error', () => resolve(false));
-    srv.listen(port, '127.0.0.1', () => srv.close(() => resolve(true)));
+async function doctor(): Promise<number> {
+  const path = configPath();
+  const cfg = existsSync(path)
+    ? loadConfig(path)
+    : { ...defaultConfig(), port: envPort() ?? defaultConfig().port };
+  const lines = await runDoctor({
+    port: cfg.port,
+    claudeProjectsDir: cfg.claudeProjectsDir,
+    configPath: path,
+    webDir: join(dirname(fileURLToPath(import.meta.url)), '..', 'web'),
+    home: process.env.HOME || osHomedir(),
+    noLaunchd: process.env.FLEET_NO_LAUNCHD === '1',
   });
+  for (const l of lines) console.log(formatLine(l));
+  return exitCode(lines);
 }
 
-async function doctor(): Promise<number> {
-  const cfg = loadConfig();
-  let bad = 0;
-  const line = (ok: boolean, msg: string): void => {
-    if (!ok) bad++;
-    console.log(`${ok ? 'ok  ' : 'FAIL'} ${msg}`);
-  };
-  const major = Number(process.versions.node.split('.')[0]);
-  line(major >= 20, `node ${process.versions.node} (need >=20)`);
-  line(existsSync(cfg.claudeProjectsDir), `claude projects dir ${cfg.claudeProjectsDir}`);
-  let gh = false;
-  try {
-    await pexec('gh', ['auth', 'status']);
-    gh = true;
-  } catch {
-    gh = false;
+function envPort(): number | undefined {
+  const v = process.env.FLEET_PORT;
+  if (v === undefined || v === '') return undefined;
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 0 && n <= 65535 ? n : undefined;
+}
+
+async function installCmd(args: string[]): Promise<number> {
+  const dryRun = args.includes('--dry-run');
+  const unknown = args.filter((a) => a !== '--dry-run');
+  if (unknown.length > 0) {
+    console.error(`Unknown option ${unknown[0]}. Usage: fleet install [--dry-run]`);
+    return 2;
   }
-  line(gh, 'gh auth status (needed only for GitHub polling)');
-  line(await portFree(cfg.port), `port ${cfg.port} free (fails if the daemon is already running)`);
-  return bad === 0 ? 0 : 1;
+  const opts = {
+    env: installEnv(process.env, process.execPath),
+    nodePath: process.execPath,
+    cliPath: fileURLToPath(import.meta.url),
+    logDir: join(dataDir(), 'logs'),
+  };
+  const home = process.env.HOME || osHomedir();
+  if (dryRun) {
+    // a dry run must not create the config or token either
+    const port = envPort() ?? defaultConfig().port;
+    const plan = planInstall(opts, { home });
+    console.log(`Dry run. Nothing was written and launchctl was not called.`);
+    console.log(`Plist path: ${plan.path}`);
+    console.log(plan.xml.trimEnd());
+    console.log(`Dashboard would be at http://127.0.0.1:${port}/.`);
+    return 0;
+  }
+  const cfg = loadConfig(); // create config/token before the daemon can race to do so
+  const noLoad = process.env.FLEET_NO_LAUNCHD === '1';
+  const path = await install(opts, { home, noLoad });
+  console.log(
+    noLoad
+      ? `Wrote ${path}. FLEET_NO_LAUNCHD=1 is set, so launchctl was not called.`
+      : `Installed and loaded ${path}.`,
+  );
+  console.log(`Dashboard: http://127.0.0.1:${cfg.port}/`);
+  console.log('Run fleet token for the access token and LAN URL.');
+  return 0;
 }
 
 async function main(argv: string[]): Promise<number> {
@@ -148,20 +179,17 @@ async function main(argv: string[]): Promise<number> {
       process.env.FLEET_DEMO = '1';
       await runDaemonCmd();
       return -1;
-    case 'install': {
-      const cfg = loadConfig(); // create config/token before the daemon can race to do so
-      const path = await install({
-        env: installEnv(process.env, process.execPath),
-        nodePath: process.execPath,
-        cliPath: fileURLToPath(import.meta.url),
-        logDir: join(dataDir(), 'logs'),
-      });
-      console.log(`installed ${path}`);
-      console.log(`dashboard: http://127.0.0.1:${cfg.port}/`);
-      return 0;
-    }
+    case 'install':
+      return installCmd(argv.slice(1));
     case 'uninstall':
-      console.log((await uninstall()) ? 'uninstalled' : 'not installed');
+      console.log(
+        (await uninstall({
+          home: process.env.HOME || osHomedir(),
+          noLoad: process.env.FLEET_NO_LAUNCHD === '1',
+        }))
+          ? 'Uninstalled the launchd agent.'
+          : 'No launchd agent was installed. Nothing to remove.',
+      );
       return 0;
     case 'status':
       return status();
