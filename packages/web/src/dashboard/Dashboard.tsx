@@ -4,6 +4,8 @@ import type { IconName } from '@fleet/ui';
 import type { ModelFamily, OrchTask } from '@fleet/shared';
 import type { FleetView, Selection } from '../data/contract';
 import { Icon } from '../shell/Icon';
+import { Overnight } from './Overnight.jsx';
+import { Spend } from './Spend';
 import {
   aggregateFleet,
   clockTime,
@@ -20,7 +22,7 @@ import {
 import type { SessionSortKey } from './model';
 import './dashboard.css';
 
-export type DashboardTab = 'overview' | 'sessions' | 'armies' | 'prs' | 'alerts' | 'overnight';
+export type DashboardTab = 'overview' | 'sessions' | 'armies' | 'prs' | 'alerts' | 'overnight' | 'spend';
 export interface DashboardProps {
   view: FleetView;
   selection: Selection;
@@ -255,7 +257,8 @@ export default function Dashboard({
     const timer = window.setInterval(() => setClock(Date.now()), 15000);
     return () => window.clearInterval(timer);
   }, []);
-  if (tab === 'overnight') return <div data-slot="overnight" />;
+  if (tab === 'overnight') return <Overnight view={view} />;
+  if (tab === 'spend') return <Spend />;
   const snapshot = view.snapshot;
   if (!snapshot) return <DashboardSkeleton />;
   const now = view.mode === 'replay' ? view.replay.at : view.mode === 'demo' ? snapshot.generatedAt : clock;

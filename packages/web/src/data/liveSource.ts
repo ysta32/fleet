@@ -1,28 +1,15 @@
 import type { FleetEvent, FleetSnapshot, HistoryResponse } from '@fleet/shared';
 
-function initialToken(): string | null {
-  if (typeof window === 'undefined') return null;
+function stripBootstrapToken(): void {
+  if (typeof window === 'undefined') return;
   const url = new URL(window.location.href);
-  if (url.searchParams.has('token')) {
-    const token = url.searchParams.get('token');
-    try {
-      window.localStorage.setItem('fleet.token', token ?? '');
-    } catch {
-      // Keep authentication available when storage is disabled.
-    }
-    url.searchParams.delete('token');
-    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
-    return token;
-  }
-  try {
-    return window.localStorage.getItem('fleet.token');
-  } catch {
-    return null;
-  }
+  if (!url.searchParams.has('token')) return;
+  // The collector exchanges token links for a cookie when serving the shell.
+  url.searchParams.delete('token');
+  window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
 }
 
-let token = initialToken();
-let opened = false;
+stripBootstrapToken();
 
 export function apiUrl(path: string): string {
   const url = new URL(path, window.location.origin);
@@ -48,25 +35,12 @@ export function connectLive(handlers: {
     if (stopped) return;
     try {
       const url = new URL('/api/events', window.location.origin);
-      if (!opened) {
-        let connectionToken = token;
-        if (!connectionToken) {
-          try {
-            connectionToken = window.localStorage.getItem('fleet.token');
-          } catch {
-            // Storage may be disabled; still try connecting with the session cookie.
-          }
-        }
-        if (connectionToken) url.searchParams.set('token', connectionToken);
-      }
       source = new EventSource(`${url.pathname}${url.search}`);
     } catch {
       reconnect();
       return;
     }
     source.onopen = () => {
-      token = null;
-      opened = true;
       attempt = 0;
       handlers.connected(true);
     };

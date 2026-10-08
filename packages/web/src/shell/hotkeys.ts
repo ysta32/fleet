@@ -104,6 +104,7 @@ export const KEYMAP: { keys: string[]; label: string; group: string }[] = [
   { group: 'Go to', keys: ['G', 'P'], label: 'PRs and deploys' },
   { group: 'Go to', keys: ['G', 'I'], label: 'Alerts inbox' },
   { group: 'Go to', keys: ['G', 'N'], label: 'Overnight' },
+  { group: 'Go to', keys: ['G', 'C'], label: 'Spend' },
   { group: 'Replay', keys: ['Space'], label: 'Play or pause' },
   { group: 'Replay', keys: ['[', ']'], label: 'Scrub back or forward 2%' },
   { group: 'Replay', keys: ['L'], label: 'Back to live' },

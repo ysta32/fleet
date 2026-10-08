@@ -13,3 +13,5 @@ coverage/
 captures/
 *.tsbuildinfo
 packages/collector/web/
+.vercel
+.env*

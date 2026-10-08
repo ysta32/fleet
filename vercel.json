@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "npm ci",
+  "buildCommand": "npm run build -w @fleet/shared -w @fleet/ui -w @fleet/digest -w fleet-spend && npm run build -w @fleet/site",
+  "outputDirectory": "apps/site/out",
+  "cleanUrls": true,
+  "trailingSlash": false
+}
