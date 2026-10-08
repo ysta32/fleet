@@ -40,6 +40,8 @@ build_checkout() {
     npm ci --no-audit --no-fund
   fi
   npm run build --workspaces --if-present
+  # workspace order builds the collector before web; recopy so the shipped dashboard is current
+  npm run copy-web --workspace fleet-collector
   "${npm_global[@]}" "$dir/packages/collector"
 }
 

@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { FleetSnapshot } from '@fleet/shared';
+import { Notifier } from '../notify.js';
 import { GithubPoller, type ExecFn } from './poller.js';
 
 const date = '2026-01-01T00:00:00Z';
@@ -166,6 +168,22 @@ describe('GithubPoller', () => {
     const result = await poller.poll(projects);
     expect(result.prs[0].ci).toBe('pending');
     expect(result.events).toEqual([]);
+  });
+
+  it('deploy failure events carry source=deploy and pass the notifier filter', async () => {
+    const { poller, data } = fixture();
+    await poller.poll(projects);
+    data.statuses[0].state = 'error';
+    const { events } = await poller.poll(projects);
+    const failure = events.find((event) => event.kind === 'failure');
+    expect(failure?.data).toEqual({ source: 'deploy' });
+    const notifier = new Notifier(
+      { macos: false, kinds: ['deploy.failed'] },
+      { exec: vi.fn(), fetch: vi.fn(), platform: 'linux' },
+    );
+    const snap = { projects: [{ id: 'synthetic', name: 'demo', path: '/synthetic/project' }] };
+    const alert = notifier.handle(failure!, snap as unknown as FleetSnapshot);
+    expect(alert).toMatchObject({ kind: 'deploy.failed' });
   });
 
   it('emits only changed merge, CI, release and deployment events', async () => {
