@@ -103,7 +103,8 @@ const world = JSON.parse(await readFile(path.join(site, 'lib/world.generated.jso
 
 /** The waiting station's tag anchor (its signal pennant) as fractions of the viewport, or null. */
 const NEEDS_ANCHOR = () => {
-  const tag = [...document.querySelectorAll('.fl-viz-tag[data-needs="1"]')].find(
+  // the station the island's camera frames (island/entry.tsx markSignalTag), as for the live beacon
+  const tag = [...document.querySelectorAll('.fl-viz-tag[data-signal="1"]')].find(
     (el) => el.style.visibility !== 'hidden' && el.style.display !== 'none',
   );
   if (!tag) return null;

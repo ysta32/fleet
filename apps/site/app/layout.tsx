@@ -70,7 +70,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <a className="skip" href="#main">
           Skip to content
         </a>
-        <header className="nav">
+        <header className="nav" data-fl-overlay>
           <div className="wrap">
             <Link href="/" className="brand" aria-label="Fleet home">
               <Wordmark className="wordmark" />

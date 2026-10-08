@@ -23,11 +23,27 @@ const POSTER_WIDTHS = [768, 1280, 1920] as const;
 const srcSet = (t: Theme) => POSTER_WIDTHS.map((w) => `/poster/fleet-${t}-${w}.webp ${w}w`).join(', ');
 /** Square 840px phone poster (scripts/assets.mjs: public/poster/fleet-<theme>-m.webp). */
 const phonePoster = (t: Theme) => `/poster/fleet-${t}-m.webp`;
-/** Mirrors the <picture> sources below for a visitor on the system scheme (the common case and Lighthouse's). */
-const POSTER_PRELOADS = (['light', 'dark'] as const).flatMap((t) => [
-  { media: `(max-width: 720px) and (prefers-color-scheme: ${t})`, href: phonePoster(t) },
-  { media: `(min-width: 721px) and (prefers-color-scheme: ${t})`, srcSet: srcSet(t) },
-]);
+interface PosterSource {
+  media: string;
+  srcSet: string;
+  sizes?: string;
+}
+/**
+ * The one table behind both the <picture> sources and the head preloads, so a preload always fetches exactly the
+ * poster the picture paints. Phones (<= 720px, the island's NARROW_MAX_PX) get the square still. With no forced
+ * theme the system scheme picks; a forced theme (html[data-theme], known only after hydration on a static export)
+ * narrows the picture to that theme. The preloads use the system table: before hydration that is what paints.
+ */
+function posterSources(forced: Theme | null): PosterSource[] {
+  return (forced ? [forced] : (['light', 'dark'] as const)).flatMap((t) => {
+    const scheme = forced ? '' : ` and (prefers-color-scheme: ${t})`;
+    return [
+      { media: `(max-width: 720px)${scheme}`, srcSet: phonePoster(t) },
+      { media: `(min-width: 721px)${scheme}`, srcSet: srcSet(t), sizes: '100vw' },
+    ];
+  });
+}
+const POSTER_PRELOADS = posterSources(null);
 
 /**
  * The scene follows html[data-theme], else the system scheme. The <picture> covers the system case
@@ -98,44 +114,6 @@ const ANCHOR_VARS = Object.fromEntries(
   ]),
 ) as React.CSSProperties;
 
-/** Clearance (px) a station tag keeps from the hero copy. */
-const KEEPOUT_PAD = 14;
-
-/**
- * Keeps the scene's station tags out of the words: a tag whose text block would sit over a [data-keepout]
- * element of the section (eyebrow, headline, lead, meta row; for a [data-keepout="children"] row, each of its
- * items: install box, demo link) or in the top band under the header fades out (data-occluded, globals.css). The waiting station's tag is never hidden; the
- * camera framing keeps it clear. All reads happen before any write, so this costs one layout per frame.
- */
-function keepLabelsClear(tags: HTMLElement[], section: Element, stage: DOMRect) {
-  const zones = [
-    ...section.querySelectorAll(
-      '[data-keepout]:not([data-keepout="children"]), [data-keepout="children"] > *',
-    ),
-  ].map((el) => el.getBoundingClientRect());
-  const band = stage.top + Math.min(80, stage.height * 0.14);
-  const hits = tags.map((tag) => {
-    if (tag.dataset.needs === '1') return false;
-    const b = (tag.querySelector('.fl-viz-block') ?? tag).getBoundingClientRect();
-    if (b.width === 0 && b.height === 0) return false;
-    if (b.top < band) return true;
-    return zones.some(
-      (z) =>
-        b.left < z.right + KEEPOUT_PAD &&
-        b.right > z.left - KEEPOUT_PAD &&
-        b.top < z.bottom + KEEPOUT_PAD &&
-        b.bottom > z.top - KEEPOUT_PAD,
-    );
-  });
-  tags.forEach((tag, i) => {
-    const want = hits[i] ? '1' : undefined;
-    if (tag.dataset.occluded !== want) {
-      if (want) tag.dataset.occluded = want;
-      else delete tag.dataset.occluded;
-    }
-  });
-}
-
 /**
  * Follows the live scene's waiting station: its tag anchor (the signal pennant), measured each frame in the
  * stage's own, untransformed coordinates and handed to the stylesheet, which frames it and raises the beacon.
@@ -150,17 +128,16 @@ function trackSignal(stage: HTMLElement, frame: HTMLElement, host: HTMLElement):
     if (visible && !raf) raf = requestAnimationFrame(step);
   });
   io.observe(stage);
-  const section = stage.closest('section') ?? document.body;
   function step() {
     raf = 0;
     if (!visible) return;
-    const tags = [...host.querySelectorAll<HTMLElement>('.fl-viz-tag')].filter(
-      (el) => el.style.visibility !== 'hidden' && el.style.display !== 'none',
-    );
-    const tag = tags.find((el) => el.dataset.needs === '1');
+    // the island marks the station its camera frames (island/entry.tsx markSignalTag): one rule for camera,
+    // beacon and poster anchors
+    const marked = host.querySelector<HTMLElement>('.fl-viz-tag[data-signal="1"]');
+    const tag =
+      marked && marked.style.visibility !== 'hidden' && marked.style.display !== 'none' ? marked : null;
     const sr = stage.getBoundingClientRect();
     const fr = frame.getBoundingClientRect();
-    keepLabelsClear(tags, section, sr);
     if (tag && sr.width > 0 && fr.width > 0) {
       const z = fr.width / sr.width;
       const r = tag.getBoundingClientRect();
@@ -278,7 +255,7 @@ export function FleetStage({
           rel="preload"
           as="image"
           media={p.media}
-          {...('href' in p ? { href: p.href } : { imageSrcSet: p.srcSet, imageSizes: '100vw' })}
+          {...(p.sizes ? { imageSrcSet: p.srcSet, imageSizes: p.sizes } : { href: p.srcSet })}
           fetchPriority="high"
         />
       ))}
@@ -291,16 +268,9 @@ export function FleetStage({
         <div ref={frame} className="stage-frame">
           <picture>
             {/* Phones get a square still rendered at phone size, so its station labels stay legible. */}
-            {forced ? null : (
-              <source
-                media="(max-width: 720px) and (prefers-color-scheme: light)"
-                srcSet={phonePoster('light')}
-              />
-            )}
-            <source media="(max-width: 720px)" srcSet={phonePoster(forced ?? 'dark')} />
-            {forced ? null : (
-              <source media="(prefers-color-scheme: light)" srcSet={srcSet('light')} sizes="100vw" />
-            )}
+            {posterSources(forced).map((p) => (
+              <source key={p.media} media={p.media} srcSet={p.srcSet} sizes={p.sizes} />
+            ))}
             <img
               className="hero-poster"
               src={`/poster/fleet-${forced ?? 'dark'}-1920.webp`}

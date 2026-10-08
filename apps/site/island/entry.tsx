@@ -110,7 +110,9 @@ const FRAME_DIST = 0.74;
  * Phone-width canvases (the 375px hero and its 420px poster) come in closer, as a share of the same distance,
  * and look a little below the station so it sits above centre, clear of the copy that rises over the stage's foot.
  */
-const NARROW_PX = 600;
+/** Same breakpoint as the hero <picture>'s square phone poster (FleetStage: max-width 720px), so the still and the
+ * live camera always use the same framing. */
+const NARROW_MAX_PX = 720;
 const FRAME_DIST_NARROW = 0.5;
 const LOOK_Y_NARROW = -0.6;
 
@@ -127,6 +129,38 @@ function waitingStation(snap: FleetSnapshot): { index: number; count: number } |
       best = { index, count };
   }
   return best ? { index: best.index, count: ids.length } : null;
+}
+
+/**
+ * The one "which station is the signal" rule for the hero: the camera aims at waitingStation(), and this marks that
+ * station's tag data-signal="1" so the beacon (FleetStage) and the poster anchors (scripts/assets.mjs) follow the
+ * same station. Tags carry no project id, so the marked tag is the needs-you tag whose anchor (the 0x0 tag root sits
+ * on it) is nearest the station's projection: the anchor is on the station's own vertical axis, other stations are
+ * far apart on screen. `ndc` is the projected station (null: nothing waiting, no tag marked).
+ */
+function markSignalTag(host: HTMLElement, ndc: THREE.Vector3 | null, canvas: HTMLCanvasElement): void {
+  const tags = host.querySelectorAll<HTMLElement>('.fl-viz-tag[data-needs="1"], .fl-viz-tag[data-signal]');
+  let pick: HTMLElement | null = null;
+  if (ndc && tags.length) {
+    const c = canvas.getBoundingClientRect();
+    const px = c.left + (ndc.x * 0.5 + 0.5) * c.width;
+    const py = c.top + (1 - (ndc.y * 0.5 + 0.5)) * c.height;
+    let best = Infinity;
+    for (const t of tags) {
+      if (t.dataset.needs !== '1') continue;
+      const r = t.getBoundingClientRect();
+      const d = (r.left - px) ** 2 + 0.25 * (r.top - py) ** 2;
+      if (d < best) {
+        best = d;
+        pick = t;
+      }
+    }
+  }
+  for (const t of tags) {
+    if (t === pick) {
+      if (t.dataset.signal !== '1') t.dataset.signal = '1';
+    } else if (t.dataset.signal !== undefined) delete t.dataset.signal;
+  }
 }
 
 interface FramingControls extends THREE.EventDispatcher<{ start: object }> {
@@ -162,6 +196,8 @@ function useSignalFraming(
     const offset = new THREE.Vector3();
     const sph = new THREE.Spherical();
     const at = { x: 0, y: 0, z: 0 };
+    const station = new THREE.Vector3();
+    const seen = new THREE.Vector3();
     let yaw = 0;
     let started = false;
     let reported = false;
@@ -171,11 +207,12 @@ function useSignalFraming(
       if (!s || !controls) return;
       const n = Math.max(1, s.projects.length);
       const w = waitingStation(s);
-      const narrow = state.size.width < NARROW_PX;
+      const narrow = state.size.width <= NARROW_MAX_PX;
       const lookY = narrow ? LOOK_Y_NARROW : LOOK_Y;
       let goalYaw = yaw;
       if (w) {
         stationPosition(w.index, w.count, at);
+        station.set(at.x, at.y, at.z);
         goal.set(at.x, lookY, at.z);
         goalYaw = Math.atan2(at.x, at.z) + FRAME_YAW;
       } else goal.set(0, lookY, 0);
@@ -202,6 +239,8 @@ function useSignalFraming(
       controls.target.copy(target);
       state.camera.position.copy(target).add(offset.setFromSpherical(sph));
       state.camera.lookAt(target);
+      state.camera.updateMatrixWorld();
+      markSignalTag(host, w ? seen.copy(station).project(state.camera) : null, state.gl.domElement);
       if (!reported) {
         reported = true;
         // this frame renders framed; report after it has been presented
