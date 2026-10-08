@@ -164,6 +164,21 @@ describe('readOrchRun', () => {
     },
   );
 
+  it.each(['Task 01 LANDED', '- Task **01** LANDED', '| 01 | auth | LANDED |'])(
+    'reads task-prefixed and table states from %s',
+    async (status) => {
+      await fixture({
+        'STATUS.md': status,
+        'TASKS/01-auth.md': '',
+        'TASKS/02-other.md': '',
+      });
+      expect((await readOrchRun(project, 'p'))!.tasks.map((task) => task.state)).toEqual([
+        'landed',
+        'queued',
+      ]);
+    },
+  );
+
   it.each(['STATUS.md', 'HANDOFF.md'])('reads mixed state segments from %s', async (file) => {
     await fixture({
       [file]: 'cycle2: landed 10,12; in flight 09,11 17:29',
@@ -388,6 +403,43 @@ describe('readOrchRun git signal', () => {
     sh('add', name);
     sh('commit', '-q', '-m', name);
   };
+
+  it('uses the inflight base when only the tip survives in the reflog', async () => {
+    sh('init', '-q', '-b', 'orch/current');
+    await commit('base.txt');
+    const base = sh('rev-parse', 'HEAD');
+    sh('checkout', '-q', '-b', 'orch-task/t01');
+    await commit('work.txt');
+    sh('reflog', 'delete', 'orch-task/t01@{1}');
+    const tip = sh('rev-parse', 'HEAD');
+    expect(sh('reflog', 'show', '--format=%H', 'orch-task/t01')).toBe(tip);
+    sh('checkout', '-q', 'orch/current');
+    sh('merge', '-q', '--ff-only', 'orch-task/t01');
+    await fixture({ 'TASKS/01-auth.md': '' });
+    expect((await readOrchRun(project, 'p'))!.tasks[0].state).toBe('queued');
+    await fixture({ 'INFLIGHT.md': `01 | coder | a | wt/t01 | ${base} | 12:00` });
+    expect((await readOrchRun(project, 'p'))!.tasks[0].state).toBe('landed');
+  });
+
+  it('prefers the inflight base over the reflog and refreshes when the base changes', async () => {
+    sh('init', '-q', '-b', 'orch/current');
+    await commit('base.txt');
+    const base = sh('rev-parse', 'HEAD');
+    sh('checkout', '-q', '-b', 'orch-task/t01');
+    await commit('work.txt');
+    const tip = sh('rev-parse', 'HEAD');
+    sh('checkout', '-q', 'orch/current');
+    sh('merge', '-q', '--ff-only', 'orch-task/t01');
+    await fixture({
+      'TASKS/01-auth.md': '',
+      'INFLIGHT.md': `01 | coder | a | wt/t01 | ${tip} | 12:00`,
+    });
+    expect((await readOrchRun(project, 'p'))!.tasks[0].state).toBe('running');
+    await fixture({ 'INFLIGHT.md': `01 | coder | a | wt/t01 | ${base} | 12:00` });
+    const result = (await readOrchRun(project, 'p'))!;
+    expect(result.tasks[0].state).toBe('landed');
+    expect(result.inflight).toEqual([]);
+  });
 
   it('marks merged task branches with work as landed, read-only', async () => {
     sh('init', '-q', '-b', 'main');

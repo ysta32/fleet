@@ -6,44 +6,60 @@ import type { FleetSnapshot, TokenUsage, ToolCallSummary } from '@fleet/shared';
 import type { Selection } from '../data/contract';
 import { countBy, formatElapsed, formatTokens } from './layout';
 import { useSceneStore } from './store';
-import { CI_COLORS, HALYARD, MODEL_COLORS, PHASE_COLORS, TASK_STATE_COLORS } from './theme';
+import { FONTS, useVizTheme, type VizTheme } from './theme';
 
-const card: CSSProperties = {
+function useH() {
+  const vt = useVizTheme();
+  return {
+    vt,
+    fg: vt.fg,
+    fgMuted: vt.fgMuted,
+    fgSubtle: vt.fgSubtle,
+    border: vt.hud.border,
+    borderStrong: vt.hud.borderStrong,
+    fontMono: FONTS.mono,
+    fontDisplay: FONTS.display,
+    trackingCaps: FONTS.trackingCaps,
+  };
+}
+const cardStyle = (vt: VizTheme): CSSProperties => ({
   transform: 'translate(28px, -50%)',
   minWidth: 248,
   maxWidth: 300,
   padding: '12px 14px 12px',
-  background: 'rgba(18, 21, 20, 0.92)',
-  border: `1px solid ${HALYARD.borderStrong}`,
-  borderRadius: HALYARD.radiusMd,
-  boxShadow: '0 1px 0 rgba(255,255,255,0.04) inset, 0 24px 64px rgba(0,0,0,0.6)',
+  background: vt.hud.bg,
+  border: `1px solid ${vt.hud.borderStrong}`,
+  borderRadius: 6,
+  boxShadow: vt.hud.shadow,
   backdropFilter: 'blur(8px)',
-  color: HALYARD.fg,
-  fontFamily: HALYARD.fontMono,
+  color: vt.fg,
+  fontFamily: FONTS.mono,
   fontSize: 11,
   lineHeight: 1.55,
+  fontVariantNumeric: 'tabular-nums',
   pointerEvents: 'auto',
   userSelect: 'none',
-};
-const caps: CSSProperties = {
+});
+const caps = (H: ReturnType<typeof useH>): CSSProperties => ({
   textTransform: 'uppercase',
-  letterSpacing: HALYARD.trackingCaps,
-  color: HALYARD.fgSubtle,
+  letterSpacing: H.trackingCaps,
+  color: H.fgSubtle,
   fontSize: 10,
-};
+});
 
 function Row({ k, children }: { k: string; children: ReactNode }) {
+  const H = useH();
   return (
     <div
       style={{
         display: 'flex',
         justifyContent: 'space-between',
         gap: 16,
-        borderTop: `1px solid ${HALYARD.border}`,
+        borderTop: `1px solid ${H.border}`,
         padding: '3px 0',
       }}
     >
-      <span style={caps}>{k}</span>
+      <span style={caps(H)}>{k}</span>
       <span style={{ textAlign: 'right', overflowWrap: 'anywhere' }}>{children}</span>
     </div>
   );
@@ -64,6 +80,7 @@ function Header({
   color: string;
   onClose(): void;
 }) {
+  const H = useH();
   return (
     <div
       style={{
@@ -75,10 +92,8 @@ function Header({
       }}
     >
       <div>
-        <div style={{ ...caps, color }}>{kicker}</div>
-        <div style={{ fontFamily: HALYARD.fontDisplay, fontSize: 22, lineHeight: 1.1, color: HALYARD.fg }}>
-          {title}
-        </div>
+        <div style={{ ...caps(H), color }}>{kicker}</div>
+        <div style={{ fontFamily: H.fontDisplay, fontSize: 22, lineHeight: 1.1, color: H.fg }}>{title}</div>
       </div>
       <button
         onClick={(e) => {
@@ -88,8 +103,8 @@ function Header({
         aria-label="Close"
         style={{
           background: 'none',
-          border: `1px solid ${HALYARD.border}`,
-          color: HALYARD.fgMuted,
+          border: `1px solid ${H.border}`,
+          color: H.fgMuted,
           borderRadius: 4,
           cursor: 'pointer',
           font: 'inherit',
@@ -113,6 +128,8 @@ function CardBody({
   now: number;
   onClose(): void;
 }) {
+  const H = useH();
+  const vt = H.vt;
   if (sel.kind === 'project') {
     const p = snap.projects.find((x) => x.id === sel.id);
     if (!p) return null;
@@ -122,7 +139,7 @@ function CardBody({
     const tokens = sessions.reduce((n, s) => n + sumTokens(s.tokens), 0);
     const pr = snap.prs.filter((x) => x.projectId === p.id).sort((a, b) => b.updatedAt - a.updatedAt)[0];
     const counts = p.orch ? countBy(p.orch.tasks) : {};
-    const color = p.orch ? PHASE_COLORS[p.orch.phase] : HALYARD.fgMuted;
+    const color = p.orch ? vt.phase[p.orch.phase] : H.fgMuted;
     return (
       <>
         <Header
@@ -139,7 +156,7 @@ function CardBody({
           <Row k="tasks">
             {(['running', 'review', 'landed', 'blocked', 'queued'] as const).map((s) =>
               counts[s] ? (
-                <span key={s} style={{ color: TASK_STATE_COLORS[s], marginLeft: 8 }}>
+                <span key={s} style={{ color: vt.task[s], marginLeft: 8 }}>
                   {counts[s]} {s}
                 </span>
               ) : null,
@@ -148,7 +165,7 @@ function CardBody({
         )}
         {pr && (
           <Row k={`pr #${pr.number}`}>
-            <span style={{ color: CI_COLORS[pr.ci] }}>ci {pr.ci}</span>
+            <span style={{ color: vt.ci[pr.ci] }}>ci {pr.ci}</span>
           </Row>
         )}
         <Row k="tokens">{formatTokens(tokens)}</Row>
@@ -169,7 +186,7 @@ function CardBody({
       <Header
         title={a ? a.label : (session?.title ?? 'session')}
         kicker={a ? `${a.role} · ${model} · ${a.status}` : `session · ${model} · ${session!.status}`}
-        color={MODEL_COLORS[model]}
+        color={vt.model[model]}
         onClose={onClose}
       />
       {a?.currentTask && <Row k="task">{a.currentTask}</Row>}
@@ -177,7 +194,7 @@ function CardBody({
       <Row k="last tool">{toolText(a?.lastTool ?? session?.lastTool, now)}</Row>
       <Row k="tokens">
         {formatTokens(sumTokens(tokens))}
-        <span style={{ color: HALYARD.fgSubtle }}>
+        <span style={{ color: H.fgSubtle }}>
           {' '}
           ({formatTokens(tokens.input)} in · {formatTokens(tokens.output)} out)
         </span>
@@ -204,6 +221,7 @@ export function Hud({
   onClose(): void;
 }) {
   const store = useSceneStore();
+  const vt = useVizTheme();
   const anchor = useRef<THREE.Group>(null);
   const [wallNow, setWallNow] = useState(() => Date.now());
   const now = replayAt ?? wallNow;
@@ -237,7 +255,7 @@ export function Hud({
     <group ref={anchor}>
       {visible && (
         <Html zIndexRange={[100, 50]} style={{ pointerEvents: 'none' }}>
-          <div style={card} onPointerDown={(e) => e.stopPropagation()}>
+          <div style={cardStyle(vt)} onPointerDown={(e) => e.stopPropagation()}>
             <CardBody sel={selection} snap={snapshot} now={now} onClose={onClose} />
           </div>
         </Html>

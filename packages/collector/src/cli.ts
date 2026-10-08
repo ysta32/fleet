@@ -53,12 +53,23 @@ const DAEMON_MODULE = './daemon.js';
 async function runDaemonCmd(): Promise<void> {
   const cfg = loadConfig();
   const { runDaemon } = (await import(DAEMON_MODULE)) as {
-    runDaemon: (c: typeof cfg) => Promise<{ close(): void }>;
+    runDaemon: (c: typeof cfg) => Promise<{ port: number; host: string; close(): Promise<void> }>;
   };
   const d = await runDaemon(cfg);
+  console.log(
+    `fleet listening on http://${d.host}:${d.port}/${process.env.FLEET_DEMO === '1' ? ' (demo)' : ''}`,
+  );
+  let stopping = false;
   const stop = (): void => {
-    d.close();
-    process.exit(0);
+    if (stopping) return;
+    stopping = true;
+    d.close().then(
+      () => process.exit(0),
+      (err: unknown) => {
+        console.error('fleet: shutdown failed:', err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      },
+    );
   };
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);

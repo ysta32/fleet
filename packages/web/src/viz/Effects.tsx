@@ -2,7 +2,8 @@ import { useLayoutEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { clamp, easeOutCubic, ringPulse, type PulseState } from './layout';
-import { BEAM_POOL, PARTICLE_POOL, RING_POOL, useSceneStore } from './store';
+import { BEAM_POOL, PARTICLE_POOL, RING_POOL, useSceneStore, type SceneStore } from './store';
+import { useVizTheme } from './theme';
 
 const m4 = new THREE.Matrix4();
 const q = new THREE.Quaternion();
@@ -12,6 +13,16 @@ const black = new THREE.Color(0, 0, 0);
 const c3 = new THREE.Color();
 const pulse: PulseState = { scale: 0, opacity: 0, alive: false };
 const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
+const white = new THREE.Color(1, 1, 1);
+
+/**
+ * Write the effect colour for opacity `op` into c3. On ink (additive) light fades to black;
+ * on paper (multiply) ink fades to white. Paper never exceeds the base colour.
+ */
+function fade(store: SceneStore, color: THREE.Color, gain: number, op: number): THREE.Color {
+  if (store.vt.dark) return c3.copy(color).multiplyScalar(gain * op);
+  return c3.copy(white).lerp(color, Math.min(1, op * Math.min(1, gain)));
+}
 
 function additive(): THREE.MeshBasicMaterial {
   return new THREE.MeshBasicMaterial({
@@ -46,10 +57,19 @@ export function Effects() {
 
   const ringGeo = useMemo(() => new THREE.RingGeometry(0.975, 1, 160).rotateX(-Math.PI / 2), []);
   const beamGeo = useMemo(() => new THREE.CylinderGeometry(1, 1, 1, 24, 1, true).translate(0, 0.5, 0), []);
-  const partGeo = useMemo(() => new THREE.OctahedronGeometry(0.06, 0), []);
+  const partGeo = useMemo(() => new THREE.OctahedronGeometry(0.085, 0), []);
   const ringMat = useMemo(additive, []);
   const beamMat = useMemo(additive, []);
   const partMat = useMemo(additive, []);
+
+  const vt = useVizTheme();
+  useLayoutEffect(() => {
+    for (const m of [ringMat, beamMat, partMat]) {
+      m.blending = vt.fxBlending;
+      m.premultipliedAlpha = !vt.dark;
+      m.needsUpdate = true;
+    }
+  }, [vt, ringMat, beamMat, partMat]);
 
   useLayoutEffect(() => {
     if (rings.current) initInstances(rings.current, RING_POOL);
@@ -69,15 +89,28 @@ export function Effects() {
     [ringGeo, beamGeo, partGeo, ringMat, beamMat, partMat],
   );
 
+  const epoch = useRef(store.seekEpoch);
   useFrame((_, dtRaw) => {
     const dt = Math.min(dtRaw, 0.05);
     const t = store.t;
+    if (epoch.current !== store.seekEpoch) {
+      // replay scrub: transient effects belong to the old timeline
+      epoch.current = store.seekEpoch;
+      if (rings.current) initInstances(rings.current, RING_POOL);
+      if (beams.current) initInstances(beams.current, BEAM_POOL);
+      if (parts.current) initInstances(parts.current, PARTICLE_POOL);
+    }
     const rm = rings.current;
     if (rm) {
       for (let i = 0; i < RING_POOL; i++) {
         const r = store.rings[i]!;
         if (!r.active) continue;
         const age = t - r.start;
+        if (age < 0) {
+          // staggered echo not started yet
+          rm.setMatrixAt(i, ZERO);
+          continue;
+        }
         ringPulse(age, r.dur, r.from, r.to, pulse);
         if (!pulse.alive) {
           r.active = false;
@@ -97,8 +130,7 @@ export function Effects() {
         s3.set(pulse.scale, 1, pulse.scale);
         m4.compose(p3, q.identity(), s3);
         rm.setMatrixAt(i, m4);
-        c3.copy(r.color).multiplyScalar(op);
-        rm.setColorAt(i, c3);
+        rm.setColorAt(i, fade(store, r.color, r.gain, op));
       }
       rm.instanceMatrix.needsUpdate = true;
       if (rm.instanceColor) rm.instanceColor.needsUpdate = true;
@@ -121,8 +153,7 @@ export function Effects() {
         s3.set(rad, b.height * grow, rad);
         m4.compose(b.pos, q.identity(), s3);
         bm.setMatrixAt(i, m4);
-        c3.copy(b.color).multiplyScalar(Math.pow(1 - u, 1.5));
-        bm.setColorAt(i, c3);
+        bm.setColorAt(i, fade(store, b.color, b.gain, Math.pow(1 - u, 1.5)));
       }
       bm.instanceMatrix.needsUpdate = true;
       if (bm.instanceColor) bm.instanceColor.needsUpdate = true;
@@ -148,8 +179,7 @@ export function Effects() {
         s3.set(sc, sc, sc);
         m4.compose(p.pos, q.identity(), s3);
         pm.setMatrixAt(i, m4);
-        c3.copy(p.color).multiplyScalar(1 - u);
-        pm.setColorAt(i, c3);
+        pm.setColorAt(i, fade(store, p.color, p.gain, 1 - u));
       }
       pm.instanceMatrix.needsUpdate = true;
       if (pm.instanceColor) pm.instanceColor.needsUpdate = true;

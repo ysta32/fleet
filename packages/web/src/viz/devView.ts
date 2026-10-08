@@ -18,7 +18,12 @@ import type {
   Session,
   Severity,
 } from '@fleet/shared';
+import * as shared from '@fleet/shared';
+import type { DemoFleet } from '@fleet/shared';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import type { FleetView, ReplayControls } from '../data/contract';
+import { clampPlayhead, normalizeHistory, reconstruct } from '../data/replay';
+import type { HistoryResponse } from '@fleet/shared';
 
 function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
@@ -52,12 +57,19 @@ export interface DevFleet {
   subscribe(cb: () => void): () => void;
   start(): void;
   stop(): void;
+  /** dev/screenshot trigger: fire a synthetic event of `kind` on the n-th project */
+  fire(kind: FleetEventKind, projectIndex?: number): void;
+  /** dev/screenshot: enter replay of the last `hours` of synthetic history (if supported) */
+  replay?(hours: number): void;
+  /** dev/screenshot: move the replay playhead to fraction `f` (0..1) of the window */
+  seek?(f: number): void;
 }
 
 export function createDevFleet(opts: { seed?: number; projects?: number; tickMs?: number } = {}): DevFleet {
   const rnd = mulberry32(opts.seed ?? 7);
   const pick = <T>(xs: readonly T[]): T => xs[Math.floor(rnd() * xs.length)]!;
-  const nProjects = Math.max(1, Math.min(NAMES.length, opts.projects ?? 5));
+  // beyond the named set (perf staging, e.g. 40 projects) names are numbered and still synthetic
+  const nProjects = Math.max(1, Math.min(64, opts.projects ?? 5));
   const tickMs = opts.tickMs ?? 450;
   const now0 = Date.now();
   let seq = 0;
@@ -68,7 +80,8 @@ export function createDevFleet(opts: { seed?: number; projects?: number; tickMs?
   const prs: PullRequest[] = [];
 
   for (let p = 0; p < nProjects; p++) {
-    const id = `-synthetic-${NAMES[p]}`;
+    const name = NAMES[p] ?? `synth-${String(p + 1).padStart(2, '0')}`;
+    const id = `-synthetic-${name}`;
     const hasOrch = p % 3 !== 2;
     const tasks: OrchTask[] = [];
     if (hasOrch) {
@@ -85,9 +98,9 @@ export function createDevFleet(opts: { seed?: number; projects?: number; tickMs?
     }
     projects.push({
       id,
-      name: NAMES[p]!,
+      name,
       path: '',
-      repo: `example/${NAMES[p]}`,
+      repo: `example/${name}`,
       branch: hasOrch ? 'orch/synthetic' : 'main',
       lastActivity: now0,
       orch: hasOrch
@@ -170,6 +183,11 @@ export function createDevFleet(opts: { seed?: number; projects?: number; tickMs?
       }
     }
   }
+
+  // one agent waits on the operator: the scene's single "needs you" signal
+  const waitIn = projects[Math.min(1, projects.length - 1)]!.id;
+  const waiter = agents.find((x) => x.role !== 'lead' && x.projectId === waitIn);
+  if (waiter) waiter.status = 'waiting';
 
   const listeners = new Set<(e: FleetEvent) => void>();
   const changeListeners = new Set<() => void>();
@@ -346,5 +364,185 @@ export function createDevFleet(opts: { seed?: number; projects?: number; tickMs?
       if (timer) clearInterval(timer);
       timer = null;
     },
+    fire(kind, projectIndex = 0) {
+      const p = projects[Math.abs(projectIndex) % projects.length]!;
+      const sev: Severity = kind === 'failure' ? 'error' : kind === 'blocked' ? 'warn' : 'success';
+      emit(kind, p.id, sev, `synthetic ${kind}`);
+    },
   };
+}
+
+/**
+ * Adapter: drive a FleetView from the shared synthetic demo generator (createDemoFleet) when
+ * @fleet/shared exports it. Events are emitted as the internal clock advances; the snapshot is
+ * refreshed at most every second.
+ */
+export function fromDemoFleet(demo: DemoFleet, tickMs = 250): DevFleet {
+  const listeners = new Set<(e: FleetEvent) => void>();
+  const changeListeners = new Set<() => void>();
+  const events: FleetEvent[] = [];
+  const t0 = Date.now();
+  let snapshot = demo.snapshot();
+  let lastSnap = 0;
+  let timer: ReturnType<typeof setInterval> | null = null;
+  const replay: ReplayControls = {
+    from: t0,
+    to: t0,
+    at: t0,
+    playing: false,
+    speed: 1,
+    seek: () => undefined,
+    setPlaying: () => undefined,
+    setSpeed: () => undefined,
+    load: () => undefined,
+    exit: () => undefined,
+  };
+  const make = (): FleetView => ({
+    mode: 'demo',
+    connected: true,
+    snapshot,
+    events: events.slice(),
+    onEvent(cb) {
+      listeners.add(cb);
+      return () => listeners.delete(cb);
+    },
+    replay,
+    startReplay: () => undefined,
+  });
+  let current = make();
+  const push = (e: FleetEvent) => {
+    events.push(e);
+    if (events.length > 300) events.shift();
+    for (const l of listeners) l(e);
+  };
+  // dev replay: the synthetic history reconstructed at a playhead (same math as the real data layer)
+  let hist: HistoryResponse | null = null;
+  let at = 0;
+  const makeReplay = (): FleetView => {
+    const h = hist!;
+    const r = reconstruct(h, at);
+    return {
+      mode: 'replay',
+      connected: true,
+      snapshot: r.snapshot,
+      events: r.events.slice(-300),
+      onEvent(cb) {
+        listeners.add(cb);
+        return () => listeners.delete(cb);
+      },
+      replay: { ...replay, from: h.from, to: h.to, at },
+      startReplay: () => undefined,
+    };
+  };
+  const notify = () => {
+    for (const l of changeListeners) l();
+  };
+  return {
+    view: () => current,
+    subscribe(cb) {
+      changeListeners.add(cb);
+      return () => changeListeners.delete(cb);
+    },
+    start() {
+      if (timer) return;
+      timer = setInterval(() => {
+        if (hist) return;
+        for (const e of demo.tick(tickMs)) push(e);
+        const now = Date.now();
+        if (now - lastSnap >= 1000) {
+          lastSnap = now;
+          snapshot = demo.snapshot();
+          current = make();
+          for (const l of changeListeners) l();
+        }
+      }, tickMs);
+    },
+    stop() {
+      if (timer) clearInterval(timer);
+      timer = null;
+    },
+    fire(kind, projectIndex = 0) {
+      const ps = snapshot.projects;
+      if (!ps.length) return;
+      const p = ps[Math.abs(projectIndex) % ps.length]!;
+      const ts = Date.now();
+      push({
+        id: `${ts}-dev`,
+        ts,
+        kind,
+        projectId: p.id,
+        severity: kind === 'failure' ? 'error' : 'success',
+        label: `synthetic ${kind}`,
+      });
+    },
+    replay(hours) {
+      hist = normalizeHistory(demo.history(hours));
+      at = hist.from;
+      current = makeReplay();
+      notify();
+    },
+    seek(f) {
+      if (!hist) return;
+      at = clampPlayhead(hist, hist.from + (hist.to - hist.from) * Math.min(1, Math.max(0, f)));
+      current = makeReplay();
+      notify();
+      // an explicit seek is silent: the scene is reconstructed at the playhead, no events replay
+    },
+  };
+}
+
+type DemoFactory = (opts?: { seed?: number; projects?: number }) => DemoFleet;
+
+/** Prefer the shared demo generator when exported; fall back to the local synthetic one. */
+export function createVizDevFleet(opts: { seed?: number; projects?: number } = {}): DevFleet {
+  const factory: unknown = Reflect.get(shared, 'createDemoFleet');
+  // the shared generator caps at 24 projects; perf staging beyond that uses the local one
+  if (typeof factory === 'function' && (opts.projects ?? 6) <= 24)
+    return fromDemoFleet((factory as DemoFactory)(opts));
+  return createDevFleet(opts);
+}
+
+/** True when the page was opened with `?vizdev=1` (dev/screenshot harness for the visualizer). */
+export function isVizDevRequested(
+  search: string = typeof window === 'undefined' ? '' : window.location.search,
+): boolean {
+  const v = new URLSearchParams(search).get('vizdev');
+  return v !== null && v !== '0' && v !== 'false';
+}
+
+/**
+ * When `?vizdev=1` is present, returns a synthetic FleetView (and exposes `window.__vizdev.fire`
+ * for screenshot choreography); otherwise null and does nothing.
+ */
+let sharedFleet: DevFleet | null = null;
+let sharedUsers = 0;
+
+/** One synthetic fleet per page: every useVizDevView caller (harness + nested scene) shares it. */
+function sharedVizDevFleet(): DevFleet {
+  const qs = new URLSearchParams(window.location.search);
+  const n = Number(qs.get('projects'));
+  const opts = Number.isInteger(n) && n > 0 ? { projects: n } : {};
+  // `?vizdev=local` stages the local generator (one agent waiting on you: the needs-you state)
+  return (sharedFleet ??= qs.get('vizdev') === 'local' ? createDevFleet(opts) : createVizDevFleet(opts));
+}
+
+function acquireSharedFleet(fleet: DevFleet): () => void {
+  if (sharedUsers++ === 0) {
+    fleet.start();
+    const w = window as unknown as { __vizdev?: Pick<DevFleet, 'fire' | 'replay' | 'seek'> };
+    w.__vizdev = { fire: fleet.fire, replay: fleet.replay, seek: fleet.seek };
+  }
+  return () => {
+    if (--sharedUsers > 0) return;
+    fleet.stop();
+    delete (window as unknown as { __vizdev?: unknown }).__vizdev;
+  };
+}
+
+export function useVizDevView(): FleetView | null {
+  const [fleet] = useState<DevFleet | null>(() => (isVizDevRequested() ? sharedVizDevFleet() : null));
+  useEffect(() => (fleet ? acquireSharedFleet(fleet) : undefined), [fleet]);
+  const sub = useCallback((cb: () => void) => (fleet ? fleet.subscribe(cb) : () => undefined), [fleet]);
+  const get = useCallback(() => (fleet ? fleet.view() : null), [fleet]);
+  return useSyncExternalStore(sub, get);
 }

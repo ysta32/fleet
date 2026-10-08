@@ -16,7 +16,7 @@ import {
   vec3,
   type Vec3,
 } from './layout';
-import { MODEL_COLORS, THEME } from './theme';
+import { vizTheme, type VizTheme } from './theme';
 
 export interface ProjectLayout {
   id: string;
@@ -26,6 +26,10 @@ export interface ProjectLayout {
   worktrees: string[];
   /** worktree id -> normalised task id */
   inflightWt: Map<string, string>;
+  /** has running tasks or working agents (drives orbit motion) */
+  busy: boolean;
+  /** accumulated orbit clock (s); advances only while busy */
+  orbitT: number;
 }
 
 export const RING_POOL = 64;
@@ -44,6 +48,7 @@ export interface RingFx {
   rise: number;
   pos: THREE.Vector3;
   color: THREE.Color;
+  gain: number;
 }
 export interface BeamFx {
   active: boolean;
@@ -53,6 +58,7 @@ export interface BeamFx {
   radius: number;
   pos: THREE.Vector3;
   color: THREE.Color;
+  gain: number;
 }
 export interface ParticleFx {
   active: boolean;
@@ -61,13 +67,15 @@ export interface ParticleFx {
   pos: THREE.Vector3;
   vel: THREE.Vector3;
   color: THREE.Color;
+  gain: number;
   size: number;
 }
 
 const tmpV = vec3();
+/** forward playhead jump (ms) treated as a scrub rather than playback */
+export const SEEK_JUMP_MS = 10_000;
 /** global effect brightness: restrained, instrument-like bloom */
 const FX_GAIN = 0.6;
-const tmpColor = new THREE.Color();
 
 export class SceneStore {
   /** scene clock (s), advanced by the root frame loop; drives effect lifetimes */
@@ -85,8 +93,13 @@ export class SceneStore {
   taskPos = new Map<string, THREE.Vector3>();
   /** agentId -> live world position of the bot */
   botPos = new Map<string, THREE.Vector3>();
-  /** projectId -> scene time until which the station flickers red */
-  flicker = new Map<string, number>();
+  /** active theme (colours for effects) */
+  vt: VizTheme = vizTheme('dark');
+  /**
+   * projectId -> one-shot `alert` motion (DESIGN.md: one overshoot pulse, never looped).
+   * kind 'needs' = blocked/waiting (signal orange), 'fail' = failure/CI red (danger).
+   */
+  alerts = new Map<string, { start: number; kind: 'needs' | 'fail' }>();
   /** projectId -> scene time of the last "activity" event (station pulse) */
   activityAt = new Map<string, number>();
   /** agent.move events applied ahead of the next snapshot */
@@ -94,6 +107,25 @@ export class SceneStore {
   /** data-source mode + playhead last seen; used to invalidate pending move overrides */
   private clockMode: string | null = null;
   private playhead = -Infinity;
+  /**
+   * Bumped on a discontinuity of the data clock (mode switch, replay seek backward, or a forward
+   * jump larger than playback can produce). Vessels snap and transient effects clear, so a scrubbed
+   * scene is a function of the playhead rather than of the path taken to it.
+   */
+  seekEpoch = 0;
+
+  /** True while the scene is driven by a replay playhead. */
+  get replaying(): boolean {
+    return this.clockMode === 'replay';
+  }
+
+  /**
+   * Replay clock (s) for ambient motion (hover, spin, task orbits): a pure function of the playhead,
+   * so revisiting a playhead reproduces the same scene. Only meaningful while `replaying`.
+   */
+  get replaySec(): number {
+    return Number.isFinite(this.playhead) ? this.playhead / 1000 : 0;
+  }
   rings: RingFx[] = [];
   beams: BeamFx[] = [];
   particles: ParticleFx[] = [];
@@ -114,6 +146,7 @@ export class SceneStore {
         rise: 0,
         pos: new THREE.Vector3(),
         color: new THREE.Color(),
+        gain: 1,
       });
     for (let i = 0; i < BEAM_POOL; i++)
       this.beams.push({
@@ -124,6 +157,7 @@ export class SceneStore {
         radius: 1,
         pos: new THREE.Vector3(),
         color: new THREE.Color(),
+        gain: 1,
       });
     for (let i = 0; i < PARTICLE_POOL; i++)
       this.particles.push({
@@ -133,6 +167,7 @@ export class SceneStore {
         pos: new THREE.Vector3(),
         vel: new THREE.Vector3(),
         color: new THREE.Color(),
+        gain: 1,
         size: 1,
       });
   }
@@ -142,11 +177,28 @@ export class SceneStore {
    * (live <-> demo <-> replay) or the playhead moves backward (replay seek), since they describe a
    * future that no longer applies. Idempotent for repeated calls with the same values.
    */
-  syncClock(mode: string, playhead: number): void {
-    if ((this.clockMode !== null && mode !== this.clockMode) || playhead < this.playhead)
-      this.locOverride.clear();
+  syncClock(mode: string, playhead: number, playing = true): void {
+    const switched = this.clockMode !== null && mode !== this.clockMode;
+    const back = playhead < this.playhead;
+    if (switched || back) this.locOverride.clear();
+    const moved = playhead !== this.playhead && Number.isFinite(this.playhead);
+    // replay: a paused playhead only moves by an explicit seek; while playing, playback advances at
+    // most 100ms x 60 per frame, so a backward move or a larger jump is a seek too
+    const seek = mode === 'replay' && moved && (!playing || back || playhead - this.playhead > SEEK_JUMP_MS);
+    if (switched || seek) this.discontinuity();
     this.clockMode = mode;
     this.playhead = playhead;
+  }
+
+  /** Drop everything transient (effects, alerts, pending moves) and start a new seek epoch. */
+  discontinuity(): void {
+    this.seekEpoch++;
+    this.locOverride.clear();
+    this.alerts.clear();
+    this.activityAt.clear();
+    for (const r of this.rings) r.active = false;
+    for (const b of this.beams) b.active = false;
+    for (const p of this.particles) p.active = false;
   }
 
   /** Apply a new snapshot: recompute station layout (stable by sorted id). Called during render, idempotent. */
@@ -171,7 +223,16 @@ export class SceneStore {
       const p = byId.get(id)!;
       let l = this.layouts.get(id);
       if (!l) {
-        l = { id, index, pos: new THREE.Vector3(), scale: 1, worktrees: [], inflightWt: new Map() };
+        l = {
+          id,
+          index,
+          pos: new THREE.Vector3(),
+          scale: 1,
+          worktrees: [],
+          inflightWt: new Map(),
+          busy: false,
+          orbitT: hash01(id) * 40,
+        };
         this.layouts.set(id, l);
       }
       l.index = index;
@@ -179,6 +240,7 @@ export class SceneStore {
       l.pos.set(tmpV.x, tmpV.y, tmpV.z);
       const running = p.orch ? p.orch.tasks.filter((t) => t.state === 'running').length : 0;
       l.scale = stationScale(working.get(id) ?? 0, running, snap.generatedAt - p.lastActivity);
+      l.busy = running > 0 || (working.get(id) ?? 0) > 0;
       l.worktrees = p.orch?.worktrees ?? [];
       l.inflightWt.clear();
       for (const f of p.orch?.inflight ?? []) l.inflightWt.set(f.worktree, normTaskId(f.task));
@@ -284,8 +346,10 @@ export class SceneStore {
     to: number,
     dur: number,
     rise = 0,
+    delay = 0,
   ): void {
     if (this.reduced) {
+      delay = 0;
       from = to;
       dur = Math.min(dur, 0.6);
       rise = 0;
@@ -294,13 +358,14 @@ export class SceneStore {
     this.ringCursor = (this.ringCursor + 1) % RING_POOL;
     r.active = true;
     r.kind = kind;
-    r.start = this.t;
+    r.start = this.t + delay;
     r.dur = dur;
     r.from = from;
     r.to = to;
     r.rise = rise;
     r.pos.copy(pos);
-    r.color.set(color).multiplyScalar(intensity * FX_GAIN);
+    r.color.set(color);
+    r.gain = intensity * FX_GAIN;
   }
 
   spawnBeam(
@@ -319,7 +384,8 @@ export class SceneStore {
     b.height = height;
     b.radius = radius;
     b.pos.copy(pos);
-    b.color.set(color).multiplyScalar(intensity * FX_GAIN);
+    b.color.set(color);
+    b.gain = intensity * FX_GAIN;
   }
 
   spawnBurst(
@@ -332,7 +398,6 @@ export class SceneStore {
     upBias = 0.3,
   ): void {
     if (this.reduced) return;
-    tmpColor.set(color).multiplyScalar(intensity * FX_GAIN);
     for (let i = 0; i < count; i++) {
       const p = this.particles[this.particleCursor]!;
       this.particleCursor = (this.particleCursor + 1) % PARTICLE_POOL;
@@ -345,7 +410,8 @@ export class SceneStore {
       p.life = life * (0.6 + this.rand() * 0.6);
       p.pos.copy(pos);
       p.vel.set(Math.cos(th) * s * v, (Math.abs(u) * (1 - upBias) + upBias) * v, Math.sin(th) * s * v);
-      p.color.copy(tmpColor);
+      p.color.set(color);
+      p.gain = intensity * FX_GAIN;
       p.size = 0.6 + this.rand() * 0.8;
     }
   }
@@ -367,17 +433,19 @@ export class SceneStore {
     if (!l) return;
     this.activityAt.set(e.projectId, this.t);
     const s = l.scale;
+    const c = this.vt;
     switch (e.kind) {
       case 'merge': {
-        this.spawnRing('shock', scratch, THEME.success, 3, 0.6 * s, 7 * s, 1.6);
-        this.spawnRing('shock', scratch, THEME.success, 1.6, 0.4 * s, 4.5 * s, 1.1);
-        this.spawnBurst(scratch, THEME.success, 3, 48, 4.5, 1.4);
+        // land: one clean success shockwave, a second faint echo, a sparse spray
+        this.spawnRing('shock', scratch, c.success, 2.6, 0.5 * s, 6.5 * s, 1.9);
+        this.spawnRing('shock', scratch, c.success, 1.2, 0.4 * s, 4 * s, 1.3);
+        this.spawnBurst(scratch, c.success, 2.8, 40, 4, 1.6);
         return;
       }
       case 'army.done': {
-        this.spawnRing('shock', scratch, THEME.release, 3, 0.6 * s, 11 * s, 2.2);
-        this.spawnRing('shock', scratch, THEME.success, 2, 0.6 * s, 7 * s, 1.6);
-        this.spawnBurst(scratch, THEME.release, 3, 90, 6, 2);
+        this.spawnRing('shock', scratch, c.success, 2.6, 0.6 * s, 10 * s, 2.2);
+        this.spawnRing('shock', scratch, c.fg, 1.4, 0.6 * s, 6.5 * s, 1.6);
+        this.spawnBurst(scratch, c.success, 2.6, 70, 5.5, 2);
         return;
       }
       case 'deploy':
@@ -387,19 +455,28 @@ export class SceneStore {
         scratch.x += tmpV.x;
         scratch.y += tmpV.y;
         scratch.z += tmpV.z;
-        const c = err ? THEME.failure : e.kind === 'release' ? THEME.release : THEME.beam;
-        this.spawnBeam(scratch, c, 0.9, 14, 0.32, 1.8);
-        this.spawnBeam(scratch, c, 3.2, 16, 0.045, 1.2);
-        this.spawnRing('shock', scratch, c, 2.5, 0.2, 3, 1);
-        this.spawnBurst(scratch, c, 2.5, 30, 3, 1.2, 0.8);
-        if (err) this.flicker.set(e.projectId, this.t + 1.4);
+        const col = err ? c.danger : e.kind === 'release' ? c.focus : c.fg;
+        // launch: a short hairline beam with a ring climbing it (reads as "shipped", not a light show)
+        this.spawnBeam(scratch, col, 0.5, 5.5, 0.14, 1.4);
+        this.spawnBeam(scratch, col, 2.6, 6.5, 0.022, 1.1);
+        this.spawnRing('scan', scratch, col, 2.4, 0.5, 0.5, 1.2, 9);
+        this.spawnRing('shock', scratch, col, 2, 0.2, 2.6, 0.9);
+        this.spawnBurst(scratch, col, 2, 16, 2.4, 1, 0.8);
+        if (err) this.alerts.set(e.projectId, { start: this.t, kind: 'fail' });
         return;
       }
-      case 'failure':
-      case 'blocked': {
-        this.spawnRing('pulse', scratch, THEME.failure, 3, 0.8 * s, 5 * s, 1.2);
-        this.spawnRing('pulse', scratch, THEME.failure, 2, 0.8 * s, 3.5 * s, 0.9);
-        this.flicker.set(e.projectId, this.t + (e.kind === 'failure' ? 1.6 : 0.9));
+      case 'failure': {
+        // two staggered red rings: reads as an alarm at a glance, without looping
+        this.spawnRing('pulse', scratch, c.danger, 2.8, 0.8 * s, 4.8 * s, 1.3);
+        this.spawnRing('pulse', scratch, c.danger, 1.6, 0.8 * s, 3.2 * s, 1.0, 0, 0.16);
+        this.alerts.set(e.projectId, { start: this.t, kind: 'fail' });
+        return;
+      }
+      case 'blocked':
+      case 'session.waiting': {
+        // needs you: the only orange moment
+        this.spawnRing('pulse', scratch, c.accent, 2.8, 0.8 * s, 4.5 * s, 0.9);
+        this.alerts.set(e.projectId, { start: this.t, kind: 'needs' });
         return;
       }
       case 'ci': {
@@ -408,13 +485,13 @@ export class SceneStore {
         scratch.y += tmpV.y;
         scratch.z += tmpV.z;
         if (e.severity === 'error') {
-          this.spawnRing('pulse', scratch, THEME.failure, 3, 0.3, 3.2, 1.1);
-          this.flicker.set(e.projectId, this.t + 1.2);
-        } else if (e.severity === 'success') this.spawnRing('ping', scratch, THEME.success, 2.2, 0.2, 2, 0.9);
+          this.spawnRing('pulse', scratch, c.danger, 2.6, 0.3, 3, 0.9);
+          this.alerts.set(e.projectId, { start: this.t, kind: 'fail' });
+        } else if (e.severity === 'success') this.spawnRing('ping', scratch, c.success, 2, 0.2, 2, 0.9);
         return;
       }
       case 'test.run': {
-        this.spawnRing('scan', scratch, THEME.scan, 2.2, 1.35 * s, 1.35 * s, 0.9, 2.4 * s);
+        this.spawnRing('scan', scratch, c.fg, 1.6, 1.35 * s, 1.35 * s, 0.9, 2.4 * s);
         return;
       }
       case 'review': {
@@ -422,40 +499,37 @@ export class SceneStore {
         scratch.x += tmpV.x;
         scratch.y += tmpV.y;
         scratch.z += tmpV.z;
-        this.spawnRing('ping', scratch, THEME.gate, 2.6, 0.2, 2.2, 1);
+        this.spawnRing('ping', scratch, c.warn, 2.2, 0.2, 2.2, 1);
         return;
       }
       case 'task.state': {
         const tp = e.taskId ? this.taskPos.get(`${l.id}/${normTaskId(e.taskId)}`) : undefined;
         if (!tp) return;
         const st = e.data?.state;
-        const c =
+        const col =
           st === 'landed'
-            ? THEME.success
+            ? c.success
             : st === 'review'
-              ? THEME.gate
-              : st === 'blocked' || st === 'failed'
-                ? THEME.failure
-                : THEME.scan;
-        this.spawnRing('ping', tp, c, 2.4, 0.1, 1.1, 0.7);
-        if (st === 'landed') this.spawnBurst(tp, c, 2.5, 14, 1.8, 0.8);
+              ? c.warn
+              : st === 'blocked'
+                ? c.accent
+                : st === 'failed'
+                  ? c.danger
+                  : c.fg;
+        this.spawnRing('ping', tp, col, 2.2, 0.1, 1.1, 0.7);
+        if (st === 'landed') this.spawnBurst(tp, col, 2.2, 12, 1.8, 0.8);
         return;
       }
       case 'agent.tool': {
         const bp = e.agentId ? this.botPos.get(e.agentId) : undefined;
         const a = e.agentId ? this.agents.get(e.agentId) : undefined;
         if (!bp) return;
-        this.spawnBurst(bp, a ? MODEL_COLORS[a.model] : THEME.beam, 3, 6, 1.4, 0.45, 0.2);
+        this.spawnBurst(bp, a ? c.model[a.model] : c.fg, 2.4, 5, 1.3, 0.4, 0.2);
         return;
       }
       case 'agent.spawn':
       case 'session.start': {
-        this.spawnRing('ping', scratch, THEME.hairline, 2, 0.4 * s, 2.6 * s, 0.8);
-        this.spawnBurst(scratch, THEME.hairline, 2, 16, 2.2, 0.8);
-        return;
-      }
-      case 'session.waiting': {
-        this.spawnRing('ping', scratch, THEME.warn, 2, 0.6 * s, 3 * s, 1.2);
+        this.spawnRing('ping', scratch, c.fg, 1.6, 0.4 * s, 2.6 * s, 0.8);
         return;
       }
       default:

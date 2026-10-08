@@ -13,7 +13,8 @@
     "launchd"
   ],
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b && npm run copy-web",
+    "copy-web": "node -e \"const fs=require('fs');const src='../web/dist';if(fs.existsSync(src)){fs.rmSync('web',{recursive:true,force:true});fs.cpSync(src,'web',{recursive:true});console.log('copied web dist')}else{console.log('web dist not built; skipping copy')}\"",
     "typecheck": "tsc -b"
   },
   "dependencies": {

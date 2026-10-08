@@ -3,9 +3,21 @@ import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import type { CiState, OrchPhase } from '@fleet/shared';
-import { anchorOffset, hash01, taskOrbitRadius, TASKS_PER_RING, vec3 } from './layout';
+import { easing, ease } from '@fleet/ui';
+import {
+  alertPulse,
+  anchorOffset,
+  INTRO_DELAY,
+  INTRO_DUR,
+  INTRO_STAGGER,
+  clamp,
+  hash01,
+  taskOrbitRadius,
+  TASKS_PER_RING,
+  vec3,
+} from './layout';
 import { useSceneStore } from './store';
-import { CI_COLORS, HALYARD, PHASE_COLORS, THEME } from './theme';
+import { FONTS, useVizTheme } from './theme';
 
 export interface StationData {
   id: string;
@@ -22,6 +34,12 @@ export interface StationData {
   review: number;
   running: number;
   ci: CiState;
+  /** layout order, used to stagger the first-load choreography */
+  index: number;
+  /** blocked tasks + waiting agents: the "needs you" count (signal orange) */
+  needs: number;
+  /** show the data block (large fleets label only the busiest stations) */
+  labelled: boolean;
 }
 
 /** Tick-marked dial ring (instrument bezel) as line segments in the xz plane. */
@@ -95,46 +113,82 @@ const shared = {
   gate: new THREE.TorusGeometry(0.42, 0.008, 4, 64),
   gateInner: new THREE.TorusGeometry(0.3, 0.005, 4, 48),
   bracket: new THREE.TorusGeometry(1, 0.012, 4, 24, Math.PI / 4),
+  /** the halyard: a hairline mast that raises a signal pennant when a station needs you */
+  mast: new THREE.BufferGeometry().setAttribute(
+    'position',
+    new THREE.Float32BufferAttribute([0, 0, 0, 0, 1, 0], 3),
+  ),
+  pennant: (() => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0.62, -0.17, 0, 0, -0.34, 0], 3));
+    g.computeVertexNormals();
+    return g;
+  })(),
 };
+const MAST_H = 3.1;
+const RAISE = 0.42;
 
 const tmpColor = new THREE.Color();
 const tmpOff = vec3();
-const BONE = new THREE.Color(THEME.hairline);
-const DANGER = new THREE.Color(THEME.failure);
-const ACCENT_HDR = new THREE.Color(HALYARD.accent).multiplyScalar(1.6);
+/** first-load choreography: the harbour fades up station by station (cinematic, land easing) */
+export { INTRO_DELAY, INTRO_DUR, INTRO_STAGGER } from './layout';
+const ALERT_DUR = 0.64;
 
 function StationImpl({
   d,
   selected,
+  compact = false,
   onSelect,
 }: {
   d: StationData;
   selected: boolean;
+  /** narrow viewport: the needs-you tag stays on the station (the pennant crowds neighbours) */
+  compact?: boolean;
   onSelect(id: string): void;
 }) {
   const store = useSceneStore();
-  const base = d.orch ? PHASE_COLORS[d.phase ?? 'idle'] : THEME.stationPlain;
+  const vt = useVizTheme();
+  const needs = d.needs > 0;
+  const base = needs ? vt.accent : d.orch ? vt.phase[d.phase ?? 'idle'] : vt.fgMuted;
   const coreMat = useRef<THREE.MeshStandardMaterial>(null);
   const wire = useRef<THREE.MeshBasicMaterial>(null);
+  const intro = useRef<THREE.Group>(null);
   const core = useRef<THREE.Group>(null);
   const r1 = useRef<THREE.Group>(null);
-  const r2 = useRef<THREE.Mesh>(null);
   const dial = useRef<THREE.LineSegments>(null);
   const sel = useRef<THREE.Group>(null);
   const gateRef = useRef<THREE.Group>(null);
   const orbMat = useRef<THREE.MeshBasicMaterial>(null);
+  const label = useRef<HTMLDivElement>(null);
+  const mast = useRef<THREE.Group>(null);
+  const pennant = useRef<THREE.Mesh>(null);
+  const raisedAt = useRef<number | null>(null);
+  if (needs && raisedAt.current === null) raisedAt.current = store.t;
+  if (!needs) raisedAt.current = null;
+  const labelOp = useRef(-1);
   const phase = useMemo(() => hash01(d.id) * Math.PI * 2, [d.id]);
-  const baseColor = useMemo(() => new THREE.Color(base), [base]);
+  const colors = useMemo(
+    () => ({
+      base: new THREE.Color(base),
+      line: new THREE.Color(vt.fg),
+      accent: new THREE.Color(vt.accent),
+      signal: new THREE.Color(vt.accent).multiplyScalar(vt.gain(2.4)),
+      danger: new THREE.Color(vt.danger),
+      focus: new THREE.Color(vt.focus).multiplyScalar(vt.gain(1.5)),
+      gate: new THREE.Color(vt.warn).multiplyScalar(d.review > 0 ? vt.gain(1.5) : vt.dark ? 0.5 : 0.8),
+      ci: new THREE.Color(vt.ci[d.ci]),
+    }),
+    [base, vt, d.review, d.ci],
+  );
   const s = d.scale;
 
   const geos = useMemo(
     () => ({
-      ring1: new THREE.TorusGeometry(1.15 * s, 0.006, 4, 160),
-      ring2: new THREE.TorusGeometry(0.9 * s, 0.005, 4, 128, Math.PI * 1.4),
+      ring1: new THREE.TorusGeometry(1.15 * s, 0.005, 4, 160),
       dial: dialGeometry(1.45 * s, 72, 6, 0.05),
       cross: crossGeometry(1.9 * s),
       guides: Array.from({ length: Math.ceil(d.taskCount / TASKS_PER_RING) }, (_, i) => ({
-        geo: new THREE.TorusGeometry(taskOrbitRadius(i, s), 0.004, 3, 160),
+        geo: new THREE.TorusGeometry(taskOrbitRadius(i, s), 0.0035, 3, 160),
         tilt: -Math.atan((0.18 + i * 0.08) * (i % 2 === 0 ? 1 : -1)),
       })),
     }),
@@ -143,7 +197,6 @@ function StationImpl({
   useEffect(
     () => () => {
       geos.ring1.dispose();
-      geos.ring2.dispose();
       geos.dial.dispose();
       geos.cross.dispose();
       for (const g of geos.guides) g.geo.dispose();
@@ -159,212 +212,300 @@ function StationImpl({
     const o = anchorOffset('ci', d, s, 0, tmpOff);
     return new THREE.Vector3(o.x, o.y, o.z);
   }, [d, s]);
-  const gateColor = useMemo(
-    () => new THREE.Color(THEME.gate).multiplyScalar(d.review > 0 ? 1.7 : 0.55),
-    [d.review],
-  );
-  const ciColor = useMemo(() => new THREE.Color(CI_COLORS[d.ci]), [d.ci]);
 
   useFrame((_, dtRaw) => {
     const dt = store.reduced ? 0 : Math.min(dtRaw, 0.05);
     const t = store.t;
-    const at = store.at;
+    // intro: fade up in layout order
+    const iu = store.reduced ? 1 : clamp((t - INTRO_DELAY - d.index * INTRO_STAGGER) / INTRO_DUR, 0, 1);
+    const ie = ease(easing.land, iu);
+    if (intro.current) {
+      intro.current.position.y = -(1 - ie) * 0.9;
+      intro.current.scale.setScalar(0.9 + 0.1 * ie);
+    }
+    if (label.current && Math.abs(labelOp.current - ie) > 0.004) {
+      labelOp.current = ie;
+      label.current.style.opacity = String(ie);
+    }
     const activity = store.activityAt.get(d.id);
     const recent = activity === undefined ? 0 : Math.max(0, 1 - (t - activity) / 1.2);
-    const flick = (store.flicker.get(d.id) ?? 0) > t;
     const busy = Math.min(1, d.working / 4 + d.running / 6);
-    const breathe = 0.5 + 0.5 * Math.sin(at * (1 + busy * 1.2) + phase);
-    let k =
-      (d.orch && d.phase !== 'idle') || d.working > 0
-        ? 2.4 + busy * 1.6 + breathe * 0.8 + recent * 1.6
-        : 1.1 + recent * 1.2;
-    if (flick) k = store.reduced ? 4 : Math.sin(t * 38) > 0 ? 0.3 : 5;
+    // one-shot alert (overshoot pulse); persistent state stays a static glow
+    const al = store.alerts.get(d.id);
+    const au = al ? (t - al.start) / ALERT_DUR : 1;
+    const alerting = au >= 0 && au < 1;
+    // reduced motion: no scale pulse, a static alert glow for the alert's duration
+    const { scale: pulse, glow } = alertPulse(au, store.reduced);
+    const live = (d.orch && d.phase !== 'idle') || d.working > 0;
+    const k = (needs ? 3 : live ? 1.7 + busy * 0.9 : 0.8) + recent * 0.8 + glow * 2.5;
+    const alertColor = al?.kind === 'fail' ? colors.danger : colors.accent;
     if (coreMat.current) {
-      coreMat.current.emissive.copy(flick ? DANGER : baseColor);
-      coreMat.current.emissiveIntensity = k;
+      coreMat.current.emissive.copy(alerting ? alertColor : colors.base);
+      coreMat.current.emissiveIntensity = vt.gain(k) * ie;
+    }
+    if (core.current) {
+      core.current.scale.setScalar(s * (1 + 0.35 * pulse));
+      core.current.rotation.y += dt * busy * 0.5;
     }
     if (wire.current) {
-      tmpColor.copy(flick ? DANGER : BONE).multiplyScalar(0.55 + recent * 0.35);
+      tmpColor.copy(alerting ? alertColor : colors.line);
       wire.current.color.copy(tmpColor);
+      wire.current.opacity =
+        (vt.dark ? 0.16 : 0.3) * (live ? 1 : 0.6) + recent * 0.22 + glow * 0.5 + (needs ? 0.2 : 0);
     }
-    const spin = 0.12 + busy * 0.3;
-    if (core.current) {
-      core.current.rotation.y += dt * spin * 2;
-      core.current.rotation.x = Math.sin(at * 0.3 + phase) * 0.2;
-      core.current.position.y = Math.sin(at * 0.7 + phase) * 0.08;
+    // motion means work: rings turn only while the station is busy
+    const spin = busy * 0.25;
+    if (dial.current) dial.current.rotation.y -= dt * spin * 0.25;
+    if (r1.current) r1.current.rotation.z += dt * spin * 0.15;
+    if (sel.current) sel.current.visible = selected;
+    if (mast.current && raisedAt.current !== null) {
+      // raise the flag once (land), then hold still; a fresh alert re-runs the overshoot on the pennant
+      const ru = store.reduced
+        ? 1
+        : clamp(
+            (t - Math.max(raisedAt.current, INTRO_DELAY + d.index * INTRO_STAGGER + INTRO_DUR * 0.6)) / RAISE,
+            0,
+            1,
+          );
+      const re = ease(easing.land, ru);
+      mast.current.scale.set(1, Math.max(0.001, re), 1);
+      if (pennant.current) {
+        pennant.current.scale.setScalar(Math.max(0.001, re) * (1 + 0.5 * pulse));
+        pennant.current.rotation.y = phase;
+      }
     }
-    if (r1.current) {
-      r1.current.rotation.x = Math.sin(at * 0.25 + phase) * 0.22;
-      r1.current.rotation.z = Math.cos(at * 0.21 + phase) * 0.18;
-    }
-    if (r2.current) r2.current.rotation.z += dt * spin;
-    if (dial.current) dial.current.rotation.y -= dt * 0.05;
-    if (sel.current) {
-      sel.current.visible = selected;
-      sel.current.rotation.y += dt * 0.4;
-    }
-    if (gateRef.current) gateRef.current.rotation.y += dt * 0.35;
-    if (orbMat.current) {
-      const p =
-        d.ci === 'pending'
-          ? 0.8 + (store.reduced ? 0.4 : 0.6 * Math.abs(Math.sin(at * 2.5)))
-          : d.ci === 'none'
-            ? 0.7
-            : 1.5;
-      orbMat.current.color.copy(ciColor).multiplyScalar(p);
-    }
+    if (gateRef.current && d.review > 0) gateRef.current.rotation.y += dt * 0.35;
+    if (orbMat.current)
+      orbMat.current.color.copy(colors.ci).multiplyScalar(vt.gain(d.ci === 'none' ? 0.8 : 1.5));
   });
 
   const click = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
     onSelect(d.id);
   };
-  const sub = d.orch
-    ? `${d.phase ?? 'idle'} · ${d.taskCount} tasks · ${d.working}/${d.agents} agents`
-    : `${d.working}/${d.agents} agents`;
+  const status = needs
+    ? `needs you · ${d.needs}`
+    : d.orch
+      ? `${d.phase ?? 'idle'} · ${d.taskCount}t`
+      : d.working > 0
+        ? 'working'
+        : 'idle';
+  // idle stations recede: their instruments draw at a lower level so live work leads the eye
+  const awake = (d.orch && d.phase !== 'idle') || d.working > 0 || needs;
+  const lineOp = (vt.dark ? 1 : 2.3) * (awake ? 1 : 0.55);
   const hairline = (opacity: number) => (
-    <meshBasicMaterial color={BONE} transparent opacity={opacity} depthWrite={false} toneMapped={false} />
+    <meshBasicMaterial
+      color={colors.line}
+      transparent
+      opacity={Math.min(1, opacity * lineOp)}
+      depthWrite={false}
+      toneMapped={false}
+    />
   );
 
   return (
     <group position={[d.x, d.y, d.z]}>
-      {/* tether + floor footprint */}
-      <lineSegments geometry={shared.tether} position={[0, -d.y, 0]} scale={[1, d.y - 0.6 * s, 1]}>
-        <lineBasicMaterial color={BONE} transparent opacity={0.16} depthWrite={false} />
-      </lineSegments>
-      <mesh geometry={shared.floor} position={[0, -d.y + 0.01, 0]} scale={1.9 * s}>
-        {hairline(0.12)}
-      </mesh>
-      <lineSegments geometry={geos.cross} position={[0, -d.y + 0.01, 0]}>
-        <lineBasicMaterial color={BONE} transparent opacity={0.28} depthWrite={false} />
-      </lineSegments>
-
-      {/* emissive core: the only bloom source on a station */}
-      <group ref={core} scale={s}>
-        <mesh geometry={d.orch ? shared.ico : shared.oct} onClick={click}>
-          <meshStandardMaterial
-            color="#1c1915"
-            emissive={base}
-            emissiveIntensity={0.16}
-            metalness={0.7}
-            roughness={0.32}
-            flatShading
-            transparent
-            opacity={0.88}
-          />
-        </mesh>
-        <mesh geometry={shared.pip}>
-          <meshStandardMaterial
-            ref={coreMat}
-            color="#000000"
-            emissive={base}
-            emissiveIntensity={2}
-            toneMapped={false}
-          />
-        </mesh>
-        <mesh geometry={d.orch ? shared.ico : shared.oct} scale={1.9}>
-          <meshBasicMaterial
-            ref={wire}
-            color={BONE}
-            wireframe
-            transparent
-            opacity={0.4}
-            depthWrite={false}
-            toneMapped={false}
-          />
-        </mesh>
-      </group>
-
-      {/* hairline gimbal + dial bezel */}
-      <group ref={r1}>
-        <mesh geometry={geos.ring1} rotation={[Math.PI / 2, 0, 0]}>
-          {hairline(0.5)}
-        </mesh>
-      </group>
-      <mesh ref={r2} geometry={geos.ring2} rotation={[Math.PI / 2.6, 0.4, 0]}>
-        {hairline(0.32)}
-      </mesh>
-      <lineSegments ref={dial} geometry={geos.dial} position={[0, -0.02, 0]}>
-        <lineBasicMaterial color={BONE} transparent opacity={0.3} depthWrite={false} />
-      </lineSegments>
-
-      {/* selection: four accent brackets */}
-      <group ref={sel} visible={selected}>
-        {[0, 1, 2, 3].map((i) => (
-          <mesh
-            key={i}
-            geometry={shared.bracket}
-            scale={2.15 * s}
-            rotation={[Math.PI / 2, 0, i * (Math.PI / 2) + Math.PI / 8]}
-          >
-            <meshBasicMaterial color={ACCENT_HDR} toneMapped={false} />
-          </mesh>
-        ))}
-      </group>
-
-      {/* task orbit guides */}
-      {geos.guides.map((g, i) => (
-        <group key={i} rotation={[g.tilt, 0, 0]}>
-          <mesh geometry={g.geo} rotation={[Math.PI / 2, 0, 0]}>
-            {hairline(0.12)}
-          </mesh>
-        </group>
-      ))}
-
-      {/* review gate */}
-      {d.orch && (
-        <group position={gatePos} ref={gateRef}>
-          <mesh geometry={shared.gate} onClick={click}>
-            <meshBasicMaterial color={gateColor} toneMapped={false} />
-          </mesh>
-          <mesh geometry={shared.gateInner}>{hairline(0.3)}</mesh>
-        </group>
-      )}
-
-      {/* CI / deploy beacon */}
-      <group position={ciPos}>
-        <lineSegments geometry={shared.pillar}>
-          <lineBasicMaterial color={BONE} transparent opacity={0.35} depthWrite={false} />
+      <group ref={intro}>
+        {/* tether + floor footprint */}
+        <lineSegments geometry={shared.tether} position={[0, -d.y, 0]} scale={[1, d.y - 0.6 * s, 1]}>
+          <lineBasicMaterial color={colors.line} transparent opacity={0.14 * lineOp} depthWrite={false} />
         </lineSegments>
-        <mesh geometry={shared.orb} position={[0, 0.6, 0]} onClick={click}>
-          <meshBasicMaterial ref={orbMat} color={ciColor} toneMapped={false} />
+        <mesh geometry={shared.floor} position={[0, -d.y + 0.01, 0]} scale={1.15 * s}>
+          {hairline(0.08)}
         </mesh>
-      </group>
+        <lineSegments geometry={geos.cross} position={[0, -d.y + 0.01, 0]} scale={0.6}>
+          <lineBasicMaterial color={colors.line} transparent opacity={0.1 * lineOp} depthWrite={false} />
+        </lineSegments>
 
-      <Html
-        position={[0, 1.45 * s + 0.75, 0]}
-        center
-        zIndexRange={[20, 0]}
-        style={{ pointerEvents: 'none', userSelect: 'none' }}
-      >
-        <div style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
+        {/* core: a dark faceted hull around one emissive pip (the only bloom source) */}
+        <group ref={core} scale={s}>
+          <mesh geometry={d.orch ? shared.ico : shared.oct} onClick={click}>
+            <meshStandardMaterial
+              color={vt.coreBody}
+              emissive={base}
+              emissiveIntensity={vt.dark ? 0.12 : 0.05}
+              metalness={vt.dark ? 0.7 : 0.2}
+              roughness={vt.dark ? 0.32 : 0.6}
+              flatShading
+              transparent
+              opacity={0.9}
+            />
+          </mesh>
+          <mesh geometry={shared.pip}>
+            <meshStandardMaterial
+              ref={coreMat}
+              color="#000000"
+              emissive={base}
+              emissiveIntensity={1}
+              toneMapped={false}
+            />
+          </mesh>
+          <mesh geometry={d.orch ? shared.ico : shared.oct} scale={1.6}>
+            <meshBasicMaterial
+              ref={wire}
+              color={colors.line}
+              wireframe
+              transparent
+              opacity={0.35}
+              depthWrite={false}
+              toneMapped={false}
+            />
+          </mesh>
+        </group>
+
+        {/* hairline gimbal + dial bezel */}
+        <group ref={r1}>
+          <mesh
+            geometry={geos.ring1}
+            rotation={[Math.PI / 2 + Math.sin(phase) * 0.2, 0, Math.cos(phase) * 0.15]}
+          >
+            {hairline(0.45)}
+          </mesh>
+        </group>
+        <lineSegments ref={dial} geometry={geos.dial} position={[0, -0.02, 0]}>
+          <lineBasicMaterial color={colors.line} transparent opacity={0.26 * lineOp} depthWrite={false} />
+        </lineSegments>
+
+        {/* selection: four focus brackets */}
+        <group ref={sel} visible={selected}>
+          {[0, 1, 2, 3].map((i) => (
+            <mesh
+              key={i}
+              geometry={shared.bracket}
+              scale={2.15 * s}
+              rotation={[Math.PI / 2, 0, i * (Math.PI / 2) + Math.PI / 8]}
+            >
+              <meshBasicMaterial color={colors.focus} toneMapped={false} />
+            </mesh>
+          ))}
+        </group>
+
+        {/* task orbit guides */}
+        {geos.guides.map((g, i) => (
+          <group key={i} rotation={[g.tilt, 0, 0]}>
+            <mesh geometry={g.geo} rotation={[Math.PI / 2, 0, 0]}>
+              {hairline(0.1)}
+            </mesh>
+          </group>
+        ))}
+
+        {/* halyard signal: the scene's focal point when something needs you */}
+        {needs && (
+          <mesh geometry={shared.floor} position={[0, -d.y + 0.02, 0]} scale={1.5 * s}>
+            <meshBasicMaterial color={colors.signal} toneMapped={false} transparent opacity={0.9} />
+          </mesh>
+        )}
+        {needs && (
+          <group ref={mast} position={[0, 0.5 * s, 0]} scale={[1, 0.001, 1]}>
+            <lineSegments geometry={shared.mast} scale={[1, MAST_H, 1]}>
+              <lineBasicMaterial color={colors.signal} toneMapped={false} />
+            </lineSegments>
+            <mesh ref={pennant} geometry={shared.pennant} position={[0, MAST_H, 0]}>
+              <meshBasicMaterial color={colors.signal} side={THREE.DoubleSide} toneMapped={false} />
+            </mesh>
+          </group>
+        )}
+
+        {/* review gate */}
+        {d.orch && (
+          <group position={gatePos} ref={gateRef}>
+            <mesh geometry={shared.gate} onClick={click}>
+              <meshBasicMaterial color={colors.gate} toneMapped={false} />
+            </mesh>
+            <mesh geometry={shared.gateInner}>{hairline(0.26)}</mesh>
+          </group>
+        )}
+
+        {/* CI / deploy beacon (only when there is a PR to report on) */}
+        <group position={ciPos} visible={d.ci !== 'none'}>
+          <lineSegments geometry={shared.pillar}>
+            <lineBasicMaterial color={colors.line} transparent opacity={0.3 * lineOp} depthWrite={false} />
+          </lineSegments>
+          <mesh geometry={shared.orb} position={[0, 0.6, 0]} onClick={click}>
+            <meshBasicMaterial ref={orbMat} color={colors.ci} toneMapped={false} />
+          </mesh>
+        </group>
+
+        {/* ATC-style data block: tag offset up-right of the target on a hairline leader */}
+        <Html
+          position={needs ? (compact ? [0, -0.9 * s, 0] : [0, 0.5 * s + MAST_H - 0.17, 0]) : [0, 0.55 * s, 0]}
+          zIndexRange={[20, 0]}
+          style={{ pointerEvents: 'none', userSelect: 'none' }}
+        >
           <div
+            ref={label}
+            className="fl-viz-tag"
+            data-needs={needs ? '1' : '0'}
             style={{
-              fontFamily: HALYARD.fontDisplay,
-              color: selected ? HALYARD.accent : HALYARD.fg,
-              fontSize: 22,
-              lineHeight: 1.05,
-              letterSpacing: '-0.01em',
-              textShadow: '0 1px 12px rgba(11,13,12,0.9)',
+              position: 'absolute',
+              left: 0,
+              bottom: 0,
+              opacity: 0,
+              display: d.labelled || needs || selected ? 'block' : 'none',
             }}
           >
-            {d.name}
+            <svg
+              width="30"
+              height="30"
+              viewBox="0 0 30 30"
+              style={{ position: 'absolute', left: 0, bottom: 0, overflow: 'visible' }}
+              aria-hidden
+            >
+              <path
+                d="M0.5 29.5 L18 12 L30 12"
+                fill="none"
+                stroke={needs ? vt.accent : selected ? vt.focus : vt.fgSubtle}
+                strokeWidth="1"
+                opacity={needs || selected ? 1 : 0.7}
+              />
+            </svg>
+            <div
+              className="fl-viz-block"
+              style={{
+                position: 'absolute',
+                left: 34,
+                bottom: 10,
+                whiteSpace: 'nowrap',
+                fontFamily: FONTS.mono,
+                fontVariantNumeric: 'tabular-nums',
+                textShadow: vt.dark ? '0 0 8px rgba(11,13,12,0.9)' : '0 0 6px rgba(243,240,232,0.95)',
+              }}
+            >
+              <div
+                className="fl-viz-name"
+                style={{
+                  color: needs ? vt.accent : selected ? vt.focus : vt.fg,
+                  fontSize: 12,
+                  fontWeight: 500,
+                  lineHeight: 1.2,
+                  letterSpacing: '0.04em',
+                  textTransform: 'uppercase',
+                }}
+              >
+                {d.name}
+              </div>
+              <div
+                className="fl-viz-sub"
+                data-needs={needs ? '1' : '0'}
+                style={{
+                  color: needs ? vt.accent : vt.fgSubtle,
+                  fontSize: 10,
+                  lineHeight: 1.3,
+                  letterSpacing: FONTS.trackingCaps,
+                  textTransform: 'uppercase',
+                  marginTop: 2,
+                }}
+              >
+                {status}
+                <span style={{ color: vt.fgSubtle }}>
+                  {' '}
+                  · {d.working}/{d.agents}
+                </span>
+              </div>
+            </div>
           </div>
-          <div
-            style={{
-              fontFamily: HALYARD.fontMono,
-              color: HALYARD.fgSubtle,
-              fontSize: 10,
-              letterSpacing: HALYARD.trackingCaps,
-              textTransform: 'uppercase',
-              marginTop: 3,
-            }}
-          >
-            <span style={{ color: base, marginRight: 6 }}>●</span>
-            {sub}
-          </div>
-        </div>
-      </Html>
+        </Html>
+      </group>
     </group>
   );
 }

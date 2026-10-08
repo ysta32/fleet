@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ysta32/fleet/packages/digest/schema/index.v1.json",
+  "title": "Overnight Index v1",
+  "type": "object",
+  "required": ["schema", "owner", "updatedAt", "digests"],
+  "additionalProperties": true,
+  "properties": {
+    "schema": {
+      "const": "overnight.index/v1"
+    },
+    "owner": {
+      "type": "string"
+    },
+    "updatedAt": {
+      "$ref": "#/$defs/isoDate"
+    },
+    "digests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "headline", "window", "totals", "path"],
+        "additionalProperties": true,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "headline": {
+            "type": "string"
+          },
+          "window": {
+            "$ref": "#/$defs/timeWindow"
+          },
+          "totals": {
+            "$ref": "#/$defs/totals"
+          },
+          "path": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "isoDate": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "timeWindow": {
+      "type": "object",
+      "required": ["since", "until"],
+      "additionalProperties": true,
+      "properties": {
+        "since": {
+          "$ref": "#/$defs/isoDate"
+        },
+        "until": {
+          "$ref": "#/$defs/isoDate"
+        }
+      }
+    },
+    "totals": {
+      "type": "object",
+      "required": [
+        "projectsActive",
+        "mergedPRs",
+        "commits",
+        "releases",
+        "ciFailures",
+        "openPRsNeedingAttention",
+        "issuesOpened",
+        "issuesClosed",
+        "deployments",
+        "deploymentsFailed",
+        "starsDelta",
+        "agentContributions"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "projectsActive": {
+          "type": "integer"
+        },
+        "mergedPRs": {
+          "type": "integer"
+        },
+        "commits": {
+          "type": "integer"
+        },
+        "releases": {
+          "type": "integer"
+        },
+        "ciFailures": {
+          "type": "integer"
+        },
+        "openPRsNeedingAttention": {
+          "type": "integer"
+        },
+        "issuesOpened": {
+          "type": "integer"
+        },
+        "issuesClosed": {
+          "type": "integer"
+        },
+        "deployments": {
+          "type": "integer"
+        },
+        "deploymentsFailed": {
+          "type": "integer"
+        },
+        "starsDelta": {
+          "type": "integer"
+        },
+        "agentContributions": {
+          "type": "integer"
+        }
+      }
+    }
+  }
+}
