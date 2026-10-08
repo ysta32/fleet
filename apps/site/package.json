@@ -1,6 +1,6 @@
 {
   "name": "@fleet/site",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,9 +13,9 @@
     "postbuild": "node scripts/check-out.mjs"
   },
   "dependencies": {
-    "@fleet/shared": "1.0.0",
-    "@fleet/ui": "1.0.0",
-    "@fleet/web": "1.0.0",
+    "@fleet/shared": "1.1.0",
+    "@fleet/ui": "1.1.0",
+    "@fleet/web": "1.1.0",
     "next": "15.5.4",
     "react": "18.3.1",
     "react-dom": "18.3.1"
