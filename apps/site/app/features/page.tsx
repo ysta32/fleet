@@ -146,24 +146,26 @@ export default function Features() {
             'With the gh CLI signed in, Fleet polls PR and CI state read-only and shows it next to the army that opened the PR.',
             'Replay scrubs back through recent history, so you can see what happened while you were away.',
           ]}
+          aside={
+            <div className="panel">
+              <dl className="keys">
+                <dt>
+                  <code>gh</code>
+                </dt>
+                <dd>Read-only, polled every 60s by default</dd>
+                <dt>
+                  <code>replay</code>
+                </dt>
+                <dd>The last hour, 6 hours or overnight (12 hours), at 1×, 4×, 16× or 60×</dd>
+                <dt>
+                  <code>.orch</code>
+                </dt>
+                <dd>Task phase, worktrees and blockers when a repo has one</dd>
+              </dl>
+            </div>
+          }
         >
           <ReplayDeck />
-          <div className="panel">
-            <dl className="keys">
-              <dt>
-                <code>gh</code>
-              </dt>
-              <dd>Read-only, polled every 60s by default</dd>
-              <dt>
-                <code>replay</code>
-              </dt>
-              <dd>Up to 24 hours, at 1×, 4×, 16× or 60×</dd>
-              <dt>
-                <code>.orch</code>
-              </dt>
-              <dd>Task phase, worktrees and blockers when a repo has one</dd>
-            </dl>
-          </div>
         </Feature>
       </div>
       <OptionalSections />
@@ -176,12 +178,15 @@ function Feature({
   title,
   body,
   children,
+  aside,
   flip = false,
 }: {
   label: string;
   title: string;
   body: string[];
   children: React.ReactNode;
+  /** Set under the copy in the text column, for sections whose media column runs much taller than the copy. */
+  aside?: React.ReactNode;
   flip?: boolean;
 }) {
   const id = featureId(label);
@@ -202,6 +207,7 @@ function Feature({
               <p key={p}>{p}</p>
             ))}
           </div>
+          {aside && <div style={{ marginTop: 'var(--fl-space-6)' }}>{aside}</div>}
         </div>
         <div data-reveal style={{ display: 'grid', gap: 'var(--fl-space-5)', ['--i' as string]: 1 }}>
           {children}

@@ -4,6 +4,10 @@ All notable changes to Fleet are recorded here. The format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Fixed
+
+- Site features page: the replay window reads the last hour, 6 hours or overnight (12 hours), as in the app, instead of up to 24 hours, and the GitHub and replay facts sit under the copy so that section's columns balance.
+
 ## [1.1.2] - 2026-10-08
 
 ### Fixed
